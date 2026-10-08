@@ -1,0 +1,39 @@
+Package: Pegasus
+Type: Package
+Title: Phenotype Evaluation and Generation by AI-assisted Synthesis & User Specifications
+Version: 0.0.1
+Date: 2026-10-08
+Authors@R: c(
+	person("Martijn", "Schuemie", email = "schuemie@ohdsi.org", role = c("aut", "cre")),
+	person("Jamie", "Gilbert", role = c("aut")),
+  person("Jared", "Houghtaling", role = c("aut")),
+  person("Anna", "Ostropolets", role = c("aut")),
+  person("Patrick", "Ryan", role = c("aut")),
+	person("Azza", "Shoaibi", role = c("aut")),
+  person("Observational Health Data Science and Informatics", role = c("cph"))
+	)
+Maintainer: Martijn Schuemie <schuemie@ohdsi.org>
+Description: Phenotype Evaluation and Generation by AI-assisted Synthesis & User Specifications (Pegasus).
+License: Apache License 2.0
+VignetteBuilder: knitr
+URL: https://ohdsi.github.io/Pegasus/, https://github.com/OHDSI/Pegasus
+BugReports: https://github.com/OHDSI/Pegasus/issues
+Depends:
+	R (>= 4.1.0),
+	DatabaseConnector (>= 7.0.0)
+Imports:
+	methods,
+	utils,
+	ggplot2,
+	readr,
+	dplyr,
+	rlang,
+	checkmate
+Suggests:
+	testthat,
+	knitr,
+	rmarkdown
+NeedsCompilation: no
+Roxygen: list(markdown = TRUE)
+Encoding: UTF-8
+Config/roxygen2/version: 8.1.0

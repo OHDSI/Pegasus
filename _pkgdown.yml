@@ -1,0 +1,113 @@
+url: https://ohdsi.github.io/CohortMethod/
+
+template:
+  bootstrap: 5
+  bslib:
+    bootswatch: cosmo
+
+home:
+  links:
+  - text: Ask a question
+    href: http://forums.ohdsi.org
+
+reference:
+  - title: "Getting data and creating a study population"
+    desc: >
+      Functions for getting the necessary data from the database in Common Data Model, and creating a study population.
+    contents:
+      - getDbCohortMethodData
+      - CohortMethodData-class
+      - isCohortMethodData
+      - saveCohortMethodData
+      - loadCohortMethodData
+      - createStudyPopulation
+  - title: "Propensity scores"
+    desc: >
+      Functions for creating and using propensity scores.
+    contents:
+      - createPs
+      - getPsModel
+      - matchOnPs
+      - trimByPs
+      - stratifyByPs
+      - truncateIptw
+  - title: "Outcome models"
+    desc: >
+      Functions for creating and viewing outcome models.
+    contents:
+      - fitOutcomeModel
+      - getOutcomeModel
+      - adjustedKm
+      - plotKaplanMeier
+  - title: "Diagnostics"
+    desc: >
+      Functions for producing various study diagnostics.
+    contents:
+      - computeMdrr
+      - getAttritionTable
+      - drawAttritionDiagram
+      - plotFollowUpDistribution
+      - createCmTable1
+      - getDefaultCmTable1Specifications
+      - getFollowUpDistribution
+      - plotPs
+      - computeEquipoise
+      - computePsAuc
+      - computeCovariateBalance
+      - plotCovariateBalanceOfTopVariables
+      - plotCovariateBalanceScatterPlot
+      - plotCovariatePrevalence
+      - plotTimeToEvent
+      - getGeneralizabilityTable
+  - title: "Running multiple analyses"
+    desc: >
+      Functions for running multiple analyses in an efficient way.
+    contents:
+      - ends_with("Args")
+      - createCmAnalysis
+      - saveCmAnalysisList
+      - loadCmAnalysisList
+      - createOutcome
+      - createTargetComparatorOutcomes
+      - saveTargetComparatorOutcomesList
+      - loadTargetComparatorOutcomesList
+      - createCmDiagnosticThresholds
+      - createCmAnalysesSpecifications
+      - convertUntypedListToCmAnalysesSpecifications
+      - createMultiThreadingSettings
+      - createDefaultMultiThreadingSettings
+      - runCmAnalyses
+      - getFileReference
+      - getResultsSummary
+      - getInteractionResultsSummary
+      - getDiagnosticsSummary
+      - exportToCsv
+  - title: "Results upload"
+    desc: >
+      Uploading results to a database.
+    contents:
+      - getResultsDataModelSpecifications
+      - createResultsDataModel
+      - migrateDataModel
+      - getDataMigrator
+      - uploadResults
+  - title: "Simulation"
+    desc: >
+      Functions for simulating cohort method data objects.
+    contents:
+      - createCohortMethodDataSimulationProfile
+      - simulateCohortMethodData
+      - cohortMethodDataSimulationProfile
+  - title: "Helper functions"
+    desc: >
+      Various helper functions
+    contents:
+      - checkCmInstallation
+
+navbar:
+  structure:
+    right: [hades, github]
+  components:
+    hades:
+      text: hadesLogo
+      href: https://ohdsi.github.io/Hades
