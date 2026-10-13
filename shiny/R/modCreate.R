@@ -87,9 +87,10 @@ createServer <- function(id, connectionPool, databaseSchema, llmConfig, systemPr
       )
     })
 
-    streamResponse <- function(message) {
+    # shinychat user input is a list (text plus attachments), so contents are spliced.
+    streamResponse <- function(contents) {
       toolCalledThisTurn <<- FALSE
-      stream <- client$stream_async(message)
+      stream <- client$stream_async(!!!contents)
       promises::then(
         shinychat::chat_append("chat", stream),
         onFulfilled = function(text) {
@@ -148,7 +149,7 @@ createServer <- function(id, connectionPool, databaseSchema, llmConfig, systemPr
       bslib::nav_select("wizard", "refine")
       prompt <- buildInitialPrompt(name, input$initialDefinition)
       shinychat::chat_append("chat", prompt, role = "user")
-      streamResponse(prompt)
+      streamResponse(list(prompt))
     })
 
     observeEvent(input$chat_user_input, {
