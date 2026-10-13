@@ -1,4 +1,4 @@
-# Pegasus <a href="https://github.com/OHDSI/Pegasus"><img src="extras/PegasusSmall.png" align="right" height="138" alt="Pegasus website" /></a>
+# Pegasus <a href="https://github.com/OHDSI/Pegasus"><img src="extras/LogoSmall.png" align="right" height="138" alt="Pegasus website" /></a>
 
 ## Introduction
 

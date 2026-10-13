@@ -2,3 +2,6 @@
 .Rhistory
 .RData
 .Ruserdata
+.Renviron
+*.duckdb
+shiny/rsconnect/

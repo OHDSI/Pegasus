@@ -31,6 +31,7 @@ Imports:
 	checkmate
 Suggests:
 	testthat,
+	duckdb,
 	knitr,
 	rmarkdown
 NeedsCompilation: no

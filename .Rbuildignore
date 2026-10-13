@@ -8,3 +8,4 @@ deploy.sh
 compare_versions
 .github
 docs
+^shiny$

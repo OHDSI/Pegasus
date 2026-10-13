@@ -1,0 +1,24 @@
+# For local development copy to .Renviron in the project root (NOT inside shiny/, which is bundled on deploy).
+# On RConnect, set these as Vars in the content settings.
+
+# Database (DuckDB for local development)
+PEGASUS_DBMS=duckdb
+PEGASUS_SERVER=pegasus.duckdb
+PEGASUS_DATABASE_SCHEMA=main
+
+# Database (Databricks)
+# PEGASUS_DBMS=spark
+# PEGASUS_CONNECTION_STRING=jdbc:databricks://...
+# PEGASUS_DB_USER=token
+# PEGASUS_DB_PASSWORD=<databricks token>
+# PEGASUS_DATABASE_SCHEMA=catalog.schema
+# DATABASECONNECTOR_JAR_FOLDER=/path/to/jdbc/drivers
+
+# LLM (Azure OpenAI)
+PEGASUS_LLM_ENDPOINT=https://<resource>.openai.azure.com/
+PEGASUS_LLM_API_KEY=<api key>
+PEGASUS_LLM_MODEL=o3
+PEGASUS_LLM_API_VERSION=2024-12-01-preview
+
+# User name when not running on RConnect
+PEGASUS_DEFAULT_USER=developer

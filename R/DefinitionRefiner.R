@@ -14,7 +14,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
 #' Refine a clinical definition of a phenotype
 #'
 #' @param name               Name of the phenotype.
@@ -40,7 +39,14 @@ refineDefinition <- function(name, clinicalDefinition = NULL, llmClient) {
   llmClient$set_turns(list())
   llmClient$set_system_prompt(systemPrompt)
   llmClient <- registerFileWriteTool(llmClient)
-  llmClient$chat(name)
+  if (is.null(clinicalDefinition)) {
+    llmClient$chat(name)
+  } else {
+    prompt <- sprintf("Name: %s\n\nInitial definition: %s\n",
+                      name,
+                      clinicalDefinition)
+    llmClient$chat(prompt)
+  }
   ellmer::live_console(llmClient, quiet = TRUE)
 }
 
@@ -62,4 +68,3 @@ registerFileWriteTool <- function(llmClient) {
   llmClient$register_tool(saveTool)
   return(llmClient)
 }
-
