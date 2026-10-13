@@ -22,5 +22,5 @@ bslib::page_navbar(
   bslib::nav_panel("Search", searchUi("search")),
   bslib::nav_panel("New phenotype", createUi("create")),
   bslib::nav_spacer(),
-  bslib::nav_item(tags$img(src = "LogoSmall.png", height = "40px", alt = "Pegasus logo"))
+  bslib::nav_item(tags$img(src = "LogoTiny.png", height = "40px", alt = "Pegasus logo"))
 )
