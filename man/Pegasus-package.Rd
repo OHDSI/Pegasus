@@ -6,7 +6,7 @@
 \alias{Pegasus-package}
 \title{Pegasus: Phenotype Evaluation and Generation by AI-assisted Synthesis & User Specifications}
 \description{
-Phenotype Evaluation and Generation by AI-assisted Synthesis & User Specifications
+Phenotype Evaluation and Generation by AI-assisted Synthesis & User Specifications (Pegasus).
 }
 \seealso{
 Useful links:
