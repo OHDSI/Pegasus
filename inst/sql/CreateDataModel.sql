@@ -23,7 +23,7 @@ CREATE TABLE @database_schema.phenotype (
 );
 
 -- Records that a phenotype was created by cloning (refining) another one
-CREATE TABLE @database_schema.phenotype_lineage (
+CREATE TABLE @database_schema.phenotype_ancestor (
   phenotype_id INT NOT NULL,
   parent_phenotype_id INT NOT NULL
 );
