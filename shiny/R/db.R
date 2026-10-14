@@ -90,8 +90,7 @@ savePhenotype <- function(connection, databaseSchema, name, clinicalDefinition, 
       creator = creator,
       timeCreated = timeCreated,
       draft = 1L,
-      valid = 0L,
-      parentPhenotypeId = as.integer(parentPhenotypeId)
+      valid = 0L
     ),
     dropTableIfExists = FALSE,
     createTable = FALSE,
@@ -99,5 +98,21 @@ savePhenotype <- function(connection, databaseSchema, name, clinicalDefinition, 
     camelCaseToSnakeCase = TRUE,
     progressBar = FALSE
   )
+  if (!is.na(parentPhenotypeId)) {
+    DatabaseConnector::insertTable(
+      connection = connection,
+      databaseSchema = databaseSchema,
+      tableName = "phenotype_lineage",
+      data = data.frame(
+        phenotypeId = as.integer(phenotypeId),
+        parentPhenotypeId = as.integer(parentPhenotypeId)
+      ),
+      dropTableIfExists = FALSE,
+      createTable = FALSE,
+      tempTable = FALSE,
+      camelCaseToSnakeCase = TRUE,
+      progressBar = FALSE
+    )
+  }
   invisible(phenotypeId)
 }

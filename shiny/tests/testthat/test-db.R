@@ -33,3 +33,22 @@ test_that("findSimilarNames finds approximate matches", {
   expect_length(findSimilarNames("Psoriasis", existing), 0)
   expect_length(findSimilarNames("Psoriasis", character(0)), 0)
 })
+
+test_that("savePhenotype saves new phenotypes as draft and records lineage when cloned", {
+  pool <- createTestPool()
+  on.exit(pool::poolClose(pool))
+
+  withConnection(pool, function(connection) {
+    parentId <- savePhenotype(connection, "main", "Asthma", "Chronic airway disease.", "bob")
+    childId <- savePhenotype(connection, "main", "Asthma v2", "Refined definition.", "bob", parentPhenotypeId = parentId)
+
+    flags <- DatabaseConnector::querySql(connection, "SELECT phenotype_id, draft, valid FROM main.phenotype ORDER BY phenotype_id")
+    expect_equal(flags$DRAFT, c(1, 1))
+    expect_equal(flags$VALID, c(0, 0))
+
+    lineage <- DatabaseConnector::querySql(connection, "SELECT * FROM main.phenotype_lineage")
+    expect_equal(nrow(lineage), 1)
+    expect_equal(lineage$PHENOTYPE_ID, childId)
+    expect_equal(lineage$PARENT_PHENOTYPE_ID, parentId)
+  })
+})

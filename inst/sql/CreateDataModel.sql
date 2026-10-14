@@ -1,4 +1,5 @@
 DROP TABLE IF EXISTS @database_schema.phenotype;
+DROP TABLE IF EXISTS @database_schema.phenotype_lineage;
 DROP TABLE IF EXISTS @database_schema.draft_concept_set_target;
 DROP TABLE IF EXISTS @database_schema.draft_target_to_concept_set;
 DROP TABLE IF EXISTS @database_schema.concept_set;
@@ -17,9 +18,14 @@ CREATE TABLE @database_schema.phenotype (
   clinical_definition VARCHAR NOT NULL,
   creator VARCHAR NOT NULL,
   time_created DATETIME NOT NULL,
-  draft INT NOT NULL, -- 1 = queued for the backend development process
-  valid INT NOT NULL,
-  parent_phenotype_id INT -- phenotype this one was cloned from, if any
+  draft INT NOT NULL,
+  valid INT NOT NULL
+);
+
+-- Records that a phenotype was created by cloning (refining) another one
+CREATE TABLE @database_schema.phenotype_lineage (
+  phenotype_id INT NOT NULL,
+  parent_phenotype_id INT NOT NULL
 );
 
 CREATE TABLE @database_schema.draft_concept_set_target (
@@ -65,8 +71,6 @@ CREATE TABLE @database_schema.concept_set_item (
   include_descendants INT NOT NULL,
   include_mapped INT NOT NULL
 );
-
-CREATE INDEX idx_concept_set_item_concept ON @database_schema.concept_set_item (concept_id);
 
 CREATE TABLE @database_schema.phenotype_to_concept_set (
   phenotype_id INT NOT NULL,
@@ -123,9 +127,6 @@ CREATE TABLE @database_schema.cohort_definition_evaluation (
   sensitivity_ub FLOAT NOT NULL,
   evaluation_type VARCHAR -- 'keeper + llm', 'phevaluator', or 'keeper + human'
 );
-
-CREATE INDEX idx_cohort_definition_evaluation
-  ON @database_schema.cohort_definition_evaluation (cohort_definition_id, database_id, evaluation_type);
 
 CREATE TABLE @database_schema.database_meta_data (
   database_id INT PRIMARY KEY,

@@ -32,7 +32,7 @@ test_that("createDataModel creates the expected phenotype columns", {
   )
 
   expect_named(result, c("phenotype_id", "phenotype_name", "clinical_definition", "creator", "time_created",
-                         "draft", "valid", "parent_phenotype_id"))
+                         "draft", "valid"))
 })
 
 test_that("createDataModel can be run repeatedly", {
