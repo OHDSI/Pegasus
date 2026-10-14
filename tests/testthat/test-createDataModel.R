@@ -31,7 +31,8 @@ test_that("createDataModel creates the expected phenotype columns", {
     "SELECT * FROM main.phenotype LIMIT 0"
   )
 
-  expect_named(result, c("phenotype_id", "phenotype_name", "clinical_definition", "creator", "time_created"))
+  expect_named(result, c("phenotype_id", "phenotype_name", "clinical_definition", "creator", "time_created",
+                         "draft", "valid", "parent_phenotype_id"))
 })
 
 test_that("createDataModel can be run repeatedly", {
@@ -43,8 +44,8 @@ test_that("createDataModel can be run repeatedly", {
   createDataModel(connection = connection, databaseSchema = "main")
   DatabaseConnector::executeSql(
     connection,
-    "INSERT INTO main.phenotype (phenotype_id, phenotype_name, clinical_definition, creator, time_created)
-     VALUES (1, 'Test phenotype', 'Test definition', 'test', CURRENT_TIMESTAMP)"
+    "INSERT INTO main.phenotype (phenotype_id, phenotype_name, clinical_definition, creator, time_created, draft, valid)
+     VALUES (1, 'Test phenotype', 'Test definition', 'test', CURRENT_TIMESTAMP, 0, 1)"
   )
 
   expect_message(

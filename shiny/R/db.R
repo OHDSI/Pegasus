@@ -63,7 +63,7 @@ getNextPhenotypeId <- function(connection, databaseSchema) {
   if (length(maxId) == 0 || is.na(maxId)) 1 else maxId + 1
 }
 
-savePhenotype <- function(connection, databaseSchema, name, clinicalDefinition, creator) {
+savePhenotype <- function(connection, databaseSchema, name, clinicalDefinition, creator, parentPhenotypeId = NA_integer_) {
   name <- trimws(name)
   clinicalDefinition <- trimws(clinicalDefinition)
   if (!nzchar(name)) {
@@ -88,7 +88,10 @@ savePhenotype <- function(connection, databaseSchema, name, clinicalDefinition, 
       phenotypeName = name,
       clinicalDefinition = clinicalDefinition,
       creator = creator,
-      timeCreated = timeCreated
+      timeCreated = timeCreated,
+      draft = 1L,
+      valid = 0L,
+      parentPhenotypeId = as.integer(parentPhenotypeId)
     ),
     dropTableIfExists = FALSE,
     createTable = FALSE,

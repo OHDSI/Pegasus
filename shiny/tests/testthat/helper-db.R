@@ -7,18 +7,13 @@ createTestPool <- function() {
     maxSize = 1
   )
   withConnection(pool, function(connection) {
-    DatabaseConnector::executeSql(
-      connection,
-      "CREATE TABLE main.phenotype (
-        phenotype_id INT PRIMARY KEY,
-        phenotype_name VARCHAR NOT NULL,
-        clinical_definition VARCHAR NOT NULL,
-        creator VARCHAR NOT NULL,
-        time_created DATETIME NOT NULL
-      );",
-      progressBar = FALSE,
-      reportOverallTime = FALSE
+    # Uses the working-tree copy of the data model so tests track the real schema.
+    sql <- SqlRender::render(
+      SqlRender::readSql(file.path("..", "..", "..", "inst", "sql", "CreateDataModel.sql")),
+      database_schema = "main"
     )
+    sql <- SqlRender::translate(sql, targetDialect = "duckdb")
+    DatabaseConnector::executeSql(connection, sql, progressBar = FALSE, reportOverallTime = FALSE)
   })
   pool
 }
