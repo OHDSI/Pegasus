@@ -1,5 +1,5 @@
 DROP TABLE IF EXISTS @database_schema.phenotype;
-DROP TABLE IF EXISTS @database_schema.phenotype_lineage;
+DROP TABLE IF EXISTS @database_schema.phenotype_ancestor;
 DROP TABLE IF EXISTS @database_schema.draft_concept_set_target;
 DROP TABLE IF EXISTS @database_schema.draft_target_to_concept_set;
 DROP TABLE IF EXISTS @database_schema.concept_set;

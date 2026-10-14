@@ -102,7 +102,7 @@ savePhenotype <- function(connection, databaseSchema, name, clinicalDefinition, 
     DatabaseConnector::insertTable(
       connection = connection,
       databaseSchema = databaseSchema,
-      tableName = "phenotype_lineage",
+      tableName = "phenotype_ancestor",
       data = data.frame(
         phenotypeId = as.integer(phenotypeId),
         parentPhenotypeId = as.integer(parentPhenotypeId)

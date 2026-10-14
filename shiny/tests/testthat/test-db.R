@@ -46,7 +46,7 @@ test_that("savePhenotype saves new phenotypes as draft and records lineage when 
     expect_equal(flags$DRAFT, c(1, 1))
     expect_equal(flags$VALID, c(0, 0))
 
-    lineage <- DatabaseConnector::querySql(connection, "SELECT * FROM main.phenotype_lineage")
+    lineage <- DatabaseConnector::querySql(connection, "SELECT * FROM main.phenotype_ancestor")
     expect_equal(nrow(lineage), 1)
     expect_equal(lineage$PHENOTYPE_ID, childId)
     expect_equal(lineage$PARENT_PHENOTYPE_ID, parentId)
