@@ -6,13 +6,23 @@ PEGASUS_DBMS=duckdb
 PEGASUS_SERVER=pegasus.duckdb
 PEGASUS_DATABASE_SCHEMA=main
 
-# Database (Databricks)
-# PEGASUS_DBMS=spark
-# PEGASUS_CONNECTION_STRING=jdbc:databricks://...
-# PEGASUS_DB_USER=token
-# PEGASUS_DB_PASSWORD=<databricks token>
-# PEGASUS_DATABASE_SCHEMA=catalog.schema
+# Database (PostgreSQL)
+# PEGASUS_DBMS=postgresql
+# PEGASUS_SERVER=host/database
+# PEGASUS_DB_USER=<user>
+# PEGASUS_DB_PASSWORD=<password>
+# PEGASUS_DATABASE_SCHEMA=pegasus
+
+# Required for any dbms other than duckdb and sqlite (also used by the vocabulary database below)
 # DATABASECONNECTOR_JAR_FOLDER=/path/to/jdbc/drivers
+
+# OMOP vocabulary (optional, enables searching by concept with descendants and mappings).
+# Can be a different database platform than the one above, for example Databricks.
+# PEGASUS_VOCAB_DBMS=spark
+# PEGASUS_VOCAB_CONNECTION_STRING=jdbc:databricks://...
+# PEGASUS_VOCAB_DB_USER=token
+# PEGASUS_VOCAB_DB_PASSWORD=<databricks token>
+# PEGASUS_VOCAB_SCHEMA=catalog.schema
 
 # LLM (Azure OpenAI)
 PEGASUS_LLM_ENDPOINT=https://<resource>.openai.azure.com/

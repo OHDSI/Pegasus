@@ -34,6 +34,7 @@ loadConfig <- function() {
   list(
     dbms = dbms,
     connectionDetails = connectionDetails,
+    vocabulary = loadVocabularyConfig(),
     databaseSchema = getEnv("PEGASUS_DATABASE_SCHEMA"),
     llm = list(
       endpoint = getEnv("PEGASUS_LLM_ENDPOINT"),
@@ -41,6 +42,25 @@ loadConfig <- function() {
       model = getEnv("PEGASUS_LLM_MODEL"),
       apiVersion = getEnv("PEGASUS_LLM_API_VERSION")
     )
+  )
+}
+
+# The vocabulary database is optional; without it concept search only finds exact concept matches.
+loadVocabularyConfig <- function() {
+  dbms <- getEnv("PEGASUS_VOCAB_DBMS", required = FALSE)
+  if (is.null(dbms)) {
+    return(NULL)
+  }
+  list(
+    dbms = dbms,
+    connectionDetails = DatabaseConnector::createConnectionDetails(
+      dbms = dbms,
+      server = getEnv("PEGASUS_VOCAB_SERVER", required = FALSE),
+      connectionString = getEnv("PEGASUS_VOCAB_CONNECTION_STRING", required = FALSE),
+      user = getEnv("PEGASUS_VOCAB_DB_USER", required = FALSE),
+      password = getEnv("PEGASUS_VOCAB_DB_PASSWORD", required = FALSE)
+    ),
+    schema = getEnv("PEGASUS_VOCAB_SCHEMA")
   )
 }
 

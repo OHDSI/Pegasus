@@ -22,6 +22,7 @@ bslib::page_navbar(
   bslib::nav_panel("Browse", browseUi("browse")),
   bslib::nav_panel("New phenotype", createUi("create")),
   bslib::nav_panel("Performance", performanceUi("performance")),
+  bslib::nav_panel("Concepts", conceptsUi("concepts")),
   bslib::nav_panel(
     title = tagList("Shortlist ", uiOutput("shortlistCount", inline = TRUE)),
     value = "Shortlist",

@@ -32,4 +32,17 @@ onStop(function() {
   pool::poolClose(connectionPool)
 })
 
+vocabularyPool <- NULL
+if (!is.null(config$vocabulary)) {
+  ensureJdbcDriver(config$vocabulary$dbms)
+  vocabularyPool <- pool::poolCreate(
+    factory = function() {
+      DatabaseConnector::connect(config$vocabulary$connectionDetails)
+    }
+  )
+  onStop(function() {
+    pool::poolClose(vocabularyPool)
+  })
+}
+
 systemPrompt <- loadSystemPrompt("skills/ClinicalDefinitionRefiner.md")

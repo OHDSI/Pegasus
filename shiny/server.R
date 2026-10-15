@@ -72,6 +72,16 @@ function(input, output, session) {
     onRefine = refinePhenotype
   )
   performanceServer("performance", evaluations, shortlist = shortlist, onOpenPhenotype = openPhenotype)
+  conceptsServer(
+    "concepts",
+    connectionPool = connectionPool,
+    databaseSchema = config$databaseSchema,
+    vocabularyPool = vocabularyPool,
+    vocabularySchema = config$vocabulary$schema,
+    phenotypes = phenotypes,
+    shortlist = shortlist,
+    onOpenPhenotype = openPhenotype
+  )
   shortlistServer(
     "shortlist",
     connectionPool = connectionPool,
