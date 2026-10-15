@@ -128,6 +128,9 @@ test_that("browse server filters by status and creator and selects a phenotype",
       session$setInputs(status = statusLevels, creator = NULL)
       session$setInputs(table_rows_selected = 1)
       expect_equal(selectedId(), filtered()$phenotypeId[1])
+
+      session$setInputs(`detail-back` = 1)
+      expect_null(selectedId())
     }
   )
 })

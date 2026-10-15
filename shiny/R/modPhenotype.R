@@ -59,7 +59,7 @@ linkList <- function(ns, ids, names) {
 phenotypeDetailUi <- function(id) {
   ns <- NS(id)
   tagList(
-    actionButton(ns("back"), "Back to phenotypes", icon = icon("arrow-left"), class = "btn-sm mb-3"),
+    actionButton(ns("back"), "All phenotypes", icon = icon("arrow-left"), class = "btn-outline-primary mb-3"),
     uiOutput(ns("header")),
     bslib::navset_card_tab(
       bslib::nav_panel("Definition", uiOutput(ns("definition"))),

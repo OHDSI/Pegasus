@@ -127,13 +127,15 @@ browseServer <- function(id, connectionPool, databaseSchema, phenotypes, refresh
     })
 
     observeEvent(selectedId(), {
-      bslib::nav_select("view", "detail")
+      bslib::nav_select("view", "detail", session = session)
     })
 
+    # onBack runs inside the detail module's observer, so the session must be explicit; otherwise
+    # nav_select would namespace "view" with the detail module's id and miss this navset.
     backToList <- function() {
       selectedId(NULL)
       DT::selectRows(tableProxy, NULL)
-      bslib::nav_select("view", "list")
+      bslib::nav_select("view", "list", session = session)
     }
 
     phenotypeDetailServer(
