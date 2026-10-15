@@ -205,3 +205,19 @@ findPhenotypesByConcept <- function(connection, databaseSchema, conceptId, vocab
   rownames(result) <- NULL
   result
 }
+
+# The OMOP vocabulary table keeps the vocabulary release in the row with vocabulary_id 'None'.
+# Returns NA when the table or row is missing.
+getVocabularyVersion <- function(connection, vocabularySchema) {
+  sql <- "SELECT vocabulary_version
+  FROM @vocabulary_schema.vocabulary
+  WHERE vocabulary_id = 'None';"
+  version <- queryVocabulary(connection, vocabularySchema, sql)$vocabularyVersion
+  if (length(version) == 0 || is.na(version[1])) NA_character_ else as.character(version[1])
+}
+
+# A concept ID is digits only; anything else returns NA.
+parseConceptId <- function(term) {
+  term <- trimws(term)
+  if (grepl("^[0-9]{1,9}$", term)) as.integer(term) else NA_integer_
+}

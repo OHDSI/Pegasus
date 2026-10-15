@@ -17,6 +17,9 @@
 # Written as an immediate warning: it prints at once even while the app is busy, and warnings are
 # reliably shown in deployment logs where plain messages were not.
 logEvent <- function(...) {
+  if (isTRUE(getOption("pegasus.quiet"))) {
+    return(invisible(NULL))
+  }
   warning("[pegasus] ", ..., call. = FALSE, immediate. = TRUE)
 }
 

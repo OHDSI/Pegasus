@@ -93,3 +93,109 @@ test_that("findPhenotypesByConcept finds phenotypes through descendants, and onl
   # Without a vocabulary a descendant cannot be resolved.
   expect_equal(nrow(withConnection(pool, function(connection) findPhenotypesByConcept(connection, "main", 4051466))), 0)
 })
+
+test_that("getVocabularyVersion reads the release from the vocabulary table", {
+  vocabulary <- createVocabularyPool()
+  on.exit(pool::poolClose(vocabulary))
+  expect_equal(withConnection(vocabulary, function(connection) getVocabularyVersion(connection, "main")), "v5.0 TEST-RELEASE")
+
+  withConnection(vocabulary, function(connection) {
+    DatabaseConnector::executeSql(connection, "DELETE FROM main.vocabulary;", progressBar = FALSE, reportOverallTime = FALSE)
+  })
+  expect_true(is.na(withConnection(vocabulary, function(connection) getVocabularyVersion(connection, "main"))))
+})
+
+test_that("parseConceptId accepts only digits", {
+  expect_equal(parseConceptId(" 317009 "), 317009L)
+  expect_true(is.na(parseConceptId("asthma")))
+  expect_true(is.na(parseConceptId("31.7")))
+  expect_true(is.na(parseConceptId("1234567890")))
+  expect_true(is.na(parseConceptId("")))
+})
+
+conceptsTestArgs <- function(pool, vocabulary) {
+  list(
+    connectionPool = pool,
+    databaseSchema = "main",
+    vocabularyPool = vocabulary,
+    vocabularySchema = "main",
+    phenotypes = reactiveVal(withConnection(pool, function(connection) getPhenotypeSummary(connection, "main"))),
+    shortlist = reactiveVal(integer(0)),
+    onOpenPhenotype = function(id) NULL
+  )
+}
+
+test_that("concepts server: the connection check reports the status and vocabulary version", {
+  pool <- createTestPool()
+  vocabulary <- createVocabularyPool()
+  on.exit({
+    pool::poolClose(pool)
+    pool::poolClose(vocabulary)
+  })
+  loadSeedData(pool)
+
+  testServer(conceptsServer, args = conceptsTestArgs(pool, vocabulary), {
+    session$setInputs(checkVocabulary = 1)
+    expect_equal(vocabStatus()$state, "connected")
+    expect_equal(vocabStatus()$version, "v5.0 TEST-RELEASE")
+  })
+})
+
+test_that("concepts server: ID mode looks the concept up directly", {
+  pool <- createTestPool()
+  vocabulary <- createVocabularyPool()
+  on.exit({
+    pool::poolClose(pool)
+    pool::poolClose(vocabulary)
+  })
+  loadSeedData(pool)
+
+  testServer(conceptsServer, args = conceptsTestArgs(pool, vocabulary), {
+    session$setInputs(mode = "id", term = "317009", search = 1)
+    expect_equal(selectedConcept()$id, 317009L)
+    expect_equal(selectedConcept()$name, "Asthma")
+    expect_equal(nrow(candidates()), 0)
+    expect_equal(nrow(matches()), 3)
+
+    # Text in ID mode is rejected without a lookup.
+    session$setInputs(term = "asthma", search = 2)
+    expect_null(selectedConcept())
+  })
+})
+
+test_that("concepts server: name mode fuzzy-matches concept names into candidates", {
+  pool <- createTestPool()
+  vocabulary <- createVocabularyPool()
+  on.exit({
+    pool::poolClose(pool)
+    pool::poolClose(vocabulary)
+  })
+  loadSeedData(pool)
+
+  testServer(conceptsServer, args = conceptsTestArgs(pool, vocabulary), {
+    session$setInputs(mode = "name", term = "asthma", search = 1)
+    expect_equal(candidates()$conceptId[1:2], c(317009, 4051466))
+    expect_null(selectedConcept())
+
+    session$setInputs(candidateTable_rows_selected = 2)
+    expect_equal(selectedConcept()$id, 4051466)
+    expect_setequal(matches()$phenotypeId, c(1, 8))
+  })
+})
+
+test_that("concepts server: without a vocabulary only ID lookups work", {
+  pool <- createTestPool()
+  on.exit(pool::poolClose(pool))
+  loadSeedData(pool)
+
+  testServer(conceptsServer, args = conceptsTestArgs(pool, NULL), {
+    expect_equal(vocabStatus()$state, "none")
+    session$setInputs(mode = "name", term = "asthma", search = 1)
+    expect_equal(nrow(candidates()), 0)
+    expect_null(selectedConcept())
+
+    session$setInputs(mode = "id", term = "317009", search = 2)
+    expect_equal(selectedConcept()$id, 317009L)
+    expect_equal(nrow(matches()), 3)
+  })
+})

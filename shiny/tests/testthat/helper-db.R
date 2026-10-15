@@ -1,3 +1,6 @@
+# Keeps the app's activity logging out of the test output.
+options(pegasus.quiet = TRUE)
+
 createTestPool <- function() {
   pool <- pool::poolCreate(
     factory = function() {
@@ -50,6 +53,11 @@ createVocabularyPool <- function() {
          (255573, 'Chronic obstructive lung disease', 'Condition', 'SNOMED', 'Clinical Finding', 'S', NULL),
          (9001, 'Asthma (source code)', 'Condition', 'ICD10CM', 'ICD10 Code', NULL, NULL),
          (9002, 'Old asthma code', 'Condition', 'ICD10CM', 'ICD10 Code', NULL, 'D');
+       CREATE TABLE main.vocabulary (
+         vocabulary_id VARCHAR, vocabulary_name VARCHAR, vocabulary_version VARCHAR
+       );
+       INSERT INTO main.vocabulary VALUES
+         ('None', 'OMOP Standardized Vocabularies', 'v5.0 TEST-RELEASE'), ('SNOMED', 'SNOMED', 'SNOMED 2025');
        CREATE TABLE main.concept_ancestor (
          ancestor_concept_id INT, descendant_concept_id INT, min_levels_of_separation INT, max_levels_of_separation INT
        );
