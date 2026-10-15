@@ -62,6 +62,7 @@ phenotypeDetailUi <- function(id) {
     actionButton(ns("back"), "All phenotypes", icon = icon("arrow-left"), class = "btn-outline-primary mb-3"),
     uiOutput(ns("header")),
     bslib::navset_card_tab(
+      id = ns("tabs"),
       bslib::nav_panel("Definition", uiOutput(ns("definition"))),
       bslib::nav_panel("Concept sets", DT::DTOutput(ns("conceptSets"))),
       bslib::nav_panel("Draft targets", DT::DTOutput(ns("draftTargets"))),
@@ -79,6 +80,9 @@ phenotypeDetailServer <- function(id, connectionPool, databaseSchema, phenotypes
   moduleServer(id, function(input, output, session) {
     observeEvent(input$back, onBack())
     observeEvent(input$goto, selectedId(as.integer(input$goto)))
+
+    # Every newly opened phenotype starts on the definition, not on the previous phenotype's tab.
+    observeEvent(selectedId(), bslib::nav_select("tabs", "Definition", session = session))
 
     phenotype <- reactive({
       req(selectedId())

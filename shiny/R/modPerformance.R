@@ -13,6 +13,21 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 
+# Empty databases / phenotypeIds mean "no restriction".
+filterEvaluations <- function(data, evalTypes, sources, databases, phenotypeIds, minPpv, minSensitivity) {
+  keep <- data$evaluationType %in% evalTypes &
+    data$paSourceType %in% sources &
+    data$ppv >= minPpv / 100 &
+    data$sensitivity >= minSensitivity / 100
+  if (length(databases) > 0) {
+    keep <- keep & data$cdmSourceAbbreviation %in% databases
+  }
+  if (length(phenotypeIds) > 0) {
+    keep <- keep & data$phenotypeId %in% as.integer(phenotypeIds)
+  }
+  data[keep, , drop = FALSE]
+}
+
 performanceUi <- function(id) {
   ns <- NS(id)
   tagList(
@@ -26,9 +41,22 @@ performanceUi <- function(id) {
           bslib::input_switch(ns("showCi"), "Show 95% confidence intervals", value = FALSE)
         ),
         bslib::layout_columns(
-          col_widths = c(3, 3),
+          col_widths = c(3, 3, 6),
           sliderInput(ns("minPpv"), "Minimum PPV (%)", min = 0, max = 100, value = 0, step = 5),
-          sliderInput(ns("minSensitivity"), "Minimum sensitivity (%)", min = 0, max = 100, value = 0, step = 5)
+          sliderInput(ns("minSensitivity"), "Minimum sensitivity (%)", min = 0, max = 100, value = 0, step = 5),
+          shinyWidgets::pickerInput(
+            ns("phenotypes"),
+            "Phenotypes (empty shows all)",
+            choices = character(0),
+            multiple = TRUE,
+            width = "100%",
+            options = shinyWidgets::pickerOptions(
+              liveSearch = TRUE,
+              actionsBox = TRUE,
+              selectedTextFormat = "count > 2",
+              noneSelectedText = "All evaluated phenotypes"
+            )
+          )
         )
       )
     ),
@@ -67,18 +95,26 @@ performanceServer <- function(id, evaluations, onOpenPhenotype) {
       updateCheckboxGroupInput(session, "evalTypes", choices = evalTypes, selected = evalTypes)
       updateCheckboxGroupInput(session, "sources", choices = sources, selected = sources)
       updateSelectInput(session, "databases", choices = databaseOrder(), selected = character(0))
+      phenotypeNames <- data[!duplicated(data$phenotypeId), c("phenotypeId", "phenotypeName")]
+      phenotypeNames <- phenotypeNames[order(phenotypeNames$phenotypeName), ]
+      shinyWidgets::updatePickerInput(
+        session,
+        "phenotypes",
+        choices = stats::setNames(phenotypeNames$phenotypeId, phenotypeNames$phenotypeName),
+        selected = character(0)
+      )
     })
 
     filtered <- reactive({
-      data <- evaluations()
-      keep <- data$evaluationType %in% input$evalTypes &
-        data$paSourceType %in% input$sources &
-        data$ppv >= input$minPpv / 100 &
-        data$sensitivity >= input$minSensitivity / 100
-      if (length(input$databases) > 0) {
-        keep <- keep & data$cdmSourceAbbreviation %in% input$databases
-      }
-      data[keep, , drop = FALSE]
+      filterEvaluations(
+        evaluations(),
+        evalTypes = input$evalTypes,
+        sources = input$sources,
+        databases = input$databases,
+        phenotypeIds = input$phenotypes,
+        minPpv = input$minPpv,
+        minSensitivity = input$minSensitivity
+      )
     })
 
     output$summary <- renderText({

@@ -109,3 +109,23 @@ test_that("buildComparison makes a PPV and a sensitivity panel for every groupin
   }
   expect_length(builtTraces(buildComparison(emptyEvaluations())), 0)
 })
+
+test_that("filterEvaluations restricts by phenotype, database, type, source and thresholds", {
+  data <- seedEvaluations()
+  allTypes <- orderedLevels(data$evaluationType, evaluationTypeOrder)
+  allSources <- orderedLevels(data$paSourceType, sourceTypeOrder)
+  filterWith <- function(databases = character(0), phenotypeIds = character(0), minPpv = 0, minSensitivity = 0,
+                         evalTypes = allTypes, sources = allSources) {
+    filterEvaluations(data, evalTypes, sources, databases, phenotypeIds, minPpv, minSensitivity)
+  }
+
+  expect_equal(nrow(filterWith()), 17)
+  expect_equal(nrow(filterWith(phenotypeIds = "1")), 7)
+  expect_equal(nrow(filterWith(phenotypeIds = c("1", "2"))), 12)
+  expect_equal(nrow(filterWith(phenotypeIds = "6")), 0)
+  expect_true(all(filterWith(databases = "DEVEHR")$cdmSourceAbbreviation == "DEVEHR"))
+  expect_equal(nrow(filterWith(phenotypeIds = "1", databases = "DEVREG")), 1)
+  expect_true(all(filterWith(minPpv = 90)$ppv >= 0.9))
+  expect_equal(nrow(filterWith(evalTypes = character(0))), 0)
+  expect_true(all(filterWith(sources = "ai")$paSourceType == "ai"))
+})
