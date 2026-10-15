@@ -34,16 +34,17 @@ performanceUi <- function(id) {
     bslib::card(
       bslib::card_body(
         bslib::layout_columns(
-          col_widths = c(3, 3, 3, 3),
+          col_widths = c(2, 2, 3, 5),
           checkboxGroupInput(ns("evalTypes"), "Evaluation type", choices = character(0)),
           checkboxGroupInput(ns("sources"), "Source type", choices = character(0)),
-          selectInput(ns("databases"), "Databases (empty shows all)", choices = character(0), multiple = TRUE),
-          bslib::input_switch(ns("showCi"), "Show 95% confidence intervals", value = FALSE)
-        ),
-        bslib::layout_columns(
-          col_widths = c(3, 3, 6),
-          sliderInput(ns("minPpv"), "Minimum PPV (%)", min = 0, max = 100, value = 0, step = 5),
-          sliderInput(ns("minSensitivity"), "Minimum sensitivity (%)", min = 0, max = 100, value = 0, step = 5),
+          # Dropdowns attach to the body so the card does not clip them.
+          selectizeInput(
+            ns("databases"),
+            "Databases (empty shows all)",
+            choices = character(0),
+            multiple = TRUE,
+            options = list(dropdownParent = "body")
+          ),
           shinyWidgets::pickerInput(
             ns("phenotypes"),
             "Phenotypes (empty shows all)",
@@ -51,12 +52,19 @@ performanceUi <- function(id) {
             multiple = TRUE,
             width = "100%",
             options = shinyWidgets::pickerOptions(
+              container = "body",
               liveSearch = TRUE,
               actionsBox = TRUE,
               selectedTextFormat = "count > 2",
               noneSelectedText = "All evaluated phenotypes"
             )
           )
+        ),
+        bslib::layout_columns(
+          col_widths = c(3, 3, 6),
+          sliderInput(ns("minPpv"), "Minimum PPV (%)", min = 0, max = 100, value = 0, step = 5),
+          sliderInput(ns("minSensitivity"), "Minimum sensitivity (%)", min = 0, max = 100, value = 0, step = 5),
+          bslib::input_switch(ns("showCi"), "Show 95% confidence intervals", value = FALSE)
         )
       )
     ),
