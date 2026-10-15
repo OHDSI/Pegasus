@@ -276,9 +276,12 @@ cdEvaluations <- performance |>
             sensitivity,
             sensitivityLb,
             sensitivityUb,
-            specificity,
-            specificityLb,
-            specificityUb,
+            specificity = specificityOverall,
+            specificityLb = specificityOverallLb,
+            specificityUb = specificityOverallUb,
+            npv = npvOverall,
+            npvLb = npvOverallLb,
+            npvUb = npvOverallUb,
             evaluationType = "KEEPER + LLM")
 DatabaseConnector::insertTable(
   connection = connection,
