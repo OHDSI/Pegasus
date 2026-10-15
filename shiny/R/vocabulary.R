@@ -182,28 +182,47 @@ matchConceptSetItems <- function(items, conceptId, ancestorIds, mappedIds = inte
   matched
 }
 
-# Finds the phenotypes whose concept sets contain a concept. Without a vocabulary connection only
-# concept sets listing the concept itself can be found.
-findPhenotypesByConcept <- function(connection, databaseSchema, conceptId, vocabularyConnection = NULL, vocabularySchema = NULL) {
+# What the vocabulary says about a concept: its ancestors (including itself), the standard concepts it maps to, and
+# their ancestors. This is the only part of finding phenotypes that needs the vocabulary database.
+getConceptContext <- function(connection, vocabularySchema, conceptId) {
   conceptId <- as.integer(conceptId)
-  if (is.null(vocabularyConnection)) {
-    ancestorIds <- conceptId
-    mappedIds <- integer(0)
-    mappedAncestorIds <- integer(0)
-  } else {
-    ancestorIds <- getConceptAncestors(vocabularyConnection, vocabularySchema, conceptId)
-    mappedIds <- getMappedConcepts(vocabularyConnection, vocabularySchema, conceptId)
-    mappedAncestorIds <- getConceptAncestors(vocabularyConnection, vocabularySchema, mappedIds)
-  }
-  items <- getConceptSetItems(
-    connection, databaseSchema, unique(c(conceptId, ancestorIds, mappedIds, mappedAncestorIds))
+  mappedIds <- getMappedConcepts(connection, vocabularySchema, conceptId)
+  list(
+    ancestorIds = getConceptAncestors(connection, vocabularySchema, conceptId),
+    mappedIds = mappedIds,
+    mappedAncestorIds = getConceptAncestors(connection, vocabularySchema, mappedIds)
   )
-  matched <- matchConceptSetItems(items, conceptId, ancestorIds, mappedIds, mappedAncestorIds)
+}
+
+# Without a vocabulary only concept sets listing the concept itself can be found.
+exactConceptContext <- function(conceptId) {
+  list(ancestorIds = as.integer(conceptId), mappedIds = integer(0), mappedAncestorIds = integer(0))
+}
+
+# Finds the phenotypes whose concept sets contain a concept, given its vocabulary context.
+findPhenotypesForContext <- function(connection, databaseSchema, conceptId, context) {
+  conceptId <- as.integer(conceptId)
+  items <- getConceptSetItems(
+    connection,
+    databaseSchema,
+    unique(c(conceptId, context$ancestorIds, context$mappedIds, context$mappedAncestorIds))
+  )
+  matched <- matchConceptSetItems(items, conceptId, context$ancestorIds, context$mappedIds, context$mappedAncestorIds)
   phenotypes <- getPhenotypesForConceptSets(connection, databaseSchema, matched$conceptSetId)
   result <- merge(phenotypes, matched, by = "conceptSetId")
   result <- result[order(result$phenotypeName, result$conceptSetName), , drop = FALSE]
   rownames(result) <- NULL
   result
+}
+
+# Both steps in one call, for callers that have both connections at hand.
+findPhenotypesByConcept <- function(connection, databaseSchema, conceptId, vocabularyConnection = NULL, vocabularySchema = NULL) {
+  context <- if (is.null(vocabularyConnection)) {
+    exactConceptContext(conceptId)
+  } else {
+    getConceptContext(vocabularyConnection, vocabularySchema, conceptId)
+  }
+  findPhenotypesForContext(connection, databaseSchema, conceptId, context)
 }
 
 # The OMOP vocabulary table keeps the vocabulary release in the row with vocabulary_id 'None'.
@@ -220,4 +239,80 @@ getVocabularyVersion <- function(connection, vocabularySchema) {
 parseConceptId <- function(term) {
   term <- trimws(term)
   if (grepl("^[0-9]{1,9}$", term)) as.integer(term) else NA_integer_
+}
+
+# Everything the app asks of the vocabulary database is one of these tasks. They run in a separate R process (see
+# below) because a slow vocabulary query would otherwise freeze the whole app, and use only this function so the
+# background process and the tests behave identically.
+runVocabularyTask <- function(task, args, connection, vocabularySchema, log = function(text) NULL) {
+  switch(
+    task,
+    check = getVocabularyVersion(connection, vocabularySchema),
+    lookup = getConcepts(connection, vocabularySchema, args$conceptId),
+    search = searchConcepts(connection, vocabularySchema, args$term),
+    context = {
+      context <- getConceptContext(connection, vocabularySchema, args$conceptId)
+      ids <- unique(c(args$conceptId, context$ancestorIds, context$mappedIds, context$mappedAncestorIds))
+      log(sprintf("Found %d related concepts; reading their names...", length(ids)))
+      list(context = context, concepts = getConcepts(connection, vocabularySchema, ids))
+    },
+    stop("Unknown vocabulary task: ", task)
+  )
+}
+
+# The body of the background process. It must be self-contained, because callr only carries the function itself:
+# it loads the app's code from the app directory, connects with a fresh connection (never a stale pooled one),
+# writes timestamped progress lines to a file the app is watching, and returns the task's result.
+vocabularyJobMain <- function(appDirectory, task, args, logFile) {
+  started <- Sys.time()
+  elapsed <- function() as.numeric(Sys.time() - started, units = "secs")
+  log <- function(text) {
+    cat(sprintf("%s  %s\n", format(Sys.time(), "%H:%M:%S"), text), file = logFile, append = TRUE)
+  }
+  setwd(appDirectory)
+  source(file.path("R", "config.R"), local = TRUE)
+  source(file.path("R", "vocabulary.R"), local = TRUE)
+  vocabulary <- loadVocabularyConfig()
+  if (is.null(vocabulary)) {
+    stop("No vocabulary database is configured.")
+  }
+  log("Connecting to the vocabulary database...")
+  connection <- DatabaseConnector::connect(vocabulary$connectionDetails)
+  on.exit(DatabaseConnector::disconnect(connection))
+  log(sprintf("Connected after %.1f s; running the '%s' query...", elapsed(), task))
+  result <- runVocabularyTask(task, args, connection, vocabulary$schema, log)
+  log(sprintf("Query finished after %.1f s.", elapsed()))
+  result
+}
+
+# Returns a function(task, args) that starts a task in a background R process and gives back a handle with
+# poll() (new log lines, and the result once finished) and kill().
+backgroundVocabularyRunner <- function(appDirectory) {
+  force(appDirectory)
+  function(task, args) {
+    logFile <- tempfile("vocabulary-job-", fileext = ".log")
+    process <- callr::r_bg(vocabularyJobMain, args = list(appDirectory, task, args, logFile), supervise = TRUE)
+    linesSeen <- 0L
+    list(
+      poll = function() {
+        finished <- !process$is_alive()
+        lines <- if (file.exists(logFile)) readLines(logFile, warn = FALSE) else character(0)
+        newLines <- if (length(lines) > linesSeen) lines[(linesSeen + 1L):length(lines)] else character(0)
+        linesSeen <<- length(lines)
+        if (!finished) {
+          return(list(done = FALSE, lines = newLines))
+        }
+        outcome <- tryCatch(
+          list(ok = TRUE, value = process$get_result()),
+          error = function(e) list(ok = FALSE, error = conditionMessage(e))
+        )
+        unlink(logFile)
+        c(list(done = TRUE, lines = newLines), outcome)
+      },
+      kill = function() {
+        process$kill()
+        unlink(logFile)
+      }
+    )
+  }
 }

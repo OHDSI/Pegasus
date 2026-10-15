@@ -110,8 +110,7 @@ function(input, output, session) {
     "concepts",
     connectionPool = connectionPool,
     databaseSchema = config$databaseSchema,
-    vocabularyPool = vocabularyPool,
-    vocabularySchema = config$vocabulary$schema,
+    vocabularyRunner = vocabularyRunner,
     phenotypes = phenotypes,
     shortlist = shortlist,
     onOpenPhenotype = openPhenotype

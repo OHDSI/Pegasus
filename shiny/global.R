@@ -32,23 +32,14 @@ onStop(function() {
   pool::poolClose(connectionPool)
 })
 
-vocabularyPool <- NULL
+# Vocabulary requests run in a background R process with a fresh connection each time (see vocabulary.R), so no
+# connection is opened here and a slow or stale vocabulary connection cannot freeze the app.
+vocabularyRunner <- NULL
 if (is.null(config$vocabulary)) {
   logEvent("No vocabulary database configured (PEGASUS_VOCAB_DBMS is not set); concept search is limited to concept IDs.")
 } else {
   ensureJdbcDriver(config$vocabulary$dbms)
-  # No connection is opened at startup, and idle ones are closed after a minute. A long-lived JDBC connection to a
-  # remote warehouse can go stale without R noticing, and the next query on it can then hang.
-  vocabularyPool <- pool::poolCreate(
-    factory = function() {
-      DatabaseConnector::connect(config$vocabulary$connectionDetails)
-    },
-    minSize = 0,
-    idleTimeout = 60
-  )
-  onStop(function() {
-    pool::poolClose(vocabularyPool)
-  })
+  vocabularyRunner <- backgroundVocabularyRunner(normalizePath(getwd()))
 }
 
 systemPrompt <- loadSystemPrompt("skills/ClinicalDefinitionRefiner.md")

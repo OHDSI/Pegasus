@@ -88,27 +88,32 @@ conceptsUi <- function(id) {
   )
 }
 
-conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyPool, vocabularySchema,
-                           phenotypes, shortlist, onOpenPhenotype) {
-  hasVocabulary <- !is.null(vocabularyPool)
+# vocabularyRunner is NULL when no vocabulary database is configured. Otherwise it is a function(task, args) that
+# starts a vocabulary task in the background and returns a handle (see backgroundVocabularyRunner()). The app stays
+# responsive while the vocabulary works, and the activity log follows the background process live.
+conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyRunner, phenotypes, shortlist, onOpenPhenotype,
+                           jobTimeoutSeconds = 180) {
+  hasVocabulary <- !is.null(vocabularyRunner)
   moduleServer(id, function(input, output, session) {
     candidates <- reactiveVal(emptyConcepts())
     selectedConcept <- reactiveVal(NULL)
+    matches <- reactiveVal(NULL)
+    matchState <- reactiveVal("idle") # idle, loading, ready or failed
     vocabStatus <- reactiveVal(list(state = if (hasVocabulary) "unchecked" else "none", version = NA_character_))
+    activeJob <- reactiveVal(NULL)
 
-    # Log lines go to the sidebar box and to the server log. The box is updated with a message sent straight away, so
-    # it shows progress even while the server is blocked on a slow query (output updates would wait until it finished).
-    appendLog <- function(text) {
-      line <- sprintf("%s  %s", format(Sys.time(), "%H:%M:%S"), text)
-      logEvent("concepts: ", text)
+    # Log lines go to the sidebar box and to the server log.
+    appendRaw <- function(line) {
+      logEvent("concepts: ", line)
       tryCatch(
         session$rootScope()$sendCustomMessage("pegasusLog", list(id = session$ns("log"), line = line)),
         error = function(e) NULL
       )
     }
-    stopwatch <- function() {
-      started <- Sys.time()
-      function() as.numeric(Sys.time() - started, units = "secs")
+    appendLog <- function(text) appendRaw(sprintf("%s  %s", format(Sys.time(), "%H:%M:%S"), text))
+
+    resetSearchButton <- function() {
+      updateActionButton(session, "search", label = "Search", icon = icon("magnifying-glass"))
     }
 
     setVocabStatus <- function(state, version = NULL) {
@@ -116,45 +121,79 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyPool, v
       vocabStatus(list(state = state, version = if (is.null(version)) previous$version else version))
     }
 
-    # Runs a vocabulary query on a pooled connection, logging each step and recording whether it worked.
-    withVocabulary <- function(description, fun) {
-      elapsed <- stopwatch()
-      appendLog(sprintf("%s: waiting for a vocabulary connection...", description))
-      tryCatch(
-        {
-          result <- withConnection(vocabularyPool, function(connection) {
-            appendLog(sprintf("%s: connection ready after %.1f s, running the query...", description, elapsed()))
-            fun(connection)
-          })
-          appendLog(sprintf("%s: done in %.1f s.", description, elapsed()))
-          setVocabStatus("connected")
-          list(ok = TRUE, value = result)
-        },
+    # One vocabulary request at a time. onDone(result) gets list(ok, value) or list(ok = FALSE, error).
+    startJob <- function(description, task, args, onDone) {
+      if (!is.null(activeJob())) {
+        appendLog(sprintf("%s: another vocabulary request is still running; try again when it finishes.", description))
+        showNotification("A vocabulary request is still running.", type = "warning")
+        return(FALSE)
+      }
+      appendLog(sprintf("%s: starting a background request...", description))
+      handle <- tryCatch(
+        vocabularyRunner(task, args),
         error = function(e) {
-          appendLog(sprintf("%s: FAILED after %.1f s: %s", description, elapsed(), conditionMessage(e)))
-          setVocabStatus("error")
-          list(ok = FALSE, error = conditionMessage(e))
+          appendLog(sprintf("%s: could not start: %s", description, conditionMessage(e)))
+          NULL
         }
       )
+      if (is.null(handle)) {
+        setVocabStatus("error")
+        return(FALSE)
+      }
+      activeJob(list(handle = handle, description = description, onDone = onDone, started = Sys.time()))
+      TRUE
     }
 
+    finishJob <- function(job, outcome) {
+      activeJob(NULL)
+      resetSearchButton()
+      seconds <- as.numeric(Sys.time() - job$started, units = "secs")
+      if (isTRUE(outcome$ok)) {
+        appendLog(sprintf("%s: done in %.1f s.", job$description, seconds))
+        setVocabStatus("connected")
+      } else {
+        appendLog(sprintf("%s: FAILED after %.1f s: %s", job$description, seconds, outcome$error))
+        setVocabStatus("error")
+      }
+      job$onDone(outcome)
+    }
+
+    # Follows the running job: relays its log lines, and finishes it when it ends or runs out of time.
+    observe({
+      job <- activeJob()
+      req(job)
+      invalidateLater(500)
+      isolate({
+        polled <- job$handle$poll()
+        for (line in polled$lines) {
+          appendRaw(line)
+        }
+        if (isTRUE(polled$done)) {
+          finishJob(job, polled)
+        } else if (as.numeric(Sys.time() - job$started, units = "secs") > jobTimeoutSeconds) {
+          job$handle$kill()
+          finishJob(job, list(ok = FALSE, error = sprintf("timed out after %d seconds", as.integer(jobTimeoutSeconds))))
+        }
+      })
+    })
+
+    # The first check is manual: use the refresh icon.
     checkVocabulary <- function() {
       if (!hasVocabulary) {
         return(invisible(NULL))
       }
-      result <- withVocabulary("Connection check", function(connection) getVocabularyVersion(connection, vocabularySchema))
-      if (result$ok) {
-        setVocabStatus("connected", version = result$value)
-      }
+      startJob("Connection check", "check", list(), function(result) {
+        if (isTRUE(result$ok)) {
+          setVocabStatus("connected", version = result$value)
+        }
+      })
       invisible(NULL)
     }
-
-    # Never checked automatically: R runs one thing at a time, so a vocabulary connection that hangs at page load
-    # would freeze the whole session. Use the refresh icon to check it.
     observeEvent(input$checkVocabulary, checkVocabulary())
 
     output$connection <- renderUI({
       status <- vocabStatus()
+      busy <- !is.null(activeJob())
       display <- switch(
         status$state,
         none = list(color = "#898781", label = "Vocabulary not configured"),
@@ -169,9 +208,10 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyPool, v
           tags$span(display$label),
           if (hasVocabulary) {
             actionLink(session$ns("checkVocabulary"), NULL, icon = icon("rotate"), title = "Check the connection")
-          }
+          },
+          if (busy) tags$span(class = "text-muted", "working...")
         ),
-        if (hasVocabulary && status$state != "none") {
+        if (hasVocabulary) {
           tags$div(
             class = "text-muted small",
             "Vocabulary version: ",
@@ -195,13 +235,14 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyPool, v
       updateTextInput(session, "term", placeholder = if (identical(input$mode, "id")) "e.g. 317009" else "e.g. asthma")
     })
 
-    # Concept ID mode looks up the ID directly; name mode first resolves a fuzzy match to candidate concepts.
+    # Concept ID mode looks the ID up directly; name mode first resolves a fuzzy match to candidate concepts.
     runSearch <- function() {
       term <- trimws(input$term)
       candidates(emptyConcepts())
       selectedConcept(NULL)
       if (!nzchar(term)) {
         appendLog("Nothing to search for: the search box is empty.")
+        resetSearchButton()
         return()
       }
       if (identical(input$mode, "id")) {
@@ -209,48 +250,58 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyPool, v
         if (is.na(conceptId)) {
           appendLog(sprintf("'%s' is not a concept ID (digits only).", term))
           showNotification("Enter a numeric concept ID, or switch to name search.", type = "warning")
+          resetSearchButton()
           return()
         }
         appendLog(sprintf("Concept ID lookup: %d", conceptId))
-        conceptName <- NA_character_
-        if (hasVocabulary) {
-          result <- withVocabulary("Concept lookup", function(connection) getConcepts(connection, vocabularySchema, conceptId))
-          if (result$ok && nrow(result$value) == 1) {
+        if (!hasVocabulary) {
+          appendLog("No vocabulary configured; searching the concept sets for the exact ID only.")
+          selectedConcept(list(id = conceptId, name = NA_character_))
+          resetSearchButton()
+          return()
+        }
+        started <- startJob("Concept lookup", "lookup", list(conceptId = conceptId), function(result) {
+          if (!isTRUE(result$ok)) {
+            showNotification(paste("Unable to look up the concept:", result$error), type = "error")
+            return()
+          }
+          conceptName <- NA_character_
+          if (nrow(result$value) == 1) {
             conceptName <- result$value$conceptName
             appendLog(sprintf("Concept %d is '%s'.", conceptId, conceptName))
-          } else if (result$ok) {
+          } else {
             appendLog(sprintf("Concept %d is not in the vocabulary; searching the concept sets anyway.", conceptId))
           }
-        } else {
-          appendLog("No vocabulary configured; searching the concept sets for the exact ID only.")
-        }
-        selectedConcept(list(id = conceptId, name = conceptName))
+          selectedConcept(list(id = conceptId, name = conceptName))
+        })
       } else {
         if (!hasVocabulary) {
           appendLog("Name search needs a vocabulary database, which is not configured.")
           showNotification("Searching by name needs a vocabulary database. Use the Concept ID option instead.", type = "warning")
+          resetSearchButton()
           return()
         }
         appendLog(sprintf("Name search for '%s'", sanitizeSearchTerm(term)))
-        result <- withVocabulary("Name search", function(connection) searchConcepts(connection, vocabularySchema, term))
-        if (!result$ok) {
-          showNotification(paste("Unable to search the vocabulary:", result$error), type = "error")
-          return()
-        }
-        appendLog(sprintf("%d matching concepts.", nrow(result$value)))
-        if (nrow(result$value) == 0) {
-          showNotification("No concepts found.", type = "warning")
-        }
-        candidates(result$value)
+        started <- startJob("Name search", "search", list(term = term), function(result) {
+          if (!isTRUE(result$ok)) {
+            showNotification(paste("Unable to search the vocabulary:", result$error), type = "error")
+            return()
+          }
+          appendLog(sprintf("%d matching concepts.", nrow(result$value)))
+          if (nrow(result$value) == 0) {
+            showNotification("No concepts found.", type = "warning")
+          }
+          candidates(result$value)
+        })
+      }
+      if (!started) {
+        resetSearchButton()
       }
     }
 
     observeEvent(input$search, {
       appendLog(sprintf("Search clicked (%s mode).", if (identical(input$mode, "id")) "concept ID" else "name"))
-      tryCatch(
-        runSearch(),
-        finally = updateActionButton(session, "search", label = "Search", icon = icon("magnifying-glass"))
-      )
+      runSearch()
     })
 
     output$candidates <- renderUI({
@@ -289,40 +340,64 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyPool, v
       }
     })
 
-    matches <- reactive({
-      concept <- selectedConcept()
-      req(concept)
-      elapsed <- stopwatch()
-      appendLog(sprintf("Finding phenotypes that use concept %d...", concept$id))
+    # Finding the phenotypes: the vocabulary supplies the concept's ancestors and mappings in the background, then the
+    # Pegasus database (fast) is searched for concept sets that contain it.
+    computeMatches <- function(concept, context, concepts) {
+      started <- Sys.time()
       found <- tryCatch(
         withConnection(connectionPool, function(connection) {
-          run <- function(vocabularyConnection) {
-            found <- findPhenotypesByConcept(connection, databaseSchema, concept$id, vocabularyConnection, vocabularySchema)
-            found$itemConceptName <- NA_character_
-            if (!is.null(vocabularyConnection) && nrow(found) > 0) {
-              listed <- getConcepts(vocabularyConnection, vocabularySchema, unique(found$itemConceptId))
-              found$itemConceptName <- listed$conceptName[match(found$itemConceptId, listed$conceptId)]
-            }
-            found
-          }
-          if (hasVocabulary) withConnection(vocabularyPool, run) else run(NULL)
+          findPhenotypesForContext(connection, databaseSchema, concept$id, context)
         }),
         error = function(e) {
-          appendLog(sprintf("Phenotype lookup FAILED after %.1f s: %s", elapsed(), conditionMessage(e)))
+          appendLog(sprintf("Phenotype lookup FAILED: %s", conditionMessage(e)))
           showNotification(paste("Unable to find phenotypes:", conditionMessage(e)), type = "error")
           NULL
         }
       )
-      if (!is.null(found)) {
-        appendLog(sprintf(
-          "Found %d concept set match%s in %d phenotype%s (%.1f s).",
-          nrow(found), if (nrow(found) == 1) "" else "es",
-          length(unique(found$phenotypeId)), if (length(unique(found$phenotypeId)) == 1) "" else "s",
-          elapsed()
-        ))
+      if (is.null(found)) {
+        matchState("failed")
+        return()
       }
-      found
-    })
+      found$itemConceptName <- if (is.null(concepts)) {
+        rep(NA_character_, nrow(found))
+      } else {
+        concepts$conceptName[match(found$itemConceptId, concepts$conceptId)]
+      }
+      phenotypeCount <- length(unique(found$phenotypeId))
+      appendLog(sprintf(
+        "Found %d concept set match%s in %d phenotype%s (%.1f s).",
+        nrow(found), if (nrow(found) == 1) "" else "es",
+        phenotypeCount, if (phenotypeCount == 1) "" else "s",
+        as.numeric(Sys.time() - started, units = "secs")
+      ))
+      matches(found)
+      matchState("ready")
+    }
+
+    observeEvent(selectedConcept(), {
+      concept <- selectedConcept()
+      matches(NULL)
+      if (is.null(concept)) {
+        matchState("idle")
+        return()
+      }
+      matchState("loading")
+      if (!hasVocabulary) {
+        computeMatches(concept, exactConceptContext(concept$id), NULL)
+        return()
+      }
+      started <- startJob("Concept hierarchy", "context", list(conceptId = concept$id), function(result) {
+        if (!isTRUE(result$ok)) {
+          matchState("failed")
+          showNotification(paste("Unable to read the concept hierarchy:", result$error), type = "error")
+          return()
+        }
+        computeMatches(concept, result$value$context, result$value$concepts)
+      })
+      if (!started) {
+        matchState("failed")
+      }
+    }, ignoreNULL = FALSE)
 
     output$title <- renderText({
       concept <- selectedConcept()
@@ -330,9 +405,15 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyPool, v
         return("Search for a concept to see the phenotypes that use it")
       }
       label <- if (is.na(concept$name)) concept$id else sprintf("%s (%s)", concept$name, concept$id)
-      found <- matches()
-      count <- if (is.null(found)) 0 else length(unique(found$phenotypeId))
-      sprintf("%d phenotype%s use %s", count, if (count == 1) "" else "s", label)
+      switch(
+        matchState(),
+        loading = sprintf("Finding phenotypes that use %s...", label),
+        failed = sprintf("Could not find phenotypes for %s", label),
+        {
+          count <- length(unique(matches()$phenotypeId))
+          sprintf("%d phenotype%s use %s", count, if (count == 1) "" else "s", label)
+        }
+      )
     })
 
     output$results <- DT::renderDT({
