@@ -85,13 +85,19 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyPool, v
       } else if (!hasVocabulary) {
         showNotification("Searching by name needs a vocabulary database. Enter a concept ID instead.", type = "warning")
       } else {
-        found <- tryCatch(
-          withConnection(vocabularyPool, function(connection) searchConcepts(connection, vocabularySchema, term)),
-          error = function(e) {
-            showNotification(paste("Unable to search the vocabulary:", conditionMessage(e)), type = "error")
-            emptyConcepts()
-          }
-        )
+        message(sprintf("[concepts] searching the vocabulary for '%s'", sanitizeSearchTerm(term)))
+        started <- Sys.time()
+        found <- withProgress(message = "Searching the vocabulary...", value = NULL, {
+          tryCatch(
+            withConnection(vocabularyPool, function(connection) searchConcepts(connection, vocabularySchema, term)),
+            error = function(e) {
+              message("[concepts] vocabulary search failed: ", conditionMessage(e))
+              showNotification(paste("Unable to search the vocabulary:", conditionMessage(e)), type = "error")
+              emptyConcepts()
+            }
+          )
+        })
+        message(sprintf("[concepts] found %d concepts in %.1f seconds", nrow(found), as.numeric(Sys.time() - started, units = "secs")))
         if (nrow(found) == 0) {
           showNotification("No concepts found.", type = "warning")
         }
