@@ -206,19 +206,24 @@ getEvaluationRequests <- function(connection, databaseSchema, limit = 500) {
 evaluationUi <- function(id) {
   ns <- NS(id)
   tagList(
+    # A fixed height keeps the cards from being squeezed by the page, which would clip their contents.
     bslib::layout_columns(
       col_widths = c(7, 5),
+      height = "960px",
+      fill = FALSE,
       bslib::card(
         bslib::card_header("1. Cohort definition"),
         textInput(ns("cohortName"), "Cohort name", width = "100%"),
         textAreaInput(
-          ns("json"), "Circe JSON", rows = 16, width = "100%",
+          ns("json"), "Circe JSON", rows = 30, width = "100%",
           placeholder = "Paste the cohort definition exported from Atlas (Export > JSON)."
         ),
         uiOutput(ns("jsonStatus")),
         numericInput(ns("atlasId"), "Atlas cohort ID (optional)", value = NA, min = 1, step = 1, width = "50%")
       ),
-      tagList(
+      bslib::layout_columns(
+        col_widths = 12,
+        row_heights = c(1, 1),
         bslib::card(
           bslib::card_header("2. Phenotype"),
           shinyWidgets::pickerInput(
@@ -229,8 +234,8 @@ evaluationUi <- function(id) {
             width = "100%",
             options = shinyWidgets::pickerOptions(container = "body", liveSearch = TRUE)
           ),
-          uiOutput(ns("phenotypeSummary")),
-          actionButton(ns("newPhenotype"), "Create a new phenotype instead", icon = icon("plus"), class = "btn-outline-primary btn-sm")
+          actionButton(ns("newPhenotype"), "Create a new phenotype instead", icon = icon("plus"), class = "btn-outline-primary btn-sm"),
+          uiOutput(ns("phenotypeSummary"))
         ),
         bslib::card(
           bslib::card_header("3. Run settings"),
@@ -244,6 +249,7 @@ evaluationUi <- function(id) {
     ),
     bslib::card(
       full_screen = TRUE,
+      min_height = "520px",
       bslib::card_header(
         class = "d-flex justify-content-between align-items-center",
         "Evaluation requests",
@@ -307,7 +313,10 @@ evaluationServer <- function(id, connectionPool, databaseSchema, userName, pheno
       )
     })
 
-    observeEvent(input$newPhenotype, onNewPhenotype())
+    observeEvent(input$newPhenotype, {
+      message("[evaluation] switching to New phenotype")
+      onNewPhenotype()
+    })
 
     validation <- reactive(validateCirceJson(input$json))
 
