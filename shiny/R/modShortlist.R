@@ -126,6 +126,8 @@ shortlistUi <- function(id) {
       DT::DTOutput(ns("table"))
     ),
     bslib::card(
+      fill = FALSE,
+      min_height = "125px",
       bslib::card_header("Export"),
       tags$div(
         class = "d-flex flex-wrap gap-2",

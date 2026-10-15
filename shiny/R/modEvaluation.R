@@ -209,7 +209,7 @@ evaluationUi <- function(id) {
     # A fixed height keeps the cards from being squeezed by the page, which would clip their contents.
     bslib::layout_columns(
       col_widths = c(7, 5),
-      height = "670px",
+      height = "740px",
       fill = FALSE,
       bslib::card(
         bslib::card_header("1. Cohort definition"),
@@ -239,7 +239,19 @@ evaluationUi <- function(id) {
         ),
         bslib::card(
           bslib::card_header("3. Run settings"),
-          checkboxGroupInput(ns("databases"), "Databases", choices = character(0)),
+          shinyWidgets::pickerInput(
+            ns("databases"),
+            "Databases",
+            choices = character(0),
+            multiple = TRUE,
+            width = "100%",
+            options = shinyWidgets::pickerOptions(
+              container = "body",
+              actionsBox = TRUE,
+              selectedTextFormat = "count > 2",
+              noneSelectedText = "Choose one or more databases"
+            )
+          ),
           checkboxGroupInput(ns("evalTypes"), "Evaluation type", choices = evaluationTypeOrder, selected = evaluationTypeOrder[1], inline = TRUE),
           textAreaInput(ns("notes"), "Notes (optional)", rows = 2, width = "100%"),
           uiOutput(ns("userNote")),
@@ -291,7 +303,7 @@ evaluationServer <- function(id, connectionPool, databaseSchema, userName, pheno
       data <- databases()
       req(data)
       choices <- stats::setNames(data$databaseId, sprintf("%s - %s", data$cdmSourceAbbreviation, data$cdmSourceName))
-      updateCheckboxGroupInput(session, "databases", choices = choices, selected = isolate(input$databases))
+      shinyWidgets::updatePickerInput(session, "databases", choices = choices, selected = isolate(input$databases))
     })
 
     phenotypeChoices <- function() {

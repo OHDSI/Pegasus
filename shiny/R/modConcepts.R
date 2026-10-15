@@ -48,7 +48,7 @@ conceptsUi <- function(id) {
       # "Searching..." therefore means the server is still busy (for example waiting on a slow vocabulary query).
       actionButton(
         ns("search"), "Search", icon = icon("magnifying-glass"), class = "btn-primary",
-        onclick = "this.textContent = 'Searching...';"
+        onclick = "var label = this.querySelector('.action-label'); if (label) { label.textContent = 'Searching...'; } else { this.textContent = 'Searching...'; }"
       ),
       uiOutput(ns("vocabularyNote")),
       tags$div(
@@ -309,6 +309,7 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyRunner,
         return(NULL)
       }
       bslib::card(
+        fill = FALSE,
         bslib::card_header("Choose a concept"),
         DT::DTOutput(session$ns("candidateTable"))
       )
@@ -327,7 +328,7 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyRunner,
         ),
         rownames = FALSE,
         selection = "single",
-        options = list(pageLength = 10)
+        options = list(pageLength = 11)
       )
     })
 

@@ -28,43 +28,48 @@ filterEvaluations <- function(data, evalTypes, sources, databases, phenotypeIds,
   data[keep, , drop = FALSE]
 }
 
+# A multi-select dropdown. The list is attached to the page body so the card does not clip it.
+filterPicker <- function(inputId, label, noneSelectedText, liveSearch = FALSE) {
+  shinyWidgets::pickerInput(
+    inputId,
+    label,
+    choices = character(0),
+    multiple = TRUE,
+    width = "100%",
+    options = shinyWidgets::pickerOptions(
+      container = "body",
+      liveSearch = liveSearch,
+      actionsBox = TRUE,
+      selectedTextFormat = "count > 2",
+      noneSelectedText = noneSelectedText
+    )
+  )
+}
+
 performanceUi <- function(id) {
   ns <- NS(id)
   tagList(
+    # All four filters are the same kind of dropdown so they line up; the thresholds and the switch sit on a second row.
     bslib::card(
+      bslib::card_header("Filters"),
       bslib::card_body(
         bslib::layout_columns(
-          col_widths = c(2, 2, 3, 3),
-          checkboxGroupInput(ns("evalTypes"), "Evaluation type", choices = character(0)),
-          checkboxGroupInput(ns("sources"), "Source type", choices = character(0)),
-          # Dropdowns attach to the body so the card does not clip them.
-          selectizeInput(
-            ns("databases"),
-            "Databases (empty shows all)",
-            choices = character(0),
-            multiple = TRUE,
-            options = list(dropdownParent = "body")
-          ),
-          shinyWidgets::pickerInput(
-            ns("phenotypes"),
-            "Phenotypes (empty shows all)",
-            choices = character(0),
-            multiple = TRUE,
-            width = "100%",
-            options = shinyWidgets::pickerOptions(
-              container = "body",
-              liveSearch = TRUE,
-              actionsBox = TRUE,
-              selectedTextFormat = "count > 2",
-              noneSelectedText = "All evaluated phenotypes"
-            )
-          )
+          col_widths = c(3, 3, 3, 3),
+          filterPicker(ns("phenotypes"), "Phenotypes", "All evaluated phenotypes", liveSearch = TRUE),
+          filterPicker(ns("databases"), "Databases", "All databases"),
+          filterPicker(ns("evalTypes"), "Evaluation type", "None selected"),
+          filterPicker(ns("sources"), "Source type", "None selected")
         ),
         bslib::layout_columns(
-          col_widths = c(3, 3, 6),
-          sliderInput(ns("minPpv"), "Minimum PPV (%)", min = 0, max = 100, value = 0, step = 5),
-          sliderInput(ns("minSensitivity"), "Minimum sensitivity (%)", min = 0, max = 100, value = 0, step = 5),
-          bslib::input_switch(ns("showCi"), "Show 95% confidence intervals", value = FALSE)
+          col_widths = c(3, 3, 3, 3),
+          class = "align-items-end",
+          sliderInput(ns("minPpv"), "Minimum PPV (%)", min = 0, max = 100, value = 0, step = 5, width = "100%"),
+          sliderInput(ns("minSensitivity"), "Minimum sensitivity (%)", min = 0, max = 100, value = 0, step = 5, width = "100%"),
+          tags$div(
+            class = "pb-3",
+            bslib::input_switch(ns("showCi"), "Show 95% confidence intervals", value = FALSE)
+          ),
+          tags$div()
         )
       )
     ),
@@ -104,9 +109,9 @@ performanceServer <- function(id, evaluations, shortlist, onOpenPhenotype) {
       data <- evaluations()
       evalTypes <- orderedLevels(data$evaluationType, evaluationTypeOrder)
       sources <- orderedLevels(data$paSourceType, sourceTypeOrder)
-      updateCheckboxGroupInput(session, "evalTypes", choices = evalTypes, selected = evalTypes)
-      updateCheckboxGroupInput(session, "sources", choices = sources, selected = sources)
-      updateSelectInput(session, "databases", choices = databaseOrder(), selected = character(0))
+      shinyWidgets::updatePickerInput(session, "evalTypes", choices = evalTypes, selected = evalTypes)
+      shinyWidgets::updatePickerInput(session, "sources", choices = sources, selected = sources)
+      shinyWidgets::updatePickerInput(session, "databases", choices = databaseOrder(), selected = character(0))
       phenotypeNames <- data[!duplicated(data$phenotypeId), c("phenotypeId", "phenotypeName")]
       phenotypeNames <- phenotypeNames[order(phenotypeNames$phenotypeName), ]
       shinyWidgets::updatePickerInput(
