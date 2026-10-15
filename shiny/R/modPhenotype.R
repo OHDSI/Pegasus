@@ -77,6 +77,8 @@ phenotypeDetailUi <- function(id) {
 }
 
 phenotypeDetailServer <- function(id, connectionPool, databaseSchema, phenotypes, selectedId, shortlist, onBack, onRefine) {
+  # Evaluate eagerly so a missing argument fails at startup instead of on the first click.
+  force(onRefine)
   moduleServer(id, function(input, output, session) {
     observeEvent(input$back, onBack())
     observeEvent(input$goto, selectedId(as.integer(input$goto)))

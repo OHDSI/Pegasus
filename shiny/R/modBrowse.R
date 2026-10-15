@@ -75,6 +75,8 @@ browseUi <- function(id) {
 }
 
 browseServer <- function(id, connectionPool, databaseSchema, phenotypes, refreshPhenotypes, selectedId, shortlist, onRefine) {
+  # Evaluate eagerly so a missing argument fails at startup instead of on the first click.
+  force(onRefine)
   moduleServer(id, function(input, output, session) {
     observeEvent(input$refresh, refreshPhenotypes())
 
