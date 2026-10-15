@@ -20,7 +20,12 @@ conceptsUi <- function(id) {
       title = "Find phenotypes by concept",
       width = 320,
       textInput(ns("term"), "Concept name or ID", placeholder = "e.g. asthma or 317009"),
-      actionButton(ns("search"), "Search", icon = icon("magnifying-glass"), class = "btn-primary"),
+      # The label changes in the browser at once; the server restores it when the search is done. A label stuck on
+      # "Searching..." therefore means the server is still busy (for example waiting on a slow vocabulary query).
+      actionButton(
+        ns("search"), "Search", icon = icon("magnifying-glass"), class = "btn-primary",
+        onclick = "this.textContent = 'Searching...';"
+      ),
       uiOutput(ns("vocabularyNote")),
       helpText(
         "A concept set contains a concept when it lists the concept itself (Direct), lists an ancestor with",
@@ -61,7 +66,7 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyPool, v
     })
 
     # A concept ID goes straight to the lookup; a name is first resolved to candidate concepts.
-    observeEvent(input$search, {
+    runSearch <- function() {
       term <- trimws(input$term)
       candidates(emptyConcepts())
       selectedConcept(NULL)
@@ -103,6 +108,14 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyPool, v
         }
         candidates(found)
       }
+    }
+
+    observeEvent(input$search, {
+      message(sprintf("[concepts] search clicked (vocabulary configured: %s)", hasVocabulary))
+      tryCatch(
+        runSearch(),
+        finally = updateActionButton(session, "search", label = "Search", icon = icon("magnifying-glass"))
+      )
     })
 
     output$candidates <- renderUI({
