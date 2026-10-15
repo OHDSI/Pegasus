@@ -114,7 +114,8 @@ test_that("browse server filters by status and creator and selects a phenotype",
       phenotypes = phenotypes,
       refreshPhenotypes = function() NULL,
       selectedId = reactiveVal(NULL),
-      shortlist = reactiveVal(integer(0))
+      shortlist = reactiveVal(integer(0)),
+      onRefine = function(id) NULL
     ),
     {
       session$setInputs(status = statusLevels, creator = NULL)
@@ -127,8 +128,8 @@ test_that("browse server filters by status and creator and selects a phenotype",
       expect_equal(nrow(filtered()), 0)
 
       session$setInputs(status = statusLevels, creator = NULL)
-      session$setInputs(table_rows_selected = 1)
-      expect_equal(selectedId(), filtered()$phenotypeId[1])
+      session$setInputs(openPhenotype = 5)
+      expect_equal(selectedId(), 5L)
 
       session$setInputs(`detail-back` = 1)
       expect_null(selectedId())

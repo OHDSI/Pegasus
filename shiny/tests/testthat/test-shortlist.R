@@ -100,7 +100,8 @@ test_that("browse server toggles single phenotypes and adds all shown rows to th
       phenotypes = phenotypes,
       refreshPhenotypes = function() NULL,
       selectedId = reactiveVal(NULL),
-      shortlist = shortlist
+      shortlist = shortlist,
+      onRefine = function(id) NULL
     ),
     {
       session$setInputs(status = statusLevels, creator = NULL)

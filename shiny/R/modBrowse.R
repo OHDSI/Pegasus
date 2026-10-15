@@ -47,6 +47,7 @@ browseUi <- function(id) {
   ns <- NS(id)
   bslib::navset_hidden(
     id = ns("view"),
+    header = tags$style(".clickable-rows tbody tr { cursor: pointer; }"),
     bslib::nav_panel_hidden(
       "list",
       bslib::layout_sidebar(
@@ -65,7 +66,7 @@ browseUi <- function(id) {
             textOutput(ns("count"), inline = TRUE),
             actionButton(ns("addAll"), "Add all shown to shortlist", icon = icon("plus"), class = "btn-outline-primary btn-sm")
           ),
-          DT::DTOutput(ns("table"))
+          tags$div(class = "clickable-rows", DT::DTOutput(ns("table")))
         )
       )
     ),
@@ -73,10 +74,8 @@ browseUi <- function(id) {
   )
 }
 
-browseServer <- function(id, connectionPool, databaseSchema, phenotypes, refreshPhenotypes, selectedId, shortlist) {
+browseServer <- function(id, connectionPool, databaseSchema, phenotypes, refreshPhenotypes, selectedId, shortlist, onRefine) {
   moduleServer(id, function(input, output, session) {
-    tableProxy <- DT::dataTableProxy("table")
-
     observeEvent(input$refresh, refreshPhenotypes())
 
     observe({
@@ -99,6 +98,8 @@ browseServer <- function(id, connectionPool, databaseSchema, phenotypes, refresh
 
     output$count <- renderText(sprintf("%d of %d phenotypes", nrow(filtered()), nrow(phenotypes())))
 
+    idColumn <- 10L # zero-based position of the hidden Id column below
+
     output$table <- DT::renderDT({
       data <- filtered()
       # escape = FALSE is needed for the status badges, so free-text columns are escaped here.
@@ -114,14 +115,37 @@ browseServer <- function(id, connectionPool, databaseSchema, phenotypes, refresh
           Creator = htmltools::htmlEscape(data$creator),
           Created = formatTimestamp(data$timeCreated),
           Shortlist = shortlistButton(session$ns("toggleShortlist"), data$phenotypeId, data$phenotypeId %in% shortlist()),
+          # Hidden column: the row click handler reads the phenotype ID from here, so it stays correct
+          # under server-side paging, sorting and searching.
+          Id = data$phenotypeId,
           check.names = FALSE
         ),
         escape = FALSE,
-        selection = "single",
+        selection = "none",
         rownames = FALSE,
+        # Clicks on the shortlist button or on links must not open the phenotype.
+        callback = DT::JS(sprintf(
+          "table.on('click', 'tbody tr', function(e) {
+             if ($(e.target).closest('button, a').length > 0) { return; }
+             var row = table.row(this);
+             if (row.any()) { Shiny.setInputValue('%s', row.data()[%d], {priority: 'event'}); }
+           });",
+          session$ns("openPhenotype"),
+          idColumn
+        )),
         # The table re-renders when the shortlist changes; keep page, sort and search for this browser session.
-        options = list(pageLength = 25, order = list(list(0, "asc")), stateSave = TRUE, stateDuration = -1)
+        options = list(
+          pageLength = 25,
+          order = list(list(0, "asc")),
+          stateSave = TRUE,
+          stateDuration = -1,
+          columnDefs = list(list(visible = FALSE, targets = idColumn))
+        )
       )
+    })
+
+    observeEvent(input$openPhenotype, {
+      selectedId(as.integer(input$openPhenotype))
     })
 
     observeEvent(input$toggleShortlist, {
@@ -136,14 +160,6 @@ browseServer <- function(id, connectionPool, databaseSchema, phenotypes, refresh
       notifyAdded(addToShortlist(shortlist, data$phenotypeId[rowsShown]))
     })
 
-    observeEvent(input$table_rows_selected, {
-      row <- input$table_rows_selected
-      data <- filtered()
-      if (length(row) == 1 && row <= nrow(data)) {
-        selectedId(data$phenotypeId[row])
-      }
-    })
-
     observeEvent(selectedId(), {
       bslib::nav_select("view", "detail", session = session)
     })
@@ -152,7 +168,6 @@ browseServer <- function(id, connectionPool, databaseSchema, phenotypes, refresh
     # nav_select would namespace "view" with the detail module's id and miss this navset.
     backToList <- function() {
       selectedId(NULL)
-      DT::selectRows(tableProxy, NULL)
       bslib::nav_select("view", "list", session = session)
     }
 
@@ -163,7 +178,8 @@ browseServer <- function(id, connectionPool, databaseSchema, phenotypes, refresh
       phenotypes = phenotypes,
       selectedId = selectedId,
       shortlist = shortlist,
-      onBack = backToList
+      onBack = backToList,
+      onRefine = onRefine
     )
   })
 }

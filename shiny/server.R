@@ -19,6 +19,7 @@ function(input, output, session) {
   evaluations <- reactiveVal(emptyEvaluations())
   selectedPhenotypeId <- reactiveVal(NULL)
   shortlist <- reactiveVal(integer(0))
+  cloneSource <- reactiveVal(NULL)
 
   output$shortlistCount <- renderUI({
     if (length(shortlist()) > 0) tags$span(class = "badge text-bg-primary", length(shortlist()))
@@ -43,6 +44,23 @@ function(input, output, session) {
     bslib::nav_select("mainNav", "Browse")
   }
 
+  # Opens the New phenotype wizard seeded with an existing phenotype's definition. The nonce makes
+  # refining the same phenotype twice restart the wizard.
+  refinePhenotype <- function(phenotypeId) {
+    data <- phenotypes()
+    row <- data[data$phenotypeId == phenotypeId, , drop = FALSE]
+    if (nrow(row) != 1) {
+      return(invisible(NULL))
+    }
+    cloneSource(list(
+      id = row$phenotypeId,
+      name = row$phenotypeName,
+      definition = row$clinicalDefinition,
+      nonce = as.numeric(Sys.time())
+    ))
+    bslib::nav_select("mainNav", "New phenotype")
+  }
+
   browseServer(
     "browse",
     connectionPool = connectionPool,
@@ -50,7 +68,8 @@ function(input, output, session) {
     phenotypes = phenotypes,
     refreshPhenotypes = refreshPhenotypes,
     selectedId = selectedPhenotypeId,
-    shortlist = shortlist
+    shortlist = shortlist,
+    onRefine = refinePhenotype
   )
   performanceServer("performance", evaluations, shortlist = shortlist, onOpenPhenotype = openPhenotype)
   shortlistServer(
@@ -70,6 +89,7 @@ function(input, output, session) {
     systemPrompt = systemPrompt,
     userName = getUserName(session),
     phenotypes = phenotypes,
-    refreshPhenotypes = refreshPhenotypes
+    refreshPhenotypes = refreshPhenotypes,
+    cloneSource = cloneSource
   )
 }

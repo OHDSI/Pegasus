@@ -22,6 +22,7 @@ createUi <- function(id) {
       "start",
       bslib::card(
         bslib::card_header("Start a new phenotype"),
+        uiOutput(ns("cloneHintStart")),
         textInput(ns("name"), "Phenotype name", width = "100%"),
         textAreaInput(ns("initialDefinition"), "Initial definition (optional)", rows = 5, width = "100%"),
         actionButton(ns("start"), "Start", class = "btn-primary", width = "200px")
@@ -37,6 +38,7 @@ createUi <- function(id) {
             "Refine the clinical definition",
             actionButton(ns("startOver"), "Start over", icon = icon("arrow-rotate-left"), class = "btn-sm")
           ),
+          uiOutput(ns("cloneHintRefine")),
           uiOutput(ns("similarWarning")),
           shinychat::chat_ui(
             ns("chat"),
@@ -60,7 +62,8 @@ createUi <- function(id) {
   )
 }
 
-createServer <- function(id, connectionPool, databaseSchema, llmConfig, systemPrompt, userName, phenotypes, refreshPhenotypes) {
+createServer <- function(id, connectionPool, databaseSchema, llmConfig, systemPrompt, userName, phenotypes, refreshPhenotypes,
+                         cloneSource = reactiveVal(NULL)) {
   moduleServer(id, function(input, output, session) {
     client <- NULL
     toolCalledThisTurn <- FALSE
@@ -74,6 +77,26 @@ createServer <- function(id, connectionPool, databaseSchema, llmConfig, systemPr
         tags$p(class = "text-muted", paste("Will be saved as:", userName))
       }
     })
+
+    # cloneSource is NULL for a brand-new phenotype, otherwise list(id, name, definition) of the phenotype being refined.
+    cloneHint <- function(showClear) {
+      source <- cloneSource()
+      if (is.null(source)) {
+        return(NULL)
+      }
+      tags$div(
+        class = "alert alert-info d-flex justify-content-between align-items-center",
+        tags$span(
+          "Refining ", tags$strong(source$name),
+          ". The result is saved as a new phenotype linked to it; the original is not changed."
+        ),
+        if (showClear) {
+          actionButton(session$ns("clearClone"), "Start from scratch", class = "btn-sm btn-outline-secondary")
+        }
+      )
+    }
+    output$cloneHintStart <- renderUI(cloneHint(showClear = TRUE))
+    output$cloneHintRefine <- renderUI(cloneHint(showClear = FALSE))
 
     output$similarWarning <- renderUI({
       similar <- similarNames()
@@ -107,17 +130,27 @@ createServer <- function(id, connectionPool, databaseSchema, llmConfig, systemPr
       invisible(NULL)
     }
 
-    reset <- function() {
+    # keepClone restores the form to the refined phenotype's definition instead of clearing it.
+    reset <- function(keepClone = FALSE) {
+      initialDefinition <- if (keepClone && !is.null(cloneSource())) cloneSource()$definition else ""
+      if (!keepClone) {
+        cloneSource(NULL)
+      }
       client <<- NULL
       submittedDefinition(NULL)
       similarNames(character(0))
       shinychat::chat_clear("chat")
       updateTextInput(session, "name", value = "")
-      updateTextAreaInput(session, "initialDefinition", value = "")
+      updateTextAreaInput(session, "initialDefinition", value = initialDefinition)
       updateTextInput(session, "saveName", value = "")
       updateTextAreaInput(session, "definition", value = "")
       bslib::nav_select("wizard", "start")
     }
+
+    # Refining an existing phenotype: seed the definition and leave the name empty.
+    observeEvent(cloneSource(), reset(keepClone = TRUE))
+
+    observeEvent(input$clearClone, reset())
 
     observeEvent(input$start, {
       name <- trimws(input$name)
@@ -162,17 +195,19 @@ createServer <- function(id, connectionPool, databaseSchema, llmConfig, systemPr
       showNotification("The definition is ready for review.", type = "message")
     })
 
-    observeEvent(input$startOver, reset())
+    observeEvent(input$startOver, reset(keepClone = TRUE))
 
     observeEvent(input$save, {
       if (is.null(userName)) {
         showNotification("You must be logged in to save.", type = "error")
         return()
       }
+      parentPhenotypeId <- if (is.null(cloneSource())) NA_integer_ else cloneSource()$id
       saved <- tryCatch(
         {
           withConnection(connectionPool, function(connection) {
-            savePhenotype(connection, databaseSchema, input$saveName, input$definition, userName)
+            savePhenotype(connection, databaseSchema, input$saveName, input$definition, userName,
+                          parentPhenotypeId = parentPhenotypeId)
           })
           TRUE
         },

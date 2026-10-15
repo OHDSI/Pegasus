@@ -76,11 +76,12 @@ phenotypeDetailUi <- function(id) {
   )
 }
 
-phenotypeDetailServer <- function(id, connectionPool, databaseSchema, phenotypes, selectedId, shortlist, onBack) {
+phenotypeDetailServer <- function(id, connectionPool, databaseSchema, phenotypes, selectedId, shortlist, onBack, onRefine) {
   moduleServer(id, function(input, output, session) {
     observeEvent(input$back, onBack())
     observeEvent(input$goto, selectedId(as.integer(input$goto)))
     observeEvent(input$toggleShortlist, toggleShortlist(shortlist, selectedId()))
+    observeEvent(input$refine, onRefine(selectedId()))
 
     # Every newly opened phenotype starts on the definition, not on the previous phenotype's tab.
     observeEvent(selectedId(), bslib::nav_select("tabs", "Definition", session = session))
@@ -113,11 +114,15 @@ phenotypeDetailServer <- function(id, connectionPool, databaseSchema, phenotypes
         tags$div(
           class = "d-flex justify-content-between align-items-start",
           tags$h3(row$phenotypeName, HTML(" "), HTML(statusBadge(row$status))),
-          actionButton(
-            session$ns("toggleShortlist"),
-            if (onShortlist) "Remove from shortlist" else "Add to shortlist",
-            icon = icon(if (onShortlist) "minus" else "plus"),
-            class = if (onShortlist) "btn-secondary" else "btn-primary"
+          tags$div(
+            class = "d-flex gap-2",
+            actionButton(session$ns("refine"), "Refine this", icon = icon("pen"), class = "btn-outline-primary"),
+            actionButton(
+              session$ns("toggleShortlist"),
+              if (onShortlist) "Remove from shortlist" else "Add to shortlist",
+              icon = icon(if (onShortlist) "minus" else "plus"),
+              class = if (onShortlist) "btn-secondary" else "btn-primary"
+            )
           )
         ),
         tags$p(
