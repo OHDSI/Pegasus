@@ -36,15 +36,17 @@ populateVocabulary <- function(connection) {
   DatabaseConnector::executeSql(
     connection,
     "CREATE TABLE main.concept (
-       concept_id INT, concept_name VARCHAR, domain_id VARCHAR, vocabulary_id VARCHAR,
+       concept_id INT, concept_name VARCHAR, concept_code VARCHAR, domain_id VARCHAR, vocabulary_id VARCHAR,
        concept_class_id VARCHAR, standard_concept VARCHAR, invalid_reason VARCHAR
      );
      INSERT INTO main.concept VALUES
-       (317009, 'Asthma', 'Condition', 'SNOMED', 'Clinical Finding', 'S', NULL),
-       (4051466, 'Childhood asthma', 'Condition', 'SNOMED', 'Clinical Finding', 'S', NULL),
-       (255573, 'Chronic obstructive lung disease', 'Condition', 'SNOMED', 'Clinical Finding', 'S', NULL),
-       (9001, 'Asthma (source code)', 'Condition', 'ICD10CM', 'ICD10 Code', NULL, NULL),
-       (9002, 'Old asthma code', 'Condition', 'ICD10CM', 'ICD10 Code', NULL, 'D');
+       (317009, 'Asthma', '195967001', 'Condition', 'SNOMED', 'Clinical Finding', 'S', NULL),
+       (4051466, 'Childhood asthma', '233678006', 'Condition', 'SNOMED', 'Clinical Finding', 'S', NULL),
+       (255573, 'Chronic obstructive lung disease', '13645005', 'Condition', 'SNOMED', 'Clinical Finding', 'S', NULL),
+       (9001, 'Asthma (source code)', 'J45.9', 'Condition', 'ICD10CM', 'ICD10 Code', NULL, NULL),
+       (9002, 'Old asthma code', 'J45.909', 'Condition', 'ICD10CM', 'ICD10 Code', NULL, 'D'),
+       (9003, 'Predominantly allergic asthma', 'J45.0', 'Condition', 'ICD10CM', 'ICD10 Code', NULL, NULL),
+       (9004, 'Asthma, unspecified', '493.90', 'Condition', 'ICD9CM', 'ICD9 Code', NULL, NULL);
      CREATE TABLE main.vocabulary (
        vocabulary_id VARCHAR, vocabulary_name VARCHAR, vocabulary_version VARCHAR
      );
@@ -59,7 +61,8 @@ populateVocabulary <- function(connection) {
        concept_id_1 INT, concept_id_2 INT, relationship_id VARCHAR, invalid_reason VARCHAR
      );
      INSERT INTO main.concept_relationship VALUES
-       (9001, 317009, 'Maps to', NULL), (9001, 9001, 'Maps to', NULL), (9002, 317009, 'Maps to', 'D');",
+       (9001, 317009, 'Maps to', NULL), (9001, 9001, 'Maps to', NULL), (9002, 317009, 'Maps to', 'D'),
+       (9003, 4051466, 'Maps to', NULL), (9004, 317009, 'Maps to', NULL);",
     progressBar = FALSE,
     reportOverallTime = FALSE
   )

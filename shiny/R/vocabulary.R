@@ -39,6 +39,7 @@ emptyConcepts <- function() {
   data.frame(
     conceptId = integer(0),
     conceptName = character(0),
+    conceptCode = character(0),
     domainId = character(0),
     vocabularyId = character(0),
     conceptClassId = character(0),
@@ -53,6 +54,7 @@ searchConcepts <- function(connection, vocabularySchema, term, limit = 100) {
   }
   sql <- "SELECT TOP @limit concept_id,
     concept_name,
+    concept_code,
     domain_id,
     vocabulary_id,
     concept_class_id,
@@ -64,12 +66,44 @@ searchConcepts <- function(connection, vocabularySchema, term, limit = 100) {
   queryVocabulary(connection, vocabularySchema, sql, term = term, limit = as.integer(limit))
 }
 
+# Codes (ICD-10, ICD-9, ...) keep only letters, digits and dots, in lower case.
+sanitizeCode <- function(code) {
+  code <- gsub("[^A-Za-z0-9.]", "", trimws(code))
+  tolower(substr(code, 1, 50))
+}
+
+# Concepts whose code starts with the given text, in any vocabulary (the same code can exist in several, so the
+# vocabulary is part of the result). An exact match comes first, and source (non-standard) concepts before standard.
+searchConceptsByCode <- function(connection, vocabularySchema, code, limit = 100) {
+  code <- sanitizeCode(code)
+  if (!nzchar(code)) {
+    return(emptyConcepts())
+  }
+  sql <- "SELECT TOP @limit concept_id,
+    concept_name,
+    concept_code,
+    domain_id,
+    vocabulary_id,
+    concept_class_id,
+    standard_concept
+  FROM @vocabulary_schema.concept
+  WHERE LOWER(concept_code) LIKE '@code%'
+    AND invalid_reason IS NULL
+  ORDER BY CASE WHEN LOWER(concept_code) = '@code' THEN 0 ELSE 1 END,
+    CASE WHEN standard_concept IS NULL THEN 0 ELSE 1 END,
+    LENGTH(concept_code),
+    vocabulary_id,
+    concept_code;"
+  queryVocabulary(connection, vocabularySchema, sql, code = code, limit = as.integer(limit))
+}
+
 getConcepts <- function(connection, vocabularySchema, conceptIds) {
   if (length(conceptIds) == 0) {
     return(emptyConcepts())
   }
   sql <- "SELECT concept_id,
     concept_name,
+    concept_code,
     domain_id,
     vocabulary_id,
     concept_class_id,
@@ -90,6 +124,17 @@ getConceptAncestors <- function(connection, vocabularySchema, conceptIds) {
   WHERE descendant_concept_id IN (@concept_ids);"
   result <- queryVocabulary(connection, vocabularySchema, sql, concept_ids = as.integer(conceptIds))
   union(as.integer(conceptIds), as.integer(result$ancestorConceptId))
+}
+
+# Ancestor / descendant pairs (a concept is its own ancestor) for several concepts at once.
+getConceptAncestorPairs <- function(connection, vocabularySchema, conceptIds) {
+  if (length(conceptIds) == 0) {
+    return(data.frame(ancestorConceptId = integer(0), descendantConceptId = integer(0)))
+  }
+  sql <- "SELECT DISTINCT ancestor_concept_id, descendant_concept_id
+  FROM @vocabulary_schema.concept_ancestor
+  WHERE descendant_concept_id IN (@concept_ids);"
+  queryVocabulary(connection, vocabularySchema, sql, concept_ids = as.integer(conceptIds))
 }
 
 # Standard concepts a (source) concept maps to.
@@ -182,8 +227,8 @@ matchConceptSetItems <- function(items, conceptId, ancestorIds, mappedIds = inte
   matched
 }
 
-# What the vocabulary says about a concept: its ancestors (including itself), the standard concepts it maps to, and
-# their ancestors. This is the only part of finding phenotypes that needs the vocabulary database.
+# What the vocabulary says about a standard concept: its ancestors (including itself), the standard concepts it maps
+# to, and their ancestors. This is the only part of finding phenotypes that needs the vocabulary database.
 getConceptContext <- function(connection, vocabularySchema, conceptId) {
   conceptId <- as.integer(conceptId)
   mappedIds <- getMappedConcepts(connection, vocabularySchema, conceptId)
@@ -194,20 +239,62 @@ getConceptContext <- function(connection, vocabularySchema, conceptId) {
   )
 }
 
+# A source (non-standard) concept such as an ICD code never appears in the data as itself: records coded with it are
+# stored under the standard concepts it maps to ('Maps to'). Each of those, with its ancestors, is a target; concept
+# sets that contain any target capture the code. The concept itself is also a target, for concept sets that list the
+# source concept directly.
+getSourceConceptContext <- function(connection, vocabularySchema, conceptId) {
+  conceptId <- as.integer(conceptId)
+  mappedIds <- getMappedConcepts(connection, vocabularySchema, conceptId)
+  pairs <- getConceptAncestorPairs(connection, vocabularySchema, mappedIds)
+  targets <- lapply(mappedIds, function(id) {
+    list(id = id, ancestorIds = union(id, as.integer(pairs$ancestorConceptId[pairs$descendantConceptId == id])))
+  })
+  list(targets = c(targets, list(list(id = conceptId, ancestorIds = conceptId))), mappedIds = mappedIds)
+}
+
+# Standard concepts use their ancestors and mappings; source concepts are resolved through 'Maps to'.
+resolveConceptContext <- function(connection, vocabularySchema, concept) {
+  isSource <- nrow(concept) == 1 && is.na(concept$standardConcept)
+  if (isSource) {
+    getSourceConceptContext(connection, vocabularySchema, concept$conceptId)
+  } else {
+    getConceptContext(connection, vocabularySchema, concept$conceptId)
+  }
+}
+
+# Every concept ID whose name the results may need to show.
+contextConceptIds <- function(conceptId, context) {
+  if (!is.null(context$targets)) {
+    return(unique(c(conceptId, unlist(lapply(context$targets, function(target) c(target$id, target$ancestorIds))))))
+  }
+  unique(c(conceptId, context$ancestorIds, context$mappedIds, context$mappedAncestorIds))
+}
+
 # Without a vocabulary only concept sets listing the concept itself can be found.
 exactConceptContext <- function(conceptId) {
   list(ancestorIds = as.integer(conceptId), mappedIds = integer(0), mappedAncestorIds = integer(0))
 }
 
-# Finds the phenotypes whose concept sets contain a concept, given its vocabulary context.
+# Finds the phenotypes whose concept sets contain a concept, given its vocabulary context. The result has a
+# viaConceptId column: the mapped standard concept that matched, or NA when the concept itself matched.
 findPhenotypesForContext <- function(connection, databaseSchema, conceptId, context) {
   conceptId <- as.integer(conceptId)
-  items <- getConceptSetItems(
-    connection,
-    databaseSchema,
-    unique(c(conceptId, context$ancestorIds, context$mappedIds, context$mappedAncestorIds))
-  )
-  matched <- matchConceptSetItems(items, conceptId, context$ancestorIds, context$mappedIds, context$mappedAncestorIds)
+  items <- getConceptSetItems(connection, databaseSchema, contextConceptIds(conceptId, context))
+  if (is.null(context$targets)) {
+    matched <- matchConceptSetItems(items, conceptId, context$ancestorIds, context$mappedIds, context$mappedAncestorIds)
+    matched$viaConceptId <- rep(NA_integer_, nrow(matched))
+  } else {
+    perTarget <- lapply(context$targets, function(target) {
+      found <- matchConceptSetItems(items, target$id, target$ancestorIds)
+      found$viaConceptId <- rep(if (identical(as.integer(target$id), conceptId)) NA_integer_ else as.integer(target$id), nrow(found))
+      found
+    })
+    matched <- do.call(rbind, perTarget)
+    # A concept set that matches through several targets is reported once, by its strongest match.
+    matched <- matched[order(match(matched$matchType, c("Direct", "Descendant", "Mapped"))), , drop = FALSE]
+    matched <- matched[!duplicated(matched$conceptSetId), , drop = FALSE]
+  }
   phenotypes <- getPhenotypesForConceptSets(connection, databaseSchema, matched$conceptSetId)
   result <- merge(phenotypes, matched, by = "conceptSetId")
   result <- result[order(result$phenotypeName, result$conceptSetName), , drop = FALSE]
@@ -250,9 +337,14 @@ runVocabularyTask <- function(task, args, connection, vocabularySchema, log = fu
     check = getVocabularyVersion(connection, vocabularySchema),
     lookup = getConcepts(connection, vocabularySchema, args$conceptId),
     search = searchConcepts(connection, vocabularySchema, args$term),
+    searchCode = searchConceptsByCode(connection, vocabularySchema, args$code),
     context = {
-      context <- getConceptContext(connection, vocabularySchema, args$conceptId)
-      ids <- unique(c(args$conceptId, context$ancestorIds, context$mappedIds, context$mappedAncestorIds))
+      concept <- getConcepts(connection, vocabularySchema, args$conceptId)
+      if (nrow(concept) == 1 && is.na(concept$standardConcept)) {
+        log("This is a source concept; resolving the standard concepts it maps to...")
+      }
+      context <- resolveConceptContext(connection, vocabularySchema, concept)
+      ids <- contextConceptIds(args$conceptId, context)
       log(sprintf("Found %d related concepts; reading their names...", length(ids)))
       list(context = context, concepts = getConcepts(connection, vocabularySchema, ids))
     },

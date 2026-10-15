@@ -129,9 +129,15 @@ test_that("runVocabularyTask covers every task the app uses", {
   expect_length(context$context$mappedIds, 0)
   expect_setequal(context$concepts$conceptId, c(4051466, 317009))
 
-  mapped <- run("context", list(conceptId = 9001L))
-  expect_equal(mapped$context$mappedIds, 317009)
-  expect_true(317009 %in% mapped$context$mappedAncestorIds)
+  # A source concept is resolved through 'Maps to': the mapped standard concept (with its ancestors), plus itself.
+  source <- run("context", list(conceptId = 9003L))
+  expect_equal(source$context$mappedIds, 4051466)
+  expect_equal(vapply(source$context$targets, function(target) as.numeric(target$id), 1), c(4051466, 9003))
+  expect_setequal(source$context$targets[[1]]$ancestorIds, c(4051466, 317009))
+  expect_equal(source$context$targets[[2]]$ancestorIds, 9003)
+  expect_true(all(c(4051466, 317009, 9003) %in% source$concepts$conceptId))
+
+  expect_equal(run("searchCode", list(code = "J45.9"))$conceptId[1], 9001)
 
   expect_error(run("nonsense"), "Unknown vocabulary task")
 })
@@ -290,6 +296,94 @@ test_that("concepts server: a failing vocabulary task is reported without blocki
     session$setInputs(mode = "name", term = "asthma", search = 1)
     expect_equal(vocabStatus()$state, "error")
     expect_null(activeJob())
+    expect_equal(nrow(candidates()), 0)
+  })
+})
+
+test_that("sanitizeCode keeps letters, digits and dots in lower case", {
+  expect_equal(sanitizeCode(" J45.9 "), "j45.9")
+  expect_equal(sanitizeCode("J45'; DROP--"), "j45drop")
+  expect_equal(sanitizeCode("%_"), "")
+  expect_equal(nchar(sanitizeCode(strrep("a", 100))), 50)
+})
+
+test_that("searchConceptsByCode matches the start of a code in any vocabulary", {
+  vocabulary <- createVocabularyPool()
+  on.exit(pool::poolClose(vocabulary))
+  search <- function(code) {
+    withConnection(vocabulary, function(connection) searchConceptsByCode(connection, "main", code))
+  }
+
+  # Prefix: both J45 codes, not the invalid J45.909 and not the ICD-9 code.
+  expect_setequal(search("J45")$conceptId, c(9001, 9003))
+  # An exact code comes first, regardless of case.
+  expect_equal(search("j45.9")$conceptId, 9001)
+  expect_equal(search("493")$conceptId, 9004)
+  expect_equal(search("493")$vocabularyId, "ICD9CM")
+  expect_equal(nrow(search("zzz")), 0)
+  expect_equal(nrow(search("''; --")), 0)
+  expect_equal(nrow(search("")), 0)
+})
+
+test_that("a source code finds phenotypes through the standard concepts it maps to", {
+  pool <- createTestPool()
+  vocabulary <- createVocabularyPool()
+  on.exit({
+    pool::poolClose(pool)
+    pool::poolClose(vocabulary)
+  })
+  loadSeedData(pool)
+  find <- function(conceptId) {
+    withConnection(pool, function(connection) {
+      withConnection(vocabulary, function(vocabularyConnection) {
+        concept <- getConcepts(vocabularyConnection, "main", conceptId)
+        context <- resolveConceptContext(vocabularyConnection, "main", concept)
+        findPhenotypesForContext(connection, "main", conceptId, context)
+      })
+    })
+  }
+
+  # J45.9 maps to Asthma, which sets 1, 2 and 8 list directly.
+  asthma <- find(9001L)
+  expect_setequal(asthma$conceptSetId, c(1, 2, 8))
+  expect_true(all(asthma$matchType == "Direct"))
+  expect_true(all(asthma$viaConceptId == 317009))
+
+  # J45.0 maps to Childhood asthma: only sets that include descendants of Asthma capture it.
+  allergic <- find(9003L)
+  expect_setequal(allergic$conceptSetId, c(1, 8))
+  expect_true(all(allergic$matchType == "Descendant"))
+  expect_true(all(allergic$viaConceptId == 4051466))
+
+  # A standard concept is unchanged and has no mapping to report.
+  standard <- find(317009L)
+  expect_true(all(is.na(standard$viaConceptId)))
+  expect_equal(nrow(standard), 3)
+})
+
+test_that("concepts server: code mode lists codes and resolves the selected one through its mapping", {
+  pool <- createTestPool()
+  vocabulary <- createVocabularyPool()
+  on.exit({
+    pool::poolClose(pool)
+    pool::poolClose(vocabulary)
+  })
+  loadSeedData(pool)
+
+  testServer(conceptsServer, args = conceptsTestArgs(pool, vocabulary), {
+    session$setInputs(mode = "code", term = "J45", search = 1)
+    expect_setequal(candidates()$conceptId, c(9001, 9003))
+    expect_equal(unique(candidates()$vocabularyId), "ICD10CM")
+    expect_null(selectedConcept())
+
+    session$setInputs(candidateTable_rows_selected = which(candidates()$conceptId == 9003))
+    expect_equal(selectedConcept()$id, 9003)
+    expect_setequal(matches()$phenotypeId, c(1, 8))
+    expect_true(all(matches()$viaConceptId == 4051466))
+    expect_true(all(matches()$viaConceptName == "Childhood asthma"))
+
+    # Letters, digits and dots only.
+    session$setInputs(term = "%%%", search = 2)
     expect_equal(nrow(candidates()), 0)
   })
 })

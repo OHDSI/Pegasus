@@ -38,7 +38,7 @@ conceptsUi <- function(id) {
       shinyWidgets::radioGroupButtons(
         ns("mode"),
         label = NULL,
-        choices = c("Name (fuzzy match)" = "name", "Concept ID (direct)" = "id"),
+        choices = c("Name" = "name", "Concept ID" = "id", "Code" = "code"),
         selected = "name",
         size = "sm",
         justified = TRUE
@@ -66,6 +66,10 @@ conceptsUi <- function(id) {
           class = "small border rounded p-2 mb-0 bg-body-tertiary",
           style = "height: 160px; overflow: auto; white-space: pre-wrap; font-size: 0.75rem;"
         )
+      ),
+      helpText(
+        "Name: fuzzy match on the concept name. Concept ID: direct lookup. Code: concepts whose code starts with the",
+        "text (for example the ICD-10 code J45); a source code is resolved to the standard concepts it maps to."
       ),
       helpText(
         "A concept set contains a concept when it lists the concept itself (Direct), lists an ancestor with",
@@ -232,7 +236,10 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyRunner,
     })
 
     observeEvent(input$mode, {
-      updateTextInput(session, "term", placeholder = if (identical(input$mode, "id")) "e.g. 317009" else "e.g. asthma")
+      updateTextInput(
+        session, "term",
+        placeholder = switch(input$mode, id = "e.g. 317009", code = "e.g. J45 or J45.9", "e.g. asthma")
+      )
     })
 
     # Concept ID mode looks the ID up directly; name mode first resolves a fuzzy match to candidate concepts.
@@ -275,24 +282,40 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyRunner,
           selectedConcept(list(id = conceptId, name = conceptName))
         })
       } else {
+        isCode <- identical(input$mode, "code")
+        kind <- if (isCode) "Code" else "Name"
         if (!hasVocabulary) {
-          appendLog("Name search needs a vocabulary database, which is not configured.")
-          showNotification("Searching by name needs a vocabulary database. Use the Concept ID option instead.", type = "warning")
+          appendLog(sprintf("%s search needs a vocabulary database, which is not configured.", kind))
+          showNotification(
+            sprintf("Searching by %s needs a vocabulary database. Use the Concept ID option instead.", tolower(kind)),
+            type = "warning"
+          )
           resetSearchButton()
           return()
         }
-        appendLog(sprintf("Name search for '%s'", sanitizeSearchTerm(term)))
-        started <- startJob("Name search", "search", list(term = term), function(result) {
-          if (!isTRUE(result$ok)) {
-            showNotification(paste("Unable to search the vocabulary:", result$error), type = "error")
-            return()
+        if (isCode && !nzchar(sanitizeCode(term))) {
+          appendLog(sprintf("'%s' has no usable code characters (letters, digits and dots).", term))
+          showNotification("Enter a code such as J45 or J45.9.", type = "warning")
+          resetSearchButton()
+          return()
+        }
+        appendLog(sprintf("%s search for '%s'", kind, if (isCode) sanitizeCode(term) else sanitizeSearchTerm(term)))
+        started <- startJob(
+          paste(kind, "search"),
+          if (isCode) "searchCode" else "search",
+          if (isCode) list(code = term) else list(term = term),
+          function(result) {
+            if (!isTRUE(result$ok)) {
+              showNotification(paste("Unable to search the vocabulary:", result$error), type = "error")
+              return()
+            }
+            appendLog(sprintf("%d matching concepts.", nrow(result$value)))
+            if (nrow(result$value) == 0) {
+              showNotification("No concepts found.", type = "warning")
+            }
+            candidates(result$value)
           }
-          appendLog(sprintf("%d matching concepts.", nrow(result$value)))
-          if (nrow(result$value) == 0) {
-            showNotification("No concepts found.", type = "warning")
-          }
-          candidates(result$value)
-        })
+        )
       }
       if (!started) {
         resetSearchButton()
@@ -300,7 +323,7 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyRunner,
     }
 
     observeEvent(input$search, {
-      appendLog(sprintf("Search clicked (%s mode).", if (identical(input$mode, "id")) "concept ID" else "name"))
+      appendLog(sprintf("Search clicked (%s mode).", switch(input$mode, id = "concept ID", code = "code", "name")))
       runSearch()
     })
 
@@ -321,6 +344,7 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyRunner,
         data.frame(
           ID = found$conceptId,
           Name = found$conceptName,
+          Code = found$conceptCode,
           Domain = found$domainId,
           Vocabulary = found$vocabularyId,
           Class = found$conceptClassId,
@@ -363,6 +387,11 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyRunner,
         rep(NA_character_, nrow(found))
       } else {
         concepts$conceptName[match(found$itemConceptId, concepts$conceptId)]
+      }
+      found$viaConceptName <- if (is.null(concepts)) {
+        rep(NA_character_, nrow(found))
+      } else {
+        concepts$conceptName[match(found$viaConceptId, concepts$conceptId)]
       }
       phenotypeCount <- length(unique(found$phenotypeId))
       appendLog(sprintf(
@@ -433,17 +462,30 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyRunner,
         as.integer(found$phenotypeId),
         htmltools::htmlEscape(found$phenotypeName)
       )
+      table <- data.frame(
+        Phenotype = openLink,
+        Status = statusBadge(status),
+        "Concept set" = htmltools::htmlEscape(found$conceptSetName),
+        Pertains = htmltools::htmlEscape(found$pertains),
+        Category = htmltools::htmlEscape(found$category),
+        Match = found$matchType,
+        "Listed concept" = htmltools::htmlEscape(itemLabel),
+        check.names = FALSE
+      )
+      # Only a source concept (such as an ICD code) is matched through a standard concept it maps to.
+      if (any(!is.na(found$viaConceptId))) {
+        table[["Via standard concept"]] <- htmltools::htmlEscape(ifelse(
+          is.na(found$viaConceptId),
+          "listed directly",
+          ifelse(
+            is.na(found$viaConceptName),
+            as.character(found$viaConceptId),
+            sprintf("%s (%s)", found$viaConceptName, found$viaConceptId)
+          )
+        ))
+      }
       DT::datatable(
-        data.frame(
-          Phenotype = openLink,
-          Status = statusBadge(status),
-          "Concept set" = htmltools::htmlEscape(found$conceptSetName),
-          Pertains = htmltools::htmlEscape(found$pertains),
-          Category = htmltools::htmlEscape(found$category),
-          Match = found$matchType,
-          "Listed concept" = htmltools::htmlEscape(itemLabel),
-          check.names = FALSE
-        ),
+        table,
         escape = FALSE,
         rownames = FALSE,
         selection = "none",
