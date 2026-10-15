@@ -379,3 +379,27 @@ getPhenotypeDetails <- function(connection, databaseSchema, phenotypeId) {
     atlasBaseUrl = getAtlasBaseUrl(connection, databaseSchema)
   )
 }
+
+# Cohort definitions (including the Circe JSON) of the given phenotypes, for export.
+getCohortExpressions <- function(connection, databaseSchema, phenotypeIds) {
+  if (length(phenotypeIds) == 0) {
+    return(data.frame(
+      cohortDefinitionId = integer(0),
+      cohortDefinitionName = character(0),
+      phenotypeId = integer(0),
+      paSourceType = character(0),
+      valid = integer(0),
+      circeCohortExpression = character(0)
+    ))
+  }
+  sql <- "SELECT cohort_definition_id,
+    cohort_definition_name,
+    phenotype_id,
+    pa_source_type,
+    valid,
+    circe_cohort_expression
+  FROM @database_schema.cohort_definition
+  WHERE phenotype_id IN (@phenotype_ids)
+  ORDER BY phenotype_id, cohort_definition_id;"
+  queryPegasus(connection, databaseSchema, sql, phenotype_ids = as.integer(phenotypeIds))
+}

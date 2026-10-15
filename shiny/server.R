@@ -18,6 +18,11 @@ function(input, output, session) {
   phenotypes <- reactiveVal(emptyPhenotypeSummary())
   evaluations <- reactiveVal(emptyEvaluations())
   selectedPhenotypeId <- reactiveVal(NULL)
+  shortlist <- reactiveVal(integer(0))
+
+  output$shortlistCount <- renderUI({
+    if (length(shortlist()) > 0) tags$span(class = "badge text-bg-primary", length(shortlist()))
+  })
 
   # Reloads everything the Browse and Performance tabs show.
   refreshPhenotypes <- function() {
@@ -44,9 +49,19 @@ function(input, output, session) {
     databaseSchema = config$databaseSchema,
     phenotypes = phenotypes,
     refreshPhenotypes = refreshPhenotypes,
-    selectedId = selectedPhenotypeId
+    selectedId = selectedPhenotypeId,
+    shortlist = shortlist
   )
-  performanceServer("performance", evaluations, onOpenPhenotype = openPhenotype)
+  performanceServer("performance", evaluations, shortlist = shortlist, onOpenPhenotype = openPhenotype)
+  shortlistServer(
+    "shortlist",
+    connectionPool = connectionPool,
+    databaseSchema = config$databaseSchema,
+    phenotypes = phenotypes,
+    evaluations = evaluations,
+    shortlist = shortlist,
+    onOpenPhenotype = openPhenotype
+  )
   createServer(
     "create",
     connectionPool = connectionPool,

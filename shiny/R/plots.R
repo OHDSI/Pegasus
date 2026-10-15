@@ -109,6 +109,7 @@ buildScatter <- function(data,
                          databaseOrder = unique(data$cdmSourceAbbreviation[order(data$databaseId)]),
                          source = "performanceScatter",
                          clickable = TRUE,
+                         selectable = clickable,
                          emptyMessage = "No evaluations match the current filters.") {
   if (nrow(data) == 0) {
     return(emptyPlot(emptyMessage))
@@ -159,13 +160,17 @@ buildScatter <- function(data,
     legend = list(orientation = "h", x = 0, y = 1.1, font = list(color = inkSecondary)),
     hovermode = "closest",
     hoverdistance = 24,
+    dragmode = if (selectable) "select" else "zoom",
     paper_bgcolor = surfaceColor,
     plot_bgcolor = surfaceColor,
     font = chartFont
   )
-  plot <- plotly::config(plot, displaylogo = FALSE)
+  plot <- plotly::config(plot, displaylogo = FALSE, scrollZoom = TRUE)
   if (clickable) {
     plot <- plotly::event_register(plot, "plotly_click")
+  }
+  if (selectable) {
+    plot <- plotly::event_register(plot, "plotly_selected")
   }
   plot
 }

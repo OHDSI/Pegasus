@@ -34,7 +34,7 @@ performanceUi <- function(id) {
     bslib::card(
       bslib::card_body(
         bslib::layout_columns(
-          col_widths = c(2, 2, 3, 5),
+          col_widths = c(2, 2, 3, 3),
           checkboxGroupInput(ns("evalTypes"), "Evaluation type", choices = character(0)),
           checkboxGroupInput(ns("sources"), "Source type", choices = character(0)),
           # Dropdowns attach to the body so the card does not clip them.
@@ -72,10 +72,14 @@ performanceUi <- function(id) {
       bslib::nav_panel(
         "PPV vs sensitivity",
         radioButtons(ns("colorBy"), "Color by", choices = colorByChoices, selected = "source", inline = TRUE),
-        textOutput(ns("summary")),
+        tags$div(
+          class = "d-flex justify-content-between align-items-center",
+          textOutput(ns("summary")),
+          uiOutput(ns("shortlistActions"))
+        ),
         plotly::plotlyOutput(ns("scatter"), height = "560px"),
-        helpText("Click a point to open its phenotype. Only the first three databases get their own color;",
-                 "the rest are grouped as Other databases.")
+        helpText("Click a point to open its phenotype, or drag a box around points to select them for the shortlist.",
+                 "Only the first three databases get their own color; the rest are grouped as Other databases.")
       ),
       bslib::nav_panel(
         "Compare",
@@ -87,7 +91,7 @@ performanceUi <- function(id) {
   )
 }
 
-performanceServer <- function(id, evaluations, onOpenPhenotype) {
+performanceServer <- function(id, evaluations, shortlist, onOpenPhenotype) {
   moduleServer(id, function(input, output, session) {
     scatterSource <- "performanceScatter"
 
@@ -149,6 +153,34 @@ performanceServer <- function(id, evaluations, onOpenPhenotype) {
       req(input$groupBy)
       buildComparison(filtered(), groupBy = input$groupBy, databaseOrder = databaseOrder())
     })
+
+    selectedPhenotypeIds <- reactiveVal(integer(0))
+
+    # A new filter slice redraws the plot, which clears the box selection in the browser.
+    observeEvent(filtered(), selectedPhenotypeIds(integer(0)))
+
+    observeEvent(plotly::event_data("plotly_selected", source = scatterSource), {
+      selected <- plotly::event_data("plotly_selected", source = scatterSource)
+      ids <- if (is.null(selected) || NROW(selected) == 0) integer(0) else suppressWarnings(as.integer(selected$customdata))
+      selectedPhenotypeIds(unique(ids[!is.na(ids)]))
+    }, ignoreNULL = FALSE)
+
+    output$shortlistActions <- renderUI({
+      inView <- length(unique(filtered()$phenotypeId))
+      selected <- length(selectedPhenotypeIds())
+      tags$div(
+        class = "d-flex gap-2",
+        if (selected > 0) {
+          actionButton(session$ns("addSelected"), sprintf("Add %d selected to shortlist", selected),
+                       icon = icon("plus"), class = "btn-primary btn-sm")
+        },
+        actionButton(session$ns("addInView"), sprintf("Add all %d in view to shortlist", inView),
+                     icon = icon("plus"), class = "btn-outline-primary btn-sm")
+      )
+    })
+
+    observeEvent(input$addSelected, notifyAdded(addToShortlist(shortlist, selectedPhenotypeIds())))
+    observeEvent(input$addInView, notifyAdded(addToShortlist(shortlist, filtered()$phenotypeId)))
 
     observeEvent(plotly::event_data("plotly_click", source = scatterSource), {
       clicked <- plotly::event_data("plotly_click", source = scatterSource)

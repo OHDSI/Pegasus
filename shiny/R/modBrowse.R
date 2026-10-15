@@ -60,7 +60,11 @@ browseUi <- function(id) {
         ),
         bslib::card(
           full_screen = TRUE,
-          bslib::card_header(textOutput(ns("count"), inline = TRUE)),
+          bslib::card_header(
+            class = "d-flex justify-content-between align-items-center",
+            textOutput(ns("count"), inline = TRUE),
+            actionButton(ns("addAll"), "Add all shown to shortlist", icon = icon("plus"), class = "btn-outline-primary btn-sm")
+          ),
           DT::DTOutput(ns("table"))
         )
       )
@@ -69,7 +73,7 @@ browseUi <- function(id) {
   )
 }
 
-browseServer <- function(id, connectionPool, databaseSchema, phenotypes, refreshPhenotypes, selectedId) {
+browseServer <- function(id, connectionPool, databaseSchema, phenotypes, refreshPhenotypes, selectedId, shortlist) {
   moduleServer(id, function(input, output, session) {
     tableProxy <- DT::dataTableProxy("table")
 
@@ -109,13 +113,27 @@ browseServer <- function(id, connectionPool, databaseSchema, phenotypes, refresh
           "Best sensitivity (%)" = toPercent(data$bestSensitivity),
           Creator = htmltools::htmlEscape(data$creator),
           Created = formatTimestamp(data$timeCreated),
+          Shortlist = shortlistButton(session$ns("toggleShortlist"), data$phenotypeId, data$phenotypeId %in% shortlist()),
           check.names = FALSE
         ),
         escape = FALSE,
         selection = "single",
         rownames = FALSE,
-        options = list(pageLength = 25, order = list(list(0, "asc")))
+        # The table re-renders when the shortlist changes; keep page, sort and search for this browser session.
+        options = list(pageLength = 25, order = list(list(0, "asc")), stateSave = TRUE, stateDuration = -1)
       )
+    })
+
+    observeEvent(input$toggleShortlist, {
+      toggleShortlist(shortlist, input$toggleShortlist)
+    })
+
+    # table_rows_all holds the rows left after the table's own search, so this adds exactly what is shown.
+    observeEvent(input$addAll, {
+      data <- filtered()
+      rowsShown <- input$table_rows_all
+      rowsShown <- rowsShown[rowsShown <= nrow(data)]
+      notifyAdded(addToShortlist(shortlist, data$phenotypeId[rowsShown]))
     })
 
     observeEvent(input$table_rows_selected, {
@@ -144,6 +162,7 @@ browseServer <- function(id, connectionPool, databaseSchema, phenotypes, refresh
       databaseSchema = databaseSchema,
       phenotypes = phenotypes,
       selectedId = selectedId,
+      shortlist = shortlist,
       onBack = backToList
     )
   })

@@ -113,7 +113,8 @@ test_that("browse server filters by status and creator and selects a phenotype",
       databaseSchema = "main",
       phenotypes = phenotypes,
       refreshPhenotypes = function() NULL,
-      selectedId = reactiveVal(NULL)
+      selectedId = reactiveVal(NULL),
+      shortlist = reactiveVal(integer(0))
     ),
     {
       session$setInputs(status = statusLevels, creator = NULL)
