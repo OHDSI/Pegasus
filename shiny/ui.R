@@ -19,7 +19,8 @@ bslib::page_navbar(
   id = "mainNav",
   theme = bslib::bs_theme(version = 5),
   header = tags$head(tags$link(rel = "icon", type = "image/png", href = "LogoSmall.png")),
-  bslib::nav_panel("Search", searchUi("search")),
+  bslib::nav_panel("Browse", browseUi("browse")),
+  bslib::nav_panel("Performance", performanceUi("performance")),
   bslib::nav_panel("New phenotype", createUi("create")),
   bslib::nav_spacer(),
   bslib::nav_item(tags$img(src = "LogoTiny.png", height = "40px", alt = "Pegasus logo"))

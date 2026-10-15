@@ -1,0 +1,137 @@
+# Copyright 2026 Observational Health Data Sciences and Informatics
+#
+# This file is part of Pegasus
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+
+performanceUi <- function(id) {
+  ns <- NS(id)
+  tagList(
+    bslib::card(
+      bslib::card_body(
+        bslib::layout_columns(
+          col_widths = c(3, 3, 3, 3),
+          checkboxGroupInput(ns("evalTypes"), "Evaluation type", choices = character(0)),
+          checkboxGroupInput(ns("sources"), "Source type", choices = character(0)),
+          selectInput(ns("databases"), "Databases (empty shows all)", choices = character(0), multiple = TRUE),
+          bslib::input_switch(ns("showCi"), "Show 95% confidence intervals", value = FALSE)
+        ),
+        bslib::layout_columns(
+          col_widths = c(3, 3),
+          sliderInput(ns("minPpv"), "Minimum PPV (%)", min = 0, max = 100, value = 0, step = 5),
+          sliderInput(ns("minSensitivity"), "Minimum sensitivity (%)", min = 0, max = 100, value = 0, step = 5)
+        )
+      )
+    ),
+    bslib::navset_card_tab(
+      bslib::nav_panel(
+        "PPV vs sensitivity",
+        radioButtons(ns("colorBy"), "Color by", choices = colorByChoices, selected = "source", inline = TRUE),
+        textOutput(ns("summary")),
+        plotly::plotlyOutput(ns("scatter"), height = "560px"),
+        helpText("Click a point to open its phenotype. Only the first three databases get their own color;",
+                 "the rest are grouped as Other databases.")
+      ),
+      bslib::nav_panel(
+        "Compare",
+        radioButtons(ns("groupBy"), "Group by", choices = groupByChoices, selected = "database", inline = TRUE),
+        plotly::plotlyOutput(ns("comparison"), height = "520px")
+      ),
+      bslib::nav_panel("Table", DT::DTOutput(ns("table")))
+    )
+  )
+}
+
+performanceServer <- function(id, evaluations, onOpenPhenotype) {
+  moduleServer(id, function(input, output, session) {
+    scatterSource <- "performanceScatter"
+
+    databaseOrder <- reactive({
+      data <- evaluations()
+      unique(data$cdmSourceAbbreviation[order(data$databaseId)])
+    })
+
+    observeEvent(evaluations(), {
+      data <- evaluations()
+      evalTypes <- orderedLevels(data$evaluationType, evaluationTypeOrder)
+      sources <- orderedLevels(data$paSourceType, sourceTypeOrder)
+      updateCheckboxGroupInput(session, "evalTypes", choices = evalTypes, selected = evalTypes)
+      updateCheckboxGroupInput(session, "sources", choices = sources, selected = sources)
+      updateSelectInput(session, "databases", choices = databaseOrder(), selected = character(0))
+    })
+
+    filtered <- reactive({
+      data <- evaluations()
+      keep <- data$evaluationType %in% input$evalTypes &
+        data$paSourceType %in% input$sources &
+        data$ppv >= input$minPpv / 100 &
+        data$sensitivity >= input$minSensitivity / 100
+      if (length(input$databases) > 0) {
+        keep <- keep & data$cdmSourceAbbreviation %in% input$databases
+      }
+      data[keep, , drop = FALSE]
+    })
+
+    output$summary <- renderText({
+      data <- filtered()
+      sprintf(
+        "%s evaluations of %s phenotypes",
+        format(nrow(data), big.mark = ","),
+        format(length(unique(data$phenotypeId)), big.mark = ",")
+      )
+    })
+
+    output$scatter <- plotly::renderPlotly({
+      req(input$colorBy)
+      buildScatter(
+        filtered(),
+        colorBy = input$colorBy,
+        showCi = isTRUE(input$showCi),
+        databaseOrder = databaseOrder(),
+        source = scatterSource
+      )
+    })
+
+    output$comparison <- plotly::renderPlotly({
+      req(input$groupBy)
+      buildComparison(filtered(), groupBy = input$groupBy, databaseOrder = databaseOrder())
+    })
+
+    observeEvent(plotly::event_data("plotly_click", source = scatterSource), {
+      clicked <- plotly::event_data("plotly_click", source = scatterSource)
+      phenotypeId <- suppressWarnings(as.integer(clicked$customdata[1]))
+      if (length(phenotypeId) == 1 && !is.na(phenotypeId)) {
+        onOpenPhenotype(phenotypeId)
+      }
+    })
+
+    output$table <- DT::renderDT({
+      data <- filtered()
+      DT::datatable(
+        data.frame(
+          Phenotype = data$phenotypeName,
+          Cohort = data$cohortDefinitionName,
+          Source = data$paSourceType,
+          Database = data$cdmSourceAbbreviation,
+          "Evaluation type" = data$evaluationType,
+          Subjects = data$cohortSubjects,
+          "PPV (%)" = toPercent(data$ppv),
+          "Sensitivity (%)" = toPercent(data$sensitivity),
+          check.names = FALSE
+        ),
+        rownames = FALSE,
+        selection = "none",
+        options = list(pageLength = 25)
+      )
+    })
+  })
+}

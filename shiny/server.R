@@ -15,19 +15,17 @@
 # limitations under the License.
 
 function(input, output, session) {
-  phenotypes <- reactiveVal(data.frame(
-    phenotypeId = integer(0),
-    phenotypeName = character(0),
-    clinicalDefinition = character(0),
-    creator = character(0),
-    timeCreated = as.POSIXct(character(0))
-  ))
+  phenotypes <- reactiveVal(emptyPhenotypeSummary())
+  evaluations <- reactiveVal(emptyEvaluations())
+  selectedPhenotypeId <- reactiveVal(NULL)
 
+  # Reloads everything the Browse and Performance tabs show.
   refreshPhenotypes <- function() {
     tryCatch(
-      phenotypes(withConnection(connectionPool, function(connection) {
-        getPhenotypes(connection, config$databaseSchema)
-      })),
+      withConnection(connectionPool, function(connection) {
+        phenotypes(getPhenotypeSummary(connection, config$databaseSchema))
+        evaluations(getEvaluations(connection, config$databaseSchema))
+      }),
       error = function(e) {
         showNotification(paste("Unable to load phenotypes:", conditionMessage(e)), type = "error")
       }
@@ -35,7 +33,20 @@ function(input, output, session) {
   }
   refreshPhenotypes()
 
-  searchServer("search", phenotypes, refreshPhenotypes)
+  openPhenotype <- function(phenotypeId) {
+    selectedPhenotypeId(phenotypeId)
+    bslib::nav_select("mainNav", "Browse")
+  }
+
+  browseServer(
+    "browse",
+    connectionPool = connectionPool,
+    databaseSchema = config$databaseSchema,
+    phenotypes = phenotypes,
+    refreshPhenotypes = refreshPhenotypes,
+    selectedId = selectedPhenotypeId
+  )
+  performanceServer("performance", evaluations, onOpenPhenotype = openPhenotype)
   createServer(
     "create",
     connectionPool = connectionPool,

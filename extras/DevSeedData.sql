@@ -65,7 +65,7 @@ INSERT INTO @database_schema.database_meta_data (database_id, cdm_source_name, c
   (2, 'Dev EHR Database', 'DEVEHR', '2025-12-31', 'v5.4', 'v5.0 24-JUN-2025'),
   (3, 'Dev Registry', 'DEVREG', '2024-12-31', 'v5.3', 'v5.0 22-DEC-2024');
 
-INSERT INTO @database_schema.atlas_instance (base_url) VALUES ('https://atlas.example.org/WebAPI');
+INSERT INTO @database_schema.atlas_instance (base_url) VALUES ('https://atlas.example.org/atlas');
 
 INSERT INTO @database_schema.concept_set_person_count (concept_set_id, database_id, condition_persons, procedure_persons, drug_persons, device_persons, measurement_persons, observation_persons, visit_persons, overall_persons) VALUES
   (1, 1, 167315, 74362, 130134, 3718, 92953, 55771, 148724, 185906),

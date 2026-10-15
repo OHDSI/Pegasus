@@ -17,3 +17,13 @@ createTestPool <- function() {
   })
   pool
 }
+
+# Loads the development seed data (see extras/DevSeedData.sql) into the test database.
+loadSeedData <- function(pool) {
+  sql <- paste(readLines(file.path("..", "..", "..", "extras", "DevSeedData.sql"), encoding = "UTF-8"), collapse = "\n")
+  sql <- gsub("@database_schema", "main", sql, fixed = TRUE)
+  withConnection(pool, function(connection) {
+    DatabaseConnector::executeSql(connection, sql, progressBar = FALSE, reportOverallTime = FALSE)
+  })
+  invisible(pool)
+}
