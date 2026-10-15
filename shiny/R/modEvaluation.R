@@ -314,7 +314,7 @@ evaluationServer <- function(id, connectionPool, databaseSchema, userName, pheno
     })
 
     observeEvent(input$newPhenotype, {
-      message("[evaluation] switching to New phenotype")
+      logEvent("evaluation: switching to the New phenotype tab")
       onNewPhenotype()
     })
 

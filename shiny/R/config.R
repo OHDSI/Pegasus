@@ -14,6 +14,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Written as an immediate warning: it prints at once even while the app is busy, and warnings are
+# reliably shown in deployment logs where plain messages were not.
+logEvent <- function(...) {
+  warning("[pegasus] ", ..., call. = FALSE, immediate. = TRUE)
+}
+
 getEnv <- function(name, required = TRUE) {
   value <- Sys.getenv(name)
   if (required && !nzchar(value)) {

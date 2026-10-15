@@ -34,7 +34,7 @@ onStop(function() {
 
 vocabularyPool <- NULL
 if (is.null(config$vocabulary)) {
-  message("No vocabulary database configured (PEGASUS_VOCAB_DBMS is not set); concept search is limited to concept IDs.")
+  logEvent("No vocabulary database configured (PEGASUS_VOCAB_DBMS is not set); concept search is limited to concept IDs.")
 } else {
   ensureJdbcDriver(config$vocabulary$dbms)
   vocabularyPool <- pool::poolCreate(

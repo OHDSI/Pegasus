@@ -90,19 +90,23 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyPool, v
       } else if (!hasVocabulary) {
         showNotification("Searching by name needs a vocabulary database. Enter a concept ID instead.", type = "warning")
       } else {
-        message(sprintf("[concepts] searching the vocabulary for '%s'", sanitizeSearchTerm(term)))
         started <- Sys.time()
+        elapsed <- function() as.numeric(Sys.time() - started, units = "secs")
+        logEvent(sprintf("concept search for '%s': waiting for a vocabulary connection", sanitizeSearchTerm(term)))
         found <- withProgress(message = "Searching the vocabulary...", value = NULL, {
           tryCatch(
-            withConnection(vocabularyPool, function(connection) searchConcepts(connection, vocabularySchema, term)),
+            withConnection(vocabularyPool, function(connection) {
+              logEvent(sprintf("concept search: connection ready after %.1f s, running the query", elapsed()))
+              searchConcepts(connection, vocabularySchema, term)
+            }),
             error = function(e) {
-              message("[concepts] vocabulary search failed: ", conditionMessage(e))
+              logEvent("concept search failed after ", sprintf("%.1f s: ", elapsed()), conditionMessage(e))
               showNotification(paste("Unable to search the vocabulary:", conditionMessage(e)), type = "error")
               emptyConcepts()
             }
           )
         })
-        message(sprintf("[concepts] found %d concepts in %.1f seconds", nrow(found), as.numeric(Sys.time() - started, units = "secs")))
+        logEvent(sprintf("concept search: %d concepts found after %.1f s", nrow(found), elapsed()))
         if (nrow(found) == 0) {
           showNotification("No concepts found.", type = "warning")
         }
@@ -111,7 +115,7 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyPool, v
     }
 
     observeEvent(input$search, {
-      message(sprintf("[concepts] search clicked (vocabulary configured: %s)", hasVocabulary))
+      logEvent(sprintf("concept search clicked (vocabulary configured: %s)", hasVocabulary))
       tryCatch(
         runSearch(),
         finally = updateActionButton(session, "search", label = "Search", icon = icon("magnifying-glass"))
