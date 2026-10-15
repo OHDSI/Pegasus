@@ -63,7 +63,7 @@ createUi <- function(id) {
 }
 
 createServer <- function(id, connectionPool, databaseSchema, llmConfig, systemPrompt, userName, phenotypes, refreshPhenotypes,
-                         cloneSource = reactiveVal(NULL)) {
+                         cloneSource = reactiveVal(NULL), onSaved = function(phenotypeId) NULL) {
   moduleServer(id, function(input, output, session) {
     client <- NULL
     toolCalledThisTurn <- FALSE
@@ -206,23 +206,21 @@ createServer <- function(id, connectionPool, databaseSchema, llmConfig, systemPr
         return()
       }
       parentPhenotypeId <- if (is.null(cloneSource())) NA_integer_ else cloneSource()$id
-      saved <- tryCatch(
-        {
-          withConnection(connectionPool, function(connection) {
-            savePhenotype(connection, databaseSchema, input$saveName, input$definition, userName,
-                          parentPhenotypeId = parentPhenotypeId)
-          })
-          TRUE
-        },
+      savedId <- tryCatch(
+        withConnection(connectionPool, function(connection) {
+          savePhenotype(connection, databaseSchema, input$saveName, input$definition, userName,
+                        parentPhenotypeId = parentPhenotypeId)
+        }),
         error = function(e) {
           showNotification(conditionMessage(e), type = "error")
-          FALSE
+          NULL
         }
       )
-      if (saved) {
+      if (!is.null(savedId)) {
         showNotification(sprintf("Saved phenotype '%s'.", trimws(input$saveName)), type = "message")
         refreshPhenotypes()
         reset()
+        onSaved(savedId)
       }
     })
   })

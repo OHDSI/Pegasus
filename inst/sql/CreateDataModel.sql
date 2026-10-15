@@ -9,6 +9,7 @@ DROP TABLE IF EXISTS @database_schema.phenotype_to_concept_set;
 DROP TABLE IF EXISTS @database_schema.cohort_definition;
 DROP TABLE IF EXISTS @database_schema.cohort_definition_to_concept_set;
 DROP TABLE IF EXISTS @database_schema.cohort_definition_evaluation;
+DROP TABLE IF EXISTS @database_schema.evaluation_request;
 DROP TABLE IF EXISTS @database_schema.database_meta_data;
 DROP TABLE IF EXISTS @database_schema.atlas_instance;
 
@@ -126,6 +127,18 @@ CREATE TABLE @database_schema.cohort_definition_evaluation (
   sensitivity_lb FLOAT NOT NULL,
   sensitivity_ub FLOAT NOT NULL,
   evaluation_type VARCHAR -- 'keeper + llm', 'phevaluator', or 'keeper + human'
+);
+
+-- Evaluation runs requested through the app. A request is complete once a matching
+-- cohort_definition_evaluation row (same cohort, database and evaluation type) exists.
+CREATE TABLE @database_schema.evaluation_request (
+  evaluation_request_id INT PRIMARY KEY,
+  cohort_definition_id INT NOT NULL,
+  database_id INT NOT NULL,
+  evaluation_type VARCHAR NOT NULL, -- 'keeper + llm', 'phevaluator', or 'keeper + human'
+  requested_by VARCHAR NOT NULL,
+  time_requested DATETIME NOT NULL,
+  notes VARCHAR
 );
 
 CREATE TABLE @database_schema.database_meta_data (

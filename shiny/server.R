@@ -20,6 +20,8 @@ function(input, output, session) {
   selectedPhenotypeId <- reactiveVal(NULL)
   shortlist <- reactiveVal(integer(0))
   cloneSource <- reactiveVal(NULL)
+  returnToEvaluation <- reactiveVal(FALSE)
+  evaluationPreselect <- reactiveVal(NULL)
 
   output$shortlistCount <- renderUI({
     if (length(shortlist()) > 0) tags$span(class = "badge text-bg-primary", length(shortlist()))
@@ -61,6 +63,28 @@ function(input, output, session) {
     bslib::nav_select("mainNav", "New phenotype", session = session)
   }
 
+  # The Evaluation tab can send the user to create a phenotype and brings them back with it selected.
+  newPhenotypeForEvaluation <- function() {
+    returnToEvaluation(TRUE)
+    cloneSource(NULL)
+    bslib::nav_select("mainNav", "New phenotype", session = session)
+  }
+
+  phenotypeSaved <- function(phenotypeId) {
+    if (returnToEvaluation()) {
+      returnToEvaluation(FALSE)
+      evaluationPreselect(list(id = phenotypeId, nonce = as.numeric(Sys.time())))
+      bslib::nav_select("mainNav", "Evaluation", session = session)
+    }
+  }
+
+  # Leaving for any other tab abandons the round trip, so a later unrelated save does not jump back.
+  observeEvent(input$mainNav, {
+    if (!input$mainNav %in% c("Evaluation", "New phenotype")) {
+      returnToEvaluation(FALSE)
+    }
+  })
+
   browseServer(
     "browse",
     connectionPool = connectionPool,
@@ -72,6 +96,16 @@ function(input, output, session) {
     onRefine = refinePhenotype
   )
   performanceServer("performance", evaluations, shortlist = shortlist, onOpenPhenotype = openPhenotype)
+  evaluationServer(
+    "evaluation",
+    connectionPool = connectionPool,
+    databaseSchema = config$databaseSchema,
+    userName = getUserName(session),
+    phenotypes = phenotypes,
+    refreshPhenotypes = refreshPhenotypes,
+    preselect = evaluationPreselect,
+    onNewPhenotype = newPhenotypeForEvaluation
+  )
   conceptsServer(
     "concepts",
     connectionPool = connectionPool,
@@ -100,6 +134,7 @@ function(input, output, session) {
     userName = getUserName(session),
     phenotypes = phenotypes,
     refreshPhenotypes = refreshPhenotypes,
-    cloneSource = cloneSource
+    cloneSource = cloneSource,
+    onSaved = phenotypeSaved
   )
 }

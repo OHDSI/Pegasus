@@ -21,6 +21,7 @@ bslib::page_navbar(
   header = tags$head(tags$link(rel = "icon", type = "image/png", href = "LogoSmall.png")),
   bslib::nav_panel("Browse", browseUi("browse")),
   bslib::nav_panel("New phenotype", createUi("create")),
+  bslib::nav_panel("Evaluation", evaluationUi("evaluation")),
   bslib::nav_panel("Performance", performanceUi("performance")),
   bslib::nav_panel("Concepts", conceptsUi("concepts")),
   bslib::nav_panel(
