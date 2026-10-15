@@ -136,10 +136,13 @@ createServer <- function(id, connectionPool, databaseSchema, llmConfig, systemPr
       if (!keepClone) {
         cloneSource(NULL)
       }
+      # The chat only exists once a conversation has started, which is not the case when refining straight away.
+      if (!is.null(client)) {
+        shinychat::chat_clear("chat")
+      }
       client <<- NULL
       submittedDefinition(NULL)
       similarNames(character(0))
-      shinychat::chat_clear("chat")
       updateTextInput(session, "name", value = "")
       updateTextAreaInput(session, "initialDefinition", value = initialDefinition)
       updateTextInput(session, "saveName", value = "")

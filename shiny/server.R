@@ -41,7 +41,7 @@ function(input, output, session) {
 
   openPhenotype <- function(phenotypeId) {
     selectedPhenotypeId(phenotypeId)
-    bslib::nav_select("mainNav", "Browse")
+    bslib::nav_select("mainNav", "Browse", session = session)
   }
 
   # Opens the New phenotype wizard seeded with an existing phenotype's definition. The nonce makes
@@ -58,7 +58,7 @@ function(input, output, session) {
       definition = row$clinicalDefinition,
       nonce = as.numeric(Sys.time())
     ))
-    bslib::nav_select("mainNav", "New phenotype")
+    bslib::nav_select("mainNav", "New phenotype", session = session)
   }
 
   browseServer(
