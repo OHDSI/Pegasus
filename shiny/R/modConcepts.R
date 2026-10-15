@@ -149,8 +149,8 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyPool, v
       invisible(NULL)
     }
 
-    # The first check happens after the page is shown, so a slow connection does not delay the first render.
-    session$onFlushed(function() checkVocabulary(), once = TRUE)
+    # Never checked automatically: R runs one thing at a time, so a vocabulary connection that hangs at page load
+    # would freeze the whole session. Use the refresh icon to check it.
     observeEvent(input$checkVocabulary, checkVocabulary())
 
     output$connection <- renderUI({
@@ -158,7 +158,7 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyPool, v
       display <- switch(
         status$state,
         none = list(color = "#898781", label = "Vocabulary not configured"),
-        unchecked = list(color = "#898781", label = "Vocabulary connection not checked yet"),
+        unchecked = list(color = "#898781", label = "Vocabulary not checked yet (use the refresh icon)"),
         connected = list(color = "#0ca30c", label = "Vocabulary connected"),
         error = list(color = "#d03b3b", label = "Vocabulary connection failed")
       )

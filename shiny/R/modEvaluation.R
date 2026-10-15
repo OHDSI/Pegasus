@@ -209,13 +209,13 @@ evaluationUi <- function(id) {
     # A fixed height keeps the cards from being squeezed by the page, which would clip their contents.
     bslib::layout_columns(
       col_widths = c(7, 5),
-      height = "960px",
+      height = "670px",
       fill = FALSE,
       bslib::card(
         bslib::card_header("1. Cohort definition"),
         textInput(ns("cohortName"), "Cohort name", width = "100%"),
         textAreaInput(
-          ns("json"), "Circe JSON", rows = 30, width = "100%",
+          ns("json"), "Circe JSON", rows = 18, width = "100%",
           placeholder = "Paste the cohort definition exported from Atlas (Export > JSON)."
         ),
         uiOutput(ns("jsonStatus")),
@@ -240,7 +240,7 @@ evaluationUi <- function(id) {
         bslib::card(
           bslib::card_header("3. Run settings"),
           checkboxGroupInput(ns("databases"), "Databases", choices = character(0)),
-          checkboxGroupInput(ns("evalTypes"), "Evaluation type", choices = evaluationTypeOrder, selected = evaluationTypeOrder[1]),
+          checkboxGroupInput(ns("evalTypes"), "Evaluation type", choices = evaluationTypeOrder, selected = evaluationTypeOrder[1], inline = TRUE),
           textAreaInput(ns("notes"), "Notes (optional)", rows = 2, width = "100%"),
           uiOutput(ns("userNote")),
           actionButton(ns("queue"), "Queue evaluation", icon = icon("paper-plane"), class = "btn-success")
