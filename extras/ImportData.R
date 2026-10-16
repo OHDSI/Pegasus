@@ -11,6 +11,17 @@ connectionDetails <- DatabaseConnector::createConnectionDetails(
 
 databaseSchema <- Sys.getenv("PEGASUS_DATABASE_SCHEMA")
 
+cdmConnectionDetails <- DatabaseConnector::createConnectionDetails(
+  dbms = "spark",
+  connectionString = keyring::key_get("databricksConnectionString"),
+  user = "token",
+  password = keyring::key_get("databricksToken")
+)
+cdmDatabaseSchemas <- c("optum_extended_dod.cdm_optum_extended_dod_v4020",
+                        "optum_ehr.cdm_optum_ehr_v4154")
+
+options(sqlRenderTempEmulationSchema = "scratch.scratch_mschuemi")
+
 # Create data model ----------------------------------------------------------------------------------------------------
 connection <- DatabaseConnector::connect(connectionDetails)
 # DatabaseConnector::executeSql(connection, "CREATE SCHEMA pegasus;")
@@ -217,14 +228,6 @@ DatabaseConnector::insertTable(
 )
 
 # Upload database_meta_data --------------------------------------
-cdmConnectionDetails <- DatabaseConnector::createConnectionDetails(
-  dbms = "spark",
-  connectionString = keyring::key_get("databricksConnectionString"),
-  user = "token",
-  password = keyring::key_get("databricksToken")
-)
-cdmDatabaseSchemas <- c("optum_extended_dod.cdm_optum_extended_dod_v4020",
-                        "optum_ehr.cdm_optum_ehr_v4154")
 cdmConnection <- DatabaseConnector::connect(cdmConnectionDetails)
 databaseMetaDatas <- list()
 for (i in seq_along(cdmDatabaseSchemas)) {
@@ -306,6 +309,302 @@ DatabaseConnector::insertTable(
   camelCaseToSnakeCase = TRUE
 )
 
+# Upload concept_set_person_count ------------------------------------------------------
+getCounts <- function(conceptSetSql, connection, cdmDatabaseSchema) {
+  sql <- "
+    DROP TABLE IF EXISTS #concept_set;
+
+    SELECT cs.concept_id,
+      concept.domain_id
+    INTO #concept_set
+    FROM (
+      @concept_set_sql
+    ) cs
+    INNER JOIN @cdm_database_schema.concept
+      ON cs.concept_id = concept.concept_id;
+  "
+  DatabaseConnector::renderTranslateExecuteSql(
+    connection = connection,
+    sql = sql,
+    concept_set_sql = SqlRender::render(conceptSetSql, vocabulary_database_schema = cdmDatabaseSchema),
+    cdm_database_schema = cdmDatabaseSchema,
+    progressBar = FALSE,
+    reportOverallTime = FALSE
+  )
+  sql <- "
+    SELECT DISTINCT domain_id
+    FROM #concept_set ;
+  "
+  domains <- DatabaseConnector::renderTranslateQuerySql(
+    connection = connection,
+    sql = sql,
+    snakeCaseToCamelCase = TRUE
+  )[, 1]
+  sql <- "
+    WITH domain_persons AS (
+    {@has_condition} ? {
+      SELECT DISTINCT
+        person_id,
+        'Condition' AS domain_id
+      FROM @cdm_database_schema.condition_occurrence
+      WHERE condition_concept_id IN (
+        SELECT concept_id
+        FROM #concept_set
+      )
+    }
+    {@has_procedure} ? {
+      {@has_condition} ? {
+      UNION ALL
+      }
+      SELECT DISTINCT
+        person_id,
+        'Procedure' AS domain_id
+      FROM @cdm_database_schema.procedure_occurrence
+      WHERE procedure_concept_id IN (
+       SELECT concept_id
+       FROM #concept_set
+      )
+    }
+    {@has_drug} ?{
+      {@has_condition | @has_procedure} ? {
+      UNION ALL
+      }
+      SELECT DISTINCT
+       person_id,
+        'Drug' AS domain_id
+      FROM @cdm_database_schema.drug_exposure
+      WHERE drug_concept_id IN (
+       SELECT concept_id
+       FROM #concept_set
+      )
+    }
+    {@has_device} ? {
+      {@has_condition | @has_procedure | @has_drug} ? {
+      UNION ALL
+      }
+      SELECT DISTINCT
+       person_id,
+        'Device' AS domain_id
+      FROM @cdm_database_schema.device_exposure
+      WHERE device_concept_id IN (
+       SELECT concept_id
+       FROM #concept_set
+      )
+    }
+    {@has_measurement} ? {
+      {@has_condition | @has_procedure | @has_drug | @has_device} ? {
+      UNION ALL
+      }
+      SELECT DISTINCT
+       person_id,
+        'Measurement' AS domain_id
+      FROM @cdm_database_schema.measurement
+      WHERE measurement_concept_id IN (
+        SELECT concept_id
+        FROM #concept_set
+      )
+    }
+    {@has_observation} ? {
+      {@has_condition | @has_procedure | @has_drug | @has_device | @has_measurement} ? {
+      UNION ALL
+      }
+      SELECT DISTINCT
+       person_id,
+       'Observation' AS domain_id
+      FROM @cdm_database_schema.observation
+      WHERE observation_concept_id IN (
+        SELECT concept_id
+        FROM #concept_set
+      )
+    }
+    {@has_visit} ? {
+      {@has_condition | @has_procedure | @has_drug | @has_device | @has_measurement | @has_observation} ? {
+      UNION ALL
+      }
+      SELECT DISTINCT
+       person_id,
+       'Visit' AS domain_id
+      FROM @cdm_database_schema.visit_occurrence
+      WHERE visit_concept_id IN (
+        SELECT concept_id
+        FROM #concept_set
+      )
+    }
+    )
+    SELECT
+    {@has_condition} ? {
+      COUNT(DISTINCT CASE
+        WHEN domain_id = 'Condition' THEN person_id
+      END) AS condition_persons,
+    }
+    {@has_procedure} ? {
+      COUNT(DISTINCT CASE
+        WHEN domain_id = 'Procedure' THEN person_id
+      END) AS procedure_persons,
+    }
+    {@has_drug} ? {
+      COUNT(DISTINCT CASE
+        WHEN domain_id = 'Drug' THEN person_id
+      END) AS drug_persons,
+    }
+    {@has_device} ? {
+      COUNT(DISTINCT CASE
+        WHEN domain_id = 'Device' THEN person_id
+      END) AS device_persons,
+    }
+    {@has_measurement} ? {
+      COUNT(DISTINCT CASE
+        WHEN domain_id = 'Measurement' THEN person_id
+      END) AS measurement_persons,
+    }
+    {@has_observation} ? {
+      COUNT(DISTINCT CASE
+        WHEN domain_id = 'Observation' THEN person_id
+      END) AS observation_persons,
+    }
+    {@has_visit} ? {
+      COUNT(DISTINCT CASE
+        WHEN domain_id = 'Visit' THEN person_id
+      END) AS visit_persons,
+    }
+      COUNT(DISTINCT person_id) AS overall_persons
+      FROM domain_persons;
+  "
+  counts <- DatabaseConnector::renderTranslateQuerySql(
+    connection = connection,
+    sql = sql,
+    cdm_database_schema = cdmDatabaseSchema,
+    has_condition = "Condition" %in% domains,
+    has_procedure = "Procedure" %in% domains,
+    has_drug = "Drug" %in% domains,
+    has_device = "Device" %in% domains,
+    has_measurement = "Measurement" %in% domains,
+    has_observation = "Observation" %in% domains,
+    has_visit = "Visit" %in% domains,
+    snakeCaseToCamelCase = TRUE
+  )
+  return(counts)
+}
+cdmConnection <- DatabaseConnector::connect(cdmConnectionDetails)
+priorCounts <- readRDS("e:/temp/conceptSetPersonCounts.rds")
+fullConceptSetIds <- priorCounts |>
+  group_by(conceptSetId) |>
+  summarise(n = n()) |>
+  filter(n == 2) |>
+  pull(conceptSetId)
+remainingConceptSets <- conceptSets |>
+  filter(!conceptSetId %in% fullConceptSetIds)
+priorCounts <- priorCounts |>
+  filter(!conceptSetId %in% fullConceptSetIds)
+
+conceptSetPersonCounts <- list()
+pb <- txtProgressBar(max = nrow(remainingConceptSets), style = 3)
+for (i in seq_len(nrow(remainingConceptSets))) {
+  sql <- CirceR::buildConceptSetQuery(remainingConceptSets$circeConceptSetExpression[i])
+  for (j in seq_along(cdmDatabaseSchemas)) {
+    counts <- getCounts(conceptSetSql = sql,
+              connection = cdmConnection,
+              cdmDatabaseSchema = cdmDatabaseSchemas[j])
+    conceptSetPersonCounts[[length(conceptSetPersonCounts) + 1]] <- counts |>
+      mutate(conceptSetId = remainingConceptSets$conceptSetId[i],
+             databaseId = databaseMetaDatas$databaseId[databaseMetaDatas$cdmDatabaseSchema == cdmDatabaseSchemas[j]])
+  }
+  setTxtProgressBar(pb, i)
+}
+close(pb)
+
+conceptSetPersonCounts <- bind_rows(conceptSetPersonCounts)
+saveRDS(conceptSetPersonCounts, "e:/temp/conceptSetPersonCounts.rds")
+
+# CREATE TABLE @database_schema.concept_set_person_count (
+#   concept_set_id INT NOT NULL,
+#   database_id INT NOT NULL,
+#   condition_persons INT NOT NULL,
+#   procedure_persons INT NOT NULL,
+#   drug_persons INT NOT NULL,
+#   device_persons INT NOT NULL,
+#   measurement_persons INT NOT NULL,
+#   observation_persons INT NOT NULL,
+#   visit_persons INT NOT NULL,
+#   overall_persons INT NOT NULL
+# );
 
 
 DatabaseConnector::disconnect(connection)
+
+# Upload draft_concept_set_target ------------------------------------------
+draftConceptSetTarget <- readr::read_csv("../largescalephentest/TargetsAsConceptsCleaned.csv")
+draftConceptSetTarget <- draftConceptSetTarget |>
+  inner_join(definitions |>
+               select(phenotype = "phenotypeName", "phenotypeId"),
+             by = join_by(phenotype)) |>
+  transmute(
+    phenotypeId,
+    pertains = target,
+    category = stringr::str_to_sentence(gsub("_", " ", category)),
+    term,
+    conceptId,
+    conceptName,
+    domainId,
+    conceptClassId,
+    vocabularyId,
+    matchType = match
+  )
+DatabaseConnector::insertTable(
+  connection = connection,
+  databaseSchema = databaseSchema,
+  tableName = "draft_concept_set_target",
+  data = draftConceptSetTarget,
+  dropTableIfExists = FALSE,
+  createTable = FALSE,
+  camelCaseToSnakeCase = TRUE
+)
+
+# Upload draft_target_to_concept_set -----------------------------------------
+targetDefinitions <- readr::read_csv("../largescalephentest/ConceptSetTargetDefinitions.csv")
+phenotypeToConceptSetName <- readr::read_csv("../largescalephentest/PhenotypeToConceptSetTargetNames.csv")
+
+targetDefinitions <- targetDefinitions |>
+  inner_join(phenotypeToConceptSetName |>
+               transmute(phenotypeName = phenotype,
+                         conceptSetName,
+                         pertains = target,
+                         category = stringr::str_to_sentence(gsub("_", " ", category))),
+             by = join_by("conceptSetName")) |>
+  inner_join(definitions |>
+               select("phenotypeName", "phenotypeId"),
+             by = join_by("phenotypeName"))
+
+oneToOne <- targetDefinitions |>
+  inner_join(conceptSets |>
+               filter(!is.na(conceptId), hasDescendants == 1) |>
+               select("conceptSetId", conceptSetConceptId = "conceptId"),
+             by = join_by("conceptSetConceptId")) |>
+  select("phenotypeId",
+         "pertains",
+         "category",
+         conceptId = "conceptSetConceptId",
+         "conceptSetId")
+
+oneToMany <- targetDefinitions |>
+  filter(is.na(conceptSetConceptId)) |>
+  inner_join(conceptSets |>
+               filter(is.na(conceptId), hasDescendants == 1) |>
+               select("conceptSetId", "conceptSetName"),
+             by = join_by("conceptSetName")) |>
+  select("phenotypeId",
+         "pertains",
+         "category",
+         conceptId = "seedConceptId",
+         "conceptSetId")
+draftTargetToConceptSet <- bind_rows(oneToOne, oneToMany)
+DatabaseConnector::insertTable(
+  connection = connection,
+  databaseSchema = databaseSchema,
+  tableName = "draft_target_to_concept_set",
+  data = draftTargetToConceptSet,
+  dropTableIfExists = FALSE,
+  createTable = FALSE,
+  camelCaseToSnakeCase = TRUE
+)
+

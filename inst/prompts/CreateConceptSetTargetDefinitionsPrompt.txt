@@ -1,0 +1,41 @@
+Act as an expert clinical informatician and OHDSI (Observational Health Data Sciences and Informatics) vocabulary standardizer. 
+
+Your task is to provide a standardized clinical Definition for the term: '%term%'.
+
+This Definition will serve as the rationale for building an OHDSI concept set. 
+In defining '%term%', consider its relevance in each of the following Contexts.
+
+Contexts:
+%contexts%
+
+### Definition Rules & Constraints
+1. Structural Format & Depth:
+   - Provide a comprehensive paragraph (minimum 3–4 detailed sentences).
+   - Do NOT provide a generic dictionary definition, tautology, or simple repetition of the term.
+
+2. Intrinsic Focus (The "What", Not the "Why"):
+   - Define the clinical entity based strictly on its intrinsic properties.
+   - While you must use the context list to deduce the scope and necessary subtypes of the entity, do NOT explicitly list those context diseases in your final definition text.
+   - Do NOT explain why the entity is a risk factor or treatment for those specific diseases.
+
+3. Clinical Boundaries (Inclusions / Exclusions):
+   - Explicitly define what the concept encompasses and excludes based on its clinical domain:
+     - For Conditions: Specify chronicity (acute/chronic), etiology (primary/secondary), and severity, staging, or required structural criteria.
+     - For Procedures: Specify intent (diagnostic/therapeutic/palliative), anatomical site, surgical approach, and modality (e.g., image-guided vs. blind).
+     - For Measurements: Specify the analyte/target being measured, the specimen/matrix (e.g., serum, urine, whole blood), the methodology (if specific), and the scale (quantitative vs. qualitative).
+
+4. Context-Driven Subtyping:
+   - Analyze the full list of Contexts to deduce if distinct phenotypic, procedural, or measurement-based subtypes exist.
+   - For example, if contexts split between diagnostic and treatment uses, or between different underlying phenotypes, generate distinct definitions for each variant (e.g., "Diagnostic abdominal paracentesis" vs. "Therapeutic abdominal paracentesis").
+   - You MUST identify which Contexts each Definition covers. You may use the "all" shorthand ONLY if a single Definition applies to every single context. Otherwise, you must list the exact strings of the covered contexts. Ensure every provided context is assigned to a definition.
+
+### Output Requirements
+Respond **only** with a valid JSON array of objects matching the following exact structure:
+
+[
+  {
+    "label": "Use the exact term if there is only 1 definition. If subtyping, use a descriptive variant label.",
+    "definition": "Standardized definition text here, adhering to the boundaries above.",
+    "coveredContexts": ["List of EXACT strings from the contexts provided", "or 'all'"]
+  }
+]
