@@ -23,8 +23,8 @@ ohdsiYellow <- "#FBC511"
 ohdsiOrange <- "#EB6622"
 ohdsiNavy <- "#1F425A"
 
-# Bootstrap theme for the whole app: the brand colors take the role of the Bootstrap colors, so buttons, links,
-# badges, switches, sliders and tabs follow them. The palette has no red, so orange marks errors and invalid items.
+# Bootstrap theme for the whole app (the top bar stays white): the brand colors take the role of the Bootstrap
+# colors, so buttons, links, badges, switches, sliders and tabs follow them. The palette has no red, so orange marks errors and invalid items.
 pegasusTheme <- function() {
   bslib::bs_add_rules(
     bslib::bs_theme(
@@ -36,19 +36,15 @@ pegasusTheme <- function() {
       warning = ohdsiYellow,
       danger = ohdsiOrange
     ),
-    sprintf(
-      ".navbar {
-         background-color: %1$s !important;
-         --bs-navbar-color: rgba(255, 255, 255, 0.78);
-         --bs-navbar-hover-color: #ffffff;
-         --bs-navbar-active-color: #ffffff;
-         --bs-navbar-brand-color: #ffffff;
-         --bs-navbar-brand-hover-color: #ffffff;
-       }
-       .navbar .nav-link.active { box-shadow: inset 0 -3px 0 %2$s; }
-       .navbar .navbar-toggler { background-color: rgba(255, 255, 255, 0.85); }
-       .navbar-logo { background-color: #ffffff; border-radius: 4px; padding: 2px; }",
-      ohdsiNavy, ohdsiYellow
-    )
+    # Bootstrap picks black text on the teal and orange; labels on any dark color should be white. The
+    # yellow and light blue are light, so they keep dark text.
+    ".badge.text-bg-primary, .badge.text-bg-secondary, .badge.text-bg-success, .badge.text-bg-danger { color: #ffffff !important; }
+     .btn-success, .btn-danger {
+       --bs-btn-color: #ffffff;
+       --bs-btn-hover-color: #ffffff;
+       --bs-btn-active-color: #ffffff;
+       --bs-btn-disabled-color: #ffffff;
+     }
+     .navbar .nav-link.active { box-shadow: inset 0 -3px 0 var(--bs-primary); }"
   )
 }

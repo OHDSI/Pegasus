@@ -30,5 +30,5 @@ bslib::page_navbar(
     shortlistUi("shortlist")
   ),
   bslib::nav_spacer(),
-  bslib::nav_item(tags$img(src = "LogoTiny.png", height = "40px", alt = "Pegasus logo", class = "navbar-logo"))
+  bslib::nav_item(tags$img(src = "LogoTiny.png", height = "40px", alt = "Pegasus logo"))
 )
