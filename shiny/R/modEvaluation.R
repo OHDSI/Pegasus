@@ -61,8 +61,137 @@ getCohortNames <- function(connection, databaseSchema) {
   queryPegasus(connection, databaseSchema, "SELECT cohort_definition_name FROM @database_schema.cohort_definition;")$cohortDefinitionName
 }
 
+insertPegasusRows <- function(connection, databaseSchema, tableName, data) {
+  DatabaseConnector::insertTable(
+    connection = connection,
+    databaseSchema = databaseSchema,
+    tableName = tableName,
+    data = data,
+    dropTableIfExists = FALSE,
+    createTable = FALSE,
+    tempTable = FALSE,
+    camelCaseToSnakeCase = TRUE,
+    progressBar = FALSE
+  )
+}
+
+# Items of a Circe concept set expression as a data frame (one row per item).
+circeItemsTable <- function(items) {
+  items <- Filter(function(item) !is.null(item$concept$CONCEPT_ID), items)
+  if (length(items) == 0) {
+    return(data.frame(conceptId = integer(0), isExcluded = integer(0), includeDescendants = integer(0), includeMapped = integer(0)))
+  }
+  data.frame(
+    conceptId = vapply(items, function(item) as.integer(item$concept$CONCEPT_ID), 1L),
+    isExcluded = vapply(items, function(item) as.integer(isTRUE(item$isExcluded)), 1L),
+    includeDescendants = vapply(items, function(item) as.integer(isTRUE(item$includeDescendants)), 1L),
+    includeMapped = vapply(items, function(item) as.integer(isTRUE(item$includeMapped)), 1L)
+  )
+}
+
+# Order-independent fingerprint, so a concept set that is already stored can be recognised and reused.
+conceptSetSignature <- function(itemsTable) {
+  paste(
+    sort(paste(itemsTable$conceptId, itemsTable$isExcluded, itemsTable$includeDescendants, itemsTable$includeMapped)),
+    collapse = ";"
+  )
+}
+
+# Pertains and category are required by the data model; a pasted cohort does not say what its concept sets are for.
+userConceptSetPertains <- "unspecified"
+userConceptSetCategory <- "unspecified"
+
+# Stores the concept sets of a pasted Circe cohort (as draft concept sets of the user source type), links them to
+# the phenotype and to the cohort, and fills concept_set_item so they can be found by concept search.
+# A concept set that already exists with identical items is reused instead of duplicated.
+saveCohortConceptSets <- function(connection, databaseSchema, phenotypeId, cohortDefinitionId, cohortName, circe) {
+  conceptSets <- circe$ConceptSets
+  if (length(conceptSets) == 0) {
+    return(invisible(integer(0)))
+  }
+  stored <- queryPegasus(
+    connection, databaseSchema,
+    "SELECT concept_set_id, concept_set_name, circe_concept_set_expression FROM @database_schema.concept_set;"
+  )
+  storedSignatures <- vapply(stored$circeConceptSetExpression, function(expression) {
+    parsed <- tryCatch(jsonlite::fromJSON(expression, simplifyVector = FALSE), error = function(e) NULL)
+    conceptSetSignature(circeItemsTable(parsed$items))
+  }, "", USE.NAMES = FALSE)
+  usedNames <- normalizeName(stored$conceptSetName)
+  nextId <- getNextId(connection, databaseSchema, "concept_set", "concept_set_id")
+  linkedIds <- integer(0)
+  for (conceptSet in conceptSets) {
+    items <- circeItemsTable(conceptSet$expression$items)
+    signature <- conceptSetSignature(items)
+    match <- which(storedSignatures == signature)
+    if (nrow(items) > 0 && length(match) > 0) {
+      conceptSetId <- stored$conceptSetId[match[1]]
+    } else {
+      name <- trimws(as.character(conceptSet$name))
+      if (length(name) == 0 || !nzchar(name)) {
+        name <- "Concept set"
+      }
+      candidate <- name
+      if (normalizeName(candidate) %in% usedNames) {
+        candidate <- sprintf("%s (%s)", name, cohortName)
+      }
+      suffix <- 1
+      while (normalizeName(candidate) %in% usedNames) {
+        suffix <- suffix + 1
+        candidate <- sprintf("%s (%s) %d", name, cohortName, suffix)
+      }
+      expression <- as.character(jsonlite::toJSON(
+        list(items = conceptSet$expression$items), auto_unbox = TRUE, null = "null", digits = NA
+      ))
+      conceptSetId <- nextId
+      nextId <- nextId + 1L
+      insertPegasusRows(connection, databaseSchema, "concept_set", data.frame(
+        conceptSetId = as.integer(conceptSetId),
+        conceptSetName = candidate,
+        circeConceptSetExpression = expression,
+        caprConceptSetExpression = NA_character_,
+        hasDescendants = as.integer(any(items$includeDescendants == 1)),
+        clinicalDefinition = NA_character_,
+        conceptId = NA_integer_,
+        valid = 0L,
+        atlasConceptSetId = NA_integer_,
+        csSourceType = "user"
+      ))
+      if (nrow(items) > 0) {
+        insertPegasusRows(connection, databaseSchema, "concept_set_item", cbind(conceptSetId = as.integer(conceptSetId), items))
+      }
+      usedNames <- c(usedNames, normalizeName(candidate))
+      stored <- rbind(stored, data.frame(
+        conceptSetId = as.integer(conceptSetId), conceptSetName = candidate, circeConceptSetExpression = expression
+      ))
+      storedSignatures <- c(storedSignatures, signature)
+    }
+    linkedIds <- c(linkedIds, as.integer(conceptSetId))
+  }
+  linkedIds <- unique(linkedIds)
+  alreadyLinked <- queryPegasus(
+    connection, databaseSchema,
+    "SELECT concept_set_id FROM @database_schema.phenotype_to_concept_set WHERE phenotype_id = @phenotype_id;",
+    phenotype_id = as.integer(phenotypeId)
+  )$conceptSetId
+  newLinks <- setdiff(linkedIds, alreadyLinked)
+  if (length(newLinks) > 0) {
+    insertPegasusRows(connection, databaseSchema, "phenotype_to_concept_set", data.frame(
+      phenotypeId = as.integer(phenotypeId),
+      pertains = userConceptSetPertains,
+      category = userConceptSetCategory,
+      conceptSetId = newLinks
+    ))
+  }
+  insertPegasusRows(connection, databaseSchema, "cohort_definition_to_concept_set", data.frame(
+    cohortDefinitionId = as.integer(cohortDefinitionId),
+    conceptSetId = linkedIds
+  ))
+  invisible(linkedIds)
+}
+
 # Saves a pasted cohort as an immutable cohort definition of the user source type (valid = 0 until the
-# backend validates it). Pasting the same definition again for the same phenotype reuses the existing row.
+# backend validates it), together with its concept sets. Pasting the same definition again for the same phenotype reuses the existing row.
 saveCohortDefinition <- function(connection, databaseSchema, phenotypeId, cohortName, json, atlasCohortDefinitionId = NA) {
   validation <- validateCirceJson(json)
   if (!validation$ok) {
@@ -75,7 +204,8 @@ saveCohortDefinition <- function(connection, databaseSchema, phenotypeId, cohort
       return(list(
         cohortDefinitionId = existing$cohortDefinitionId[i],
         cohortDefinitionName = existing$cohortDefinitionName[i],
-        reused = TRUE
+        reused = TRUE,
+        conceptSetCount = 0L
       ))
     }
   }
@@ -106,7 +236,14 @@ saveCohortDefinition <- function(connection, databaseSchema, phenotypeId, cohort
     camelCaseToSnakeCase = TRUE,
     progressBar = FALSE
   )
-  list(cohortDefinitionId = cohortDefinitionId, cohortDefinitionName = cohortName, reused = FALSE)
+  conceptSetIds <- saveCohortConceptSets(
+    connection, databaseSchema, phenotypeId, cohortDefinitionId, cohortName,
+    jsonlite::fromJSON(json, simplifyVector = FALSE)
+  )
+  list(
+    cohortDefinitionId = cohortDefinitionId, cohortDefinitionName = cohortName, reused = FALSE,
+    conceptSetCount = length(conceptSetIds)
+  )
 }
 
 # Combinations that already have a request or a result.
@@ -206,25 +343,26 @@ getEvaluationRequests <- function(connection, databaseSchema, limit = 500) {
 evaluationUi <- function(id) {
   ns <- NS(id)
   tagList(
-    # A fixed height keeps the cards from being squeezed by the page, which would clip their contents.
+    # Cards do not fill the height, so nothing inside them scrolls; the page grows instead. The queue
+    # button sits in the footer of the run settings card and is always visible with it.
     bslib::layout_columns(
       col_widths = c(7, 5),
-      height = "740px",
       fill = FALSE,
       bslib::card(
+        fill = FALSE,
         bslib::card_header("1. Cohort definition"),
         textInput(ns("cohortName"), "Cohort name", width = "100%"),
         textAreaInput(
-          ns("json"), "Circe JSON", rows = 18, width = "100%",
+          ns("json"), "Circe JSON", rows = 16, width = "100%",
           placeholder = "Paste the cohort definition exported from Atlas (Export > JSON)."
         ),
         uiOutput(ns("jsonStatus")),
         numericInput(ns("atlasId"), "Atlas cohort ID (optional)", value = NA, min = 1, step = 1, width = "50%")
       ),
-      bslib::layout_columns(
-        col_widths = 12,
-        row_heights = c(1, 1),
+      tags$div(
+        class = "d-flex flex-column gap-3",
         bslib::card(
+          fill = FALSE,
           bslib::card_header("2. Phenotype"),
           shinyWidgets::pickerInput(
             ns("phenotype"),
@@ -238,6 +376,7 @@ evaluationUi <- function(id) {
           uiOutput(ns("phenotypeSummary"))
         ),
         bslib::card(
+          fill = FALSE,
           bslib::card_header("3. Run settings"),
           shinyWidgets::pickerInput(
             ns("databases"),
@@ -254,8 +393,11 @@ evaluationUi <- function(id) {
           ),
           checkboxGroupInput(ns("evalTypes"), "Evaluation type", choices = evaluationTypeOrder, selected = evaluationTypeOrder[1], inline = TRUE),
           textAreaInput(ns("notes"), "Notes (optional)", rows = 2, width = "100%"),
-          uiOutput(ns("userNote")),
-          actionButton(ns("queue"), "Queue evaluation", icon = icon("paper-plane"), class = "btn-success")
+          bslib::card_footer(
+            class = "d-flex justify-content-between align-items-center",
+            uiOutput(ns("userNote")),
+            actionButton(ns("queue"), "Queue evaluation", icon = icon("paper-plane"), class = "btn-success")
+          )
         )
       )
     ),
@@ -391,6 +533,9 @@ evaluationServer <- function(id, connectionPool, databaseSchema, userName, pheno
         if (result$reused) "Cohort already existed; queued" else "Saved the cohort and queued",
         nrow(result$queued), if (nrow(result$queued) == 1) "" else "s", result$cohortDefinitionName
       )
+      if (!result$reused && result$conceptSetCount > 0) {
+        message <- paste0(message, sprintf(" Linked %d concept set%s to the phenotype.", result$conceptSetCount, if (result$conceptSetCount == 1) "" else "s"))
+      }
       if (nrow(result$skipped) > 0) {
         message <- paste0(message, sprintf(" %d already requested or evaluated were skipped.", nrow(result$skipped)))
       }

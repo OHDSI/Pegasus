@@ -214,6 +214,7 @@ getConceptSets <- function(connection, databaseSchema, phenotypeId) {
     pcs.pertains,
     pcs.category,
     cs.cs_source_type,
+    cs.valid,
     cs.has_descendants,
     cs.capr_concept_set_expression,
     cs.atlas_concept_set_id

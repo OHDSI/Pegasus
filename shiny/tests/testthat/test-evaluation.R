@@ -150,3 +150,48 @@ test_that("Saving a phenotype reports its ID to the onSaved callback", {
   })
   expect_equal(savedId, 1)
 })
+
+cohortJsonWithConceptSets <- function() {
+  paste0(
+    '{"ConceptSets":[',
+    # Identical to seed concept set 1 (Asthma + descendants), so it must be reused.
+    '{"id":0,"name":"Asthma","expression":{"items":[{"concept":{"CONCEPT_ID":317009,"CONCEPT_NAME":"Asthma"},"isExcluded":false,"includeDescendants":true,"includeMapped":false}]}},',
+    # New set that reuses an existing name, so it must be renamed.
+    '{"id":1,"name":"COPD","expression":{"items":[{"concept":{"CONCEPT_ID":255573},"isExcluded":false,"includeDescendants":false,"includeMapped":false},',
+    '{"concept":{"CONCEPT_ID":4345213},"isExcluded":true,"includeDescendants":true,"includeMapped":true}]}}',
+    '],"PrimaryCriteria":{"CriteriaList":[],"ObservationWindow":{"PriorDays":0,"PostDays":0},"PrimaryCriteriaLimit":{"Type":"First"}},"QualifiedLimit":{"Type":"First"}}'
+  )
+}
+
+test_that("saving a pasted cohort stores its concept sets as draft sets linked to the phenotype and cohort", {
+  pool <- createTestPool()
+  on.exit(pool::poolClose(pool))
+  loadSeedData(pool)
+
+  result <- withConnection(pool, function(connection) submitTo(connection, json = cohortJsonWithConceptSets(), phenotypeId = 5L))
+  expect_equal(result$conceptSetCount, 2)
+
+  conceptSets <- withConnection(pool, function(connection) getConceptSets(connection, "main", 5L))
+  expect_equal(nrow(conceptSets), 3) # seed set 6 plus the two from the cohort
+  expect_true(1 %in% conceptSets$conceptSetId) # reused, not duplicated
+  newSet <- conceptSets[conceptSets$csSourceType == "user", ]
+  expect_equal(nrow(newSet), 1)
+  expect_equal(newSet$valid, 0)
+  expect_match(newSet$conceptSetName, "COPD (Liver custom)", fixed = TRUE)
+
+  items <- withConnection(pool, function(connection) {
+    queryPegasus(connection, "main", "SELECT * FROM @database_schema.concept_set_item WHERE concept_set_id = @id;", id = newSet$conceptSetId)
+  })
+  expect_equal(nrow(items), 2)
+  expect_equal(items$isExcluded[items$conceptId == 4345213], 1)
+
+  linked <- withConnection(pool, function(connection) {
+    queryPegasus(connection, "main", "SELECT concept_set_id FROM @database_schema.cohort_definition_to_concept_set WHERE cohort_definition_id = @id;", id = result$cohortDefinitionId)
+  })
+  expect_setequal(linked$conceptSetId, c(1, newSet$conceptSetId))
+
+  # Pasting the same cohort again adds nothing.
+  again <- withConnection(pool, function(connection) submitTo(connection, json = cohortJsonWithConceptSets(), phenotypeId = 5L))
+  expect_true(again$reused)
+  expect_equal(nrow(withConnection(pool, function(connection) getConceptSets(connection, "main", 5L))), 3)
+})

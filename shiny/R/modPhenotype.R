@@ -167,6 +167,7 @@ phenotypeDetailServer <- function(id, connectionPool, databaseSchema, phenotypes
         Pertains = htmltools::htmlEscape(conceptSets$pertains),
         Category = htmltools::htmlEscape(conceptSets$category),
         Source = htmltools::htmlEscape(conceptSets$csSourceType),
+        Status = ifelse(conceptSets$valid == 1, "Valid", "Draft (awaiting validation)"),
         Descendants = ifelse(conceptSets$hasDescendants == 1, "Yes", "No"),
         Expression = htmltools::htmlEscape(conceptSets$caprConceptSetExpression),
         Atlas = atlasLink(detail$atlasBaseUrl, "conceptSet", conceptSets$atlasConceptSetId),
@@ -210,7 +211,7 @@ phenotypeDetailServer <- function(id, connectionPool, databaseSchema, phenotypes
         data.frame(
           Name = htmltools::htmlEscape(cohorts$cohortDefinitionName),
           Source = htmltools::htmlEscape(cohorts$paSourceType),
-          Valid = ifelse(cohorts$valid == 1, "Yes", "No"),
+          Status = ifelse(cohorts$valid == 1, "Valid", "Draft (awaiting validation)"),
           Atlas = atlasLink(detail$atlasBaseUrl, "cohort", cohorts$atlasCohortDefinitionId)
         ),
         "No cohort definitions for this phenotype.",
