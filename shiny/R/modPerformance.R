@@ -50,11 +50,16 @@ performanceUi <- function(id) {
   ns <- NS(id)
   tagList(
     # All four filters are the same kind of dropdown so they line up; the thresholds and the switch sit on a second row.
+    # The card and its rows do not fill the height, so they take the room their contents need.
     bslib::card(
+      fill = FALSE,
       bslib::card_header("Filters"),
       bslib::card_body(
+        fillable = FALSE,
+        fill = FALSE,
         bslib::layout_columns(
           col_widths = c(3, 3, 3, 3),
+          fill = FALSE,
           filterPicker(ns("phenotypes"), "Phenotypes", "All evaluated phenotypes", liveSearch = TRUE),
           filterPicker(ns("databases"), "Databases", "All databases"),
           filterPicker(ns("evalTypes"), "Evaluation type", "None selected"),
@@ -62,6 +67,7 @@ performanceUi <- function(id) {
         ),
         bslib::layout_columns(
           col_widths = c(3, 3, 3, 3),
+          fill = FALSE,
           class = "align-items-end",
           sliderInput(ns("minPpv"), "Minimum PPV (%)", min = 0, max = 100, value = 0, step = 5, width = "100%"),
           sliderInput(ns("minSensitivity"), "Minimum sensitivity (%)", min = 0, max = 100, value = 0, step = 5, width = "100%"),
