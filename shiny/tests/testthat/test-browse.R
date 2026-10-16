@@ -162,3 +162,10 @@ test_that("expressionModal shows both expressions and tolerates a missing Capr e
   conceptSets$caprConceptSetExpression[1] <- NA
   expect_match(as.character(expressionModal(conceptSets[1, ])), "Not available", fixed = TRUE)
 })
+
+test_that("findConceptSet finds a concept set even when it is linked to the phenotype more than once", {
+  conceptSets <- data.frame(conceptSetId = c(4L, 7L, 7L), pertains = c("doi", "doi", "alternative diagnoses"))
+  expect_equal(nrow(findConceptSet(conceptSets, "7")), 1)
+  expect_equal(findConceptSet(conceptSets, 4)$pertains, "doi")
+  expect_null(findConceptSet(conceptSets, 99))
+})

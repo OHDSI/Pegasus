@@ -51,6 +51,13 @@ prettyJson <- function(text) {
   tryCatch(as.character(jsonlite::prettify(text)), error = function(e) text)
 }
 
+# A concept set can be linked to a phenotype more than once (different pertains or category), so several rows
+# can share an ID; any one of them has the same expressions.
+findConceptSet <- function(conceptSets, conceptSetId) {
+  row <- match(as.integer(conceptSetId), conceptSets$conceptSetId)
+  if (is.na(row)) NULL else conceptSets[row, , drop = FALSE]
+}
+
 expressionModal <- function(conceptSet) {
   modalDialog(
     title = conceptSet$conceptSetName,
@@ -222,14 +229,15 @@ phenotypeDetailServer <- function(id, connectionPool, databaseSchema, phenotypes
     })
 
     observeEvent(input$showExpression, {
-      conceptSets <- details()$conceptSets
-      conceptSet <- conceptSets[conceptSets$conceptSetId == as.integer(input$showExpression), , drop = FALSE]
-      if (nrow(conceptSet) == 1) {
-        tryCatch(
-          showModal(expressionModal(conceptSet)),
-          error = function(e) showNotification(paste("Unable to show the expression:", conditionMessage(e)), type = "error")
-        )
+      conceptSet <- findConceptSet(details()$conceptSets, input$showExpression)
+      if (is.null(conceptSet)) {
+        showNotification("That concept set could not be found.", type = "warning")
+        return()
       }
+      tryCatch(
+        showModal(expressionModal(conceptSet)),
+        error = function(e) showNotification(paste("Unable to show the expression:", conditionMessage(e)), type = "error")
+      )
     })
 
     output$personCounts <- DT::renderDT({
