@@ -178,7 +178,7 @@ phenotypeDetailServer <- function(id, connectionPool, databaseSchema, phenotypes
     })
 
     showTable <- function(data, emptyMessage, ...) {
-      DT::datatable(
+      filterableTable(
         data,
         rownames = FALSE,
         selection = "none",

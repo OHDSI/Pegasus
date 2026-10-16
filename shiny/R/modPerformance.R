@@ -209,7 +209,7 @@ performanceServer <- function(id, evaluations, shortlist, onOpenPhenotype) {
 
     output$table <- DT::renderDT({
       data <- filtered()
-      DT::datatable(
+      filterableTable(
         data.frame(
           Phenotype = data$phenotypeName,
           Cohort = data$cohortDefinitionName,

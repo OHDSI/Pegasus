@@ -171,7 +171,7 @@ shortlistServer <- function(id, connectionPool, databaseSchema, phenotypes, eval
         as.integer(data$phenotypeId),
         htmltools::htmlEscape(data$phenotypeName)
       )
-      DT::datatable(
+      filterableTable(
         data.frame(
           Name = openLink,
           Status = statusBadge(data$status),

@@ -567,7 +567,7 @@ evaluationServer <- function(id, connectionPool, databaseSchema, userName, pheno
       if (isTRUE(input$onlyMine) && !is.null(userName)) {
         data <- data[data$requestedBy == userName, , drop = FALSE]
       }
-      DT::datatable(
+      filterableTable(
         data.frame(
           Requested = formatTimestamp(data$timeRequested),
           By = htmltools::htmlEscape(data$requestedBy),

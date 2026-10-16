@@ -54,6 +54,8 @@ browseUi <- function(id) {
         height: 150px; padding: 8px 4px; text-align: left; }
       @supports (writing-mode: sideways-lr) { .clickable-rows th.narrow-col { writing-mode: sideways-lr; } }
       .clickable-rows th.narrow-col::before, .clickable-rows th.narrow-col::after { display: none; }
+      /* The range filter boxes of the narrow numeric columns need some room to be usable. */
+      .clickable-rows thead td { min-width: 76px; }
       .clickable-rows td.narrow-col { width: 1%; padding-left: 4px; padding-right: 4px; text-align: center; }
     ")),
     bslib::nav_panel_hidden(
@@ -113,7 +115,7 @@ browseServer <- function(id, connectionPool, databaseSchema, phenotypes, refresh
     output$table <- DT::renderDT({
       data <- filtered()
       # escape = FALSE is needed for the status badges, so free-text columns are escaped here.
-      DT::datatable(
+      filterableTable(
         data.frame(
           Name = sprintf(
             '<div class="name-cell" title="%s">%s</div>',

@@ -340,7 +340,7 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyRunner,
 
     output$candidateTable <- DT::renderDT({
       found <- candidates()
-      DT::datatable(
+      filterableTable(
         data.frame(
           ID = found$conceptId,
           Name = found$conceptName,
@@ -484,7 +484,7 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyRunner,
           )
         ))
       }
-      DT::datatable(
+      filterableTable(
         table,
         escape = FALSE,
         rownames = FALSE,
