@@ -13,16 +13,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 
-# Data colors come from the OHDSI visual identity palette for plots
-# (https://github.com/OHDSI/VisualIdentity, Palettes/PaletteForPlots1.pdf: #336B91, #69AED5, #11A08A, #FBC511,
-# #EB6622, plus the logo colors #1F425A, #F18A1D, #FBC50F). The first three categorical slots are blue, orange
+# Data colors come from the OHDSI visual identity palette (see brand.R). The first three categorical slots are blue, orange
 # and teal, which stay distinguishable for color-blind readers. A fourth series is never generated: it folds
 # into "Other", drawn in the logo navy with its own marker shape. Only the plot background, grid and axis lines
 # are neutral grays, because the palette has no neutrals.
-ohdsiBlue <- "#336B91"
-ohdsiOrange <- "#EB6622"
-ohdsiTeal <- "#11A08A"
-ohdsiNavy <- "#1F425A"
 surfaceColor <- "#fcfcfb"
 inkSecondary <- ohdsiNavy
 inkMuted <- "#898781"

@@ -202,8 +202,8 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyRunner,
         status$state,
         none = list(color = "#898781", label = "Vocabulary not configured"),
         unchecked = list(color = "#898781", label = "Vocabulary not checked yet (use the refresh icon)"),
-        connected = list(color = "#0ca30c", label = "Vocabulary connected"),
-        error = list(color = "#d03b3b", label = "Vocabulary connection failed")
+        connected = list(color = ohdsiTeal, label = "Vocabulary connected"),
+        error = list(color = ohdsiOrange, label = "Vocabulary connection failed")
       )
       tagList(
         tags$div(

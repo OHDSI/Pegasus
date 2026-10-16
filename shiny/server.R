@@ -24,7 +24,7 @@ function(input, output, session) {
   evaluationPreselect <- reactiveVal(NULL)
 
   output$shortlistCount <- renderUI({
-    if (length(shortlist()) > 0) tags$span(class = "badge text-bg-primary", length(shortlist()))
+    if (length(shortlist()) > 0) tags$span(class = "badge text-bg-warning", length(shortlist()))
   })
 
   # Reloads everything the Browse and Performance tabs show.
