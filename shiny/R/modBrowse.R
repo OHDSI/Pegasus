@@ -43,6 +43,18 @@ toPercent <- function(x) {
   round(100 * x, 1)
 }
 
+# DataTables render function: shows the status as a badge but sorts and filters on the plain status text.
+statusBadgeRender <- function() {
+  DT::JS(sprintf(
+    "function(data, type, row) {
+       if (type !== 'display' || data === null) { return data; }
+       var classes = %s;
+       return '<span class=\"badge ' + (classes[data] || 'text-bg-secondary') + '\">' + data + '</span>';
+     }",
+    as.character(jsonlite::toJSON(as.list(statusBadgeClasses), auto_unbox = TRUE))
+  ))
+}
+
 browseUi <- function(id) {
   ns <- NS(id)
   bslib::navset_hidden(
@@ -122,7 +134,8 @@ browseServer <- function(id, connectionPool, databaseSchema, phenotypes, refresh
             htmltools::htmlEscape(data$phenotypeName, attribute = TRUE),
             htmltools::htmlEscape(data$phenotypeName)
           ),
-          Status = statusBadge(data$status),
+          # Plain text, so the column filter is a dropdown of status names; the badge is drawn by the render function below.
+          Status = data$status,
           "Concept sets" = data$conceptSetCount,
           Cohorts = data$cohortCount,
           Databases = data$databaseCount,
@@ -157,6 +170,7 @@ browseServer <- function(id, connectionPool, databaseSchema, phenotypes, refresh
           stateDuration = -1,
           columnDefs = list(
             list(visible = FALSE, targets = idColumn),
+            list(targets = 1, render = statusBadgeRender()),
             # Concept sets, cohorts, databases, PPV and sensitivity: narrow columns with vertical labels.
             list(className = "narrow-col", targets = 2:6)
           )

@@ -189,3 +189,11 @@ test_that("useDropdownFilters turns low-cardinality plain text columns into fact
   expect_type(result$count, "integer")
   expect_equal(nrow(useDropdownFilters(data.frame(x = character(0)))), 0)
 })
+
+test_that("statusBadgeRender knows a badge class for every status", {
+  js <- as.character(statusBadgeRender())
+  for (status in statusLevels) {
+    expect_match(js, status, fixed = TRUE)
+  }
+  expect_match(js, "text-bg-success", fixed = TRUE)
+})

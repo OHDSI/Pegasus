@@ -92,6 +92,7 @@ phenotypeDetailUi <- function(id) {
     uiOutput(ns("header")),
     bslib::navset_card_tab(
       id = ns("tabs"),
+      height = "80vh",
       bslib::nav_panel("Definition", uiOutput(ns("definition"))),
       bslib::nav_panel("Concept sets", DT::DTOutput(ns("conceptSets"))),
       bslib::nav_panel("Person counts", DT::DTOutput(ns("personCounts"))),
