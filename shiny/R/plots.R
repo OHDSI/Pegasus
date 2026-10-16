@@ -13,17 +13,25 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 
-# Colors follow the validated reference palette (first three categorical slots, which pass the
-# all-pairs scatter checks in light mode). A fourth series is never generated: it folds into "Other".
+# Data colors come from the OHDSI visual identity palette for plots
+# (https://github.com/OHDSI/VisualIdentity, Palettes/PaletteForPlots1.pdf: #336B91, #69AED5, #11A08A, #FBC511,
+# #EB6622, plus the logo colors #1F425A, #F18A1D, #FBC50F). The first three categorical slots are blue, orange
+# and teal, which stay distinguishable for color-blind readers. A fourth series is never generated: it folds
+# into "Other", drawn in the logo navy with its own marker shape. Only the plot background, grid and axis lines
+# are neutral grays, because the palette has no neutrals.
+ohdsiBlue <- "#336B91"
+ohdsiOrange <- "#EB6622"
+ohdsiTeal <- "#11A08A"
+ohdsiNavy <- "#1F425A"
 surfaceColor <- "#fcfcfb"
-inkSecondary <- "#52514e"
+inkSecondary <- ohdsiNavy
 inkMuted <- "#898781"
 gridColor <- "#e1e0d9"
 axisColor <- "#c3c2b7"
-seriesColors <- c("#2a78d6", "#eb6834", "#1baf7a")
+seriesColors <- c(ohdsiBlue, ohdsiOrange, ohdsiTeal)
 # Marker shapes are a secondary encoding so identity never rests on color alone.
 seriesSymbols <- c("circle", "square", "diamond")
-otherColor <- inkMuted
+otherColor <- ohdsiNavy
 otherSymbol <- "triangle-up"
 maxSeries <- length(seriesColors)
 
@@ -220,7 +228,7 @@ buildComparison <- function(data,
       boxpoints = "all",
       jitter = 0.5,
       pointpos = 0,
-      fillcolor = "rgba(42, 120, 214, 0.10)",
+      fillcolor = "rgba(51, 107, 145, 0.10)", # ohdsiBlue at 10% opacity
       line = list(color = seriesColors[1], width = 1.5),
       marker = list(color = seriesColors[1], size = 8, opacity = 0.55)
     )

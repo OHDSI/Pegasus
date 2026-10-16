@@ -146,3 +146,9 @@ test_that("filterEvaluations restricts by phenotype, database, type, source and 
   expect_equal(nrow(filterWith(evalTypes = character(0))), 0)
   expect_true(all(filterWith(sources = "ai")$paSourceType == "ai"))
 })
+
+test_that("data colors come from the OHDSI plot palette", {
+  palette <- c("#336B91", "#69AED5", "#11A08A", "#FBC511", "#EB6622", "#1F425A", "#F18A1D", "#FBC50F")
+  expect_true(all(c(seriesColors, otherColor) %in% palette))
+  expect_equal(anyDuplicated(c(seriesColors, otherColor)), 0)
+})
