@@ -47,7 +47,15 @@ browseUi <- function(id) {
   ns <- NS(id)
   bslib::navset_hidden(
     id = ns("view"),
-    header = tags$style(".clickable-rows tbody tr { cursor: pointer; }"),
+    header = tags$style(HTML("
+      .clickable-rows tbody tr { cursor: pointer; }
+      .clickable-rows .name-cell { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .clickable-rows th.narrow-col { writing-mode: vertical-rl; vertical-align: bottom; white-space: nowrap;
+        height: 150px; padding: 8px 4px; text-align: left; }
+      @supports (writing-mode: sideways-lr) { .clickable-rows th.narrow-col { writing-mode: sideways-lr; } }
+      .clickable-rows th.narrow-col::before, .clickable-rows th.narrow-col::after { display: none; }
+      .clickable-rows td.narrow-col { width: 1%; padding-left: 4px; padding-right: 4px; text-align: center; }
+    ")),
     bslib::nav_panel_hidden(
       "list",
       bslib::layout_sidebar(
@@ -107,7 +115,11 @@ browseServer <- function(id, connectionPool, databaseSchema, phenotypes, refresh
       # escape = FALSE is needed for the status badges, so free-text columns are escaped here.
       DT::datatable(
         data.frame(
-          Name = htmltools::htmlEscape(data$phenotypeName),
+          Name = sprintf(
+            '<div class="name-cell" title="%s">%s</div>',
+            htmltools::htmlEscape(data$phenotypeName, attribute = TRUE),
+            htmltools::htmlEscape(data$phenotypeName)
+          ),
           Status = statusBadge(data$status),
           "Concept sets" = data$conceptSetCount,
           Cohorts = data$cohortCount,
@@ -141,7 +153,11 @@ browseServer <- function(id, connectionPool, databaseSchema, phenotypes, refresh
           order = list(list(0, "asc")),
           stateSave = TRUE,
           stateDuration = -1,
-          columnDefs = list(list(visible = FALSE, targets = idColumn))
+          columnDefs = list(
+            list(visible = FALSE, targets = idColumn),
+            # Concept sets, cohorts, databases, PPV and sensitivity: narrow columns with vertical labels.
+            list(className = "narrow-col", targets = 2:6)
+          )
         )
       )
     })
