@@ -33,9 +33,10 @@ formatPercentWithInterval <- function(estimate, lower, upper) {
   sprintf("%.1f (%.1f-%.1f)", 100 * estimate, 100 * lower, 100 * upper)
 }
 
-# Adds one column per database with the overall person count of each concept set.
-addPersonCountColumns <- function(conceptSets, personCounts) {
-  for (abbreviation in unique(personCounts$cdmSourceAbbreviation)) {
+# Adds one column per database with the overall person count of each concept set. Databases without counts
+# get an empty column, so it is visible that nothing has been computed for them.
+addPersonCountColumns <- function(conceptSets, personCounts, databases = unique(personCounts$cdmSourceAbbreviation)) {
+  for (abbreviation in unique(c(databases, personCounts$cdmSourceAbbreviation))) {
     counts <- personCounts[personCounts$cdmSourceAbbreviation == abbreviation, , drop = FALSE]
     conceptSets[[abbreviation]] <- counts$overallPersons[match(conceptSets$conceptSetId, counts$conceptSetId)]
   }
@@ -182,7 +183,7 @@ phenotypeDetailServer <- function(id, connectionPool, databaseSchema, phenotypes
     output$conceptSets <- DT::renderDT({
       detail <- details()
       req(detail)
-      conceptSets <- addPersonCountColumns(detail$conceptSets, detail$personCounts)
+      conceptSets <- addPersonCountColumns(detail$conceptSets, detail$personCounts, detail$databaseNames)
       databaseColumns <- setdiff(names(conceptSets), names(detail$conceptSets))
       table <- data.frame(
         Name = htmltools::htmlEscape(conceptSets$conceptSetName),
@@ -198,11 +199,22 @@ phenotypeDetailServer <- function(id, connectionPool, databaseSchema, phenotypes
         table[[paste(column, "persons")]] <- conceptSets[[column]]
       }
       table$Expression <- sprintf(
-        "<a href='#' onclick=\"Shiny.setInputValue('%s', %d, {priority: 'event'}); return false;\">View</a>",
-        session$ns("showExpression"), as.integer(conceptSets$conceptSetId)
+        "<a href='#' class='expression-link' data-id='%d'>View</a>",
+        as.integer(conceptSets$conceptSetId)
       )
       table$Atlas <- atlasLink(detail$atlasBaseUrl, "conceptSet", conceptSets$atlasConceptSetId)
-      result <- showTable(table, "No concept sets for this phenotype.", escape = FALSE)
+      # A delegated handler on the table; inline onclick attributes inside table cells proved unreliable.
+      result <- showTable(
+        table, "No concept sets for this phenotype.",
+        escape = FALSE,
+        callback = DT::JS(sprintf(
+          "table.on('click', 'a.expression-link', function(e) {
+             e.preventDefault();
+             Shiny.setInputValue('%s', $(this).data('id'), {priority: 'event'});
+           });",
+          session$ns("showExpression")
+        ))
+      )
       if (length(databaseColumns) > 0) {
         result <- DT::formatRound(result, paste(databaseColumns, "persons"), digits = 0)
       }
@@ -213,7 +225,10 @@ phenotypeDetailServer <- function(id, connectionPool, databaseSchema, phenotypes
       conceptSets <- details()$conceptSets
       conceptSet <- conceptSets[conceptSets$conceptSetId == as.integer(input$showExpression), , drop = FALSE]
       if (nrow(conceptSet) == 1) {
-        showModal(expressionModal(conceptSet))
+        tryCatch(
+          showModal(expressionModal(conceptSet)),
+          error = function(e) showNotification(paste("Unable to show the expression:", conditionMessage(e)), type = "error")
+        )
       }
     })
 
@@ -236,7 +251,7 @@ phenotypeDetailServer <- function(id, connectionPool, databaseSchema, phenotypes
           Visit = counts$visitPersons,
           check.names = FALSE
         ),
-        "No person counts have been computed for this phenotype's concept sets."
+        "No person counts are stored for this phenotype's concept sets (the concept_set_person_count table has no rows for them)."
       )
       DT::formatRound(result, c("Overall", "Condition", "Procedure", "Drug", "Device", "Measurement", "Observation", "Visit"), digits = 0)
     })

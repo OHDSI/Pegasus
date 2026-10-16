@@ -62,6 +62,7 @@ test_that("getPhenotypeDetails returns every component for a phenotype", {
   expect_equal(nrow(asthma$cohorts), 3)
   expect_equal(nrow(asthma$evaluations), 7)
   expect_setequal(asthma$personCounts$cdmSourceAbbreviation, c("DEVCLM", "DEVEHR", "DEVREG"))
+  expect_true("DEVEHR" %in% asthma$databaseNames)
   expect_true(all(c("overallPersons", "conditionPersons", "visitPersons") %in% names(asthma$personCounts)))
   expect_equal(nrow(asthma$parents), 0)
   expect_equal(asthma$children$phenotypeName, "Asthma with eosinophilic phenotype")
@@ -85,6 +86,10 @@ test_that("addPersonCountColumns adds one column per database", {
   result <- addPersonCountColumns(conceptSets, counts)
   expect_equal(result$A, c(10, 20))
   expect_equal(result$B, c(30, NA))
+
+  withDatabases <- addPersonCountColumns(conceptSets, counts[0, ], c("A", "C"))
+  expect_equal(withDatabases$A, c(NA_real_, NA_real_))
+  expect_equal(withDatabases$C, c(NA_real_, NA_real_))
 })
 
 test_that("atlasLink builds links only when possible", {

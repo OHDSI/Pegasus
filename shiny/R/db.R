@@ -380,6 +380,7 @@ getPhenotypeDetails <- function(connection, databaseSchema, phenotypeId) {
   list(
     conceptSets = getConceptSets(connection, databaseSchema, phenotypeId),
     personCounts = getConceptSetPersonCounts(connection, databaseSchema, phenotypeId),
+    databaseNames = getDatabases(connection, databaseSchema)$cdmSourceAbbreviation,
     draftTargets = getDraftTargets(connection, databaseSchema, phenotypeId),
     cohorts = getCohortDefinitions(connection, databaseSchema, phenotypeId),
     evaluations = getEvaluations(connection, databaseSchema, phenotypeId),
