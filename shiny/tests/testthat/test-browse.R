@@ -62,6 +62,7 @@ test_that("getPhenotypeDetails returns every component for a phenotype", {
   expect_equal(nrow(asthma$cohorts), 3)
   expect_equal(nrow(asthma$evaluations), 7)
   expect_setequal(asthma$personCounts$cdmSourceAbbreviation, c("DEVCLM", "DEVEHR", "DEVREG"))
+  expect_true(all(c("overallPersons", "conditionPersons", "visitPersons") %in% names(asthma$personCounts)))
   expect_equal(nrow(asthma$parents), 0)
   expect_equal(asthma$children$phenotypeName, "Asthma with eosinophilic phenotype")
   expect_match(asthma$atlasBaseUrl, "^https://")
@@ -135,4 +136,24 @@ test_that("browse server filters by status and creator and selects a phenotype",
       expect_null(selectedId())
     }
   )
+})
+
+test_that("prettyJson indents JSON and falls back to the original text", {
+  expect_match(prettyJson('{"a":1}'), "\n", fixed = TRUE)
+  expect_equal(prettyJson("not json"), "not json")
+  expect_equal(prettyJson(NA_character_), "Not available")
+})
+
+test_that("expressionModal shows both expressions and tolerates a missing Capr expression", {
+  pool <- createTestPool()
+  on.exit(pool::poolClose(pool))
+  loadSeedData(pool)
+  conceptSets <- withConnection(pool, function(connection) getConceptSets(connection, "main", 1))
+  html <- as.character(expressionModal(conceptSets[1, ]))
+  expect_match(html, "Capr expression", fixed = TRUE)
+  expect_match(html, "Circe expression", fixed = TRUE)
+  expect_match(html, "includeDescendants", fixed = TRUE)
+
+  conceptSets$caprConceptSetExpression[1] <- NA
+  expect_match(as.character(expressionModal(conceptSets[1, ])), "Not available", fixed = TRUE)
 })

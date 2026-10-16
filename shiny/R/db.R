@@ -217,6 +217,7 @@ getConceptSets <- function(connection, databaseSchema, phenotypeId) {
     cs.valid,
     cs.has_descendants,
     cs.capr_concept_set_expression,
+    cs.circe_concept_set_expression,
     cs.atlas_concept_set_id
   FROM @database_schema.phenotype_to_concept_set pcs
   INNER JOIN @database_schema.concept_set cs
@@ -229,6 +230,13 @@ getConceptSets <- function(connection, databaseSchema, phenotypeId) {
 getConceptSetPersonCounts <- function(connection, databaseSchema, phenotypeId) {
   sql <- "SELECT pc.concept_set_id,
     d.cdm_source_abbreviation,
+    pc.condition_persons,
+    pc.procedure_persons,
+    pc.drug_persons,
+    pc.device_persons,
+    pc.measurement_persons,
+    pc.observation_persons,
+    pc.visit_persons,
     pc.overall_persons
   FROM @database_schema.phenotype_to_concept_set pcs
   INNER JOIN @database_schema.concept_set_person_count pc

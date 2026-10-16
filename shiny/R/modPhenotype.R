@@ -42,6 +42,27 @@ addPersonCountColumns <- function(conceptSets, personCounts) {
   conceptSets
 }
 
+# Indented JSON for display; text that is not valid JSON is shown as it is.
+prettyJson <- function(text) {
+  if (is.null(text) || is.na(text) || !nzchar(text)) {
+    return("Not available")
+  }
+  tryCatch(as.character(jsonlite::prettify(text)), error = function(e) text)
+}
+
+expressionModal <- function(conceptSet) {
+  modalDialog(
+    title = conceptSet$conceptSetName,
+    size = "l",
+    easyClose = TRUE,
+    footer = modalButton("Close"),
+    tags$h6("Capr expression"),
+    tags$pre(style = "white-space: pre-wrap;", if (is.na(conceptSet$caprConceptSetExpression)) "Not available" else conceptSet$caprConceptSetExpression),
+    tags$h6("Circe expression"),
+    tags$pre(style = "white-space: pre-wrap; max-height: 40vh; overflow: auto;", prettyJson(conceptSet$circeConceptSetExpression))
+  )
+}
+
 linkList <- function(ns, ids, names) {
   if (length(ids) == 0) {
     return("none")
@@ -65,6 +86,7 @@ phenotypeDetailUi <- function(id) {
       id = ns("tabs"),
       bslib::nav_panel("Definition", uiOutput(ns("definition"))),
       bslib::nav_panel("Concept sets", DT::DTOutput(ns("conceptSets"))),
+      bslib::nav_panel("Person counts", DT::DTOutput(ns("personCounts"))),
       bslib::nav_panel("Draft targets", DT::DTOutput(ns("draftTargets"))),
       bslib::nav_panel("Cohorts", DT::DTOutput(ns("cohorts"))),
       bslib::nav_panel(
@@ -169,18 +191,54 @@ phenotypeDetailServer <- function(id, connectionPool, databaseSchema, phenotypes
         Source = htmltools::htmlEscape(conceptSets$csSourceType),
         Status = ifelse(conceptSets$valid == 1, "Valid", "Draft (awaiting validation)"),
         Descendants = ifelse(conceptSets$hasDescendants == 1, "Yes", "No"),
-        Expression = htmltools::htmlEscape(conceptSets$caprConceptSetExpression),
-        Atlas = atlasLink(detail$atlasBaseUrl, "conceptSet", conceptSets$atlasConceptSetId),
         check.names = FALSE
       )
+      # Persons with the concept set per database come before the long expression so they are not scrolled away.
       for (column in databaseColumns) {
         table[[paste(column, "persons")]] <- conceptSets[[column]]
       }
+      table$Expression <- sprintf(
+        "<a href='#' onclick=\"Shiny.setInputValue('%s', %d, {priority: 'event'}); return false;\">View</a>",
+        session$ns("showExpression"), as.integer(conceptSets$conceptSetId)
+      )
+      table$Atlas <- atlasLink(detail$atlasBaseUrl, "conceptSet", conceptSets$atlasConceptSetId)
       result <- showTable(table, "No concept sets for this phenotype.", escape = FALSE)
       if (length(databaseColumns) > 0) {
         result <- DT::formatRound(result, paste(databaseColumns, "persons"), digits = 0)
       }
       result
+    })
+
+    observeEvent(input$showExpression, {
+      conceptSets <- details()$conceptSets
+      conceptSet <- conceptSets[conceptSets$conceptSetId == as.integer(input$showExpression), , drop = FALSE]
+      if (nrow(conceptSet) == 1) {
+        showModal(expressionModal(conceptSet))
+      }
+    })
+
+    output$personCounts <- DT::renderDT({
+      detail <- details()
+      req(detail)
+      counts <- detail$personCounts
+      names <- detail$conceptSets$conceptSetName[match(counts$conceptSetId, detail$conceptSets$conceptSetId)]
+      result <- showTable(
+        data.frame(
+          "Concept set" = names,
+          Database = counts$cdmSourceAbbreviation,
+          Overall = counts$overallPersons,
+          Condition = counts$conditionPersons,
+          Procedure = counts$procedurePersons,
+          Drug = counts$drugPersons,
+          Device = counts$devicePersons,
+          Measurement = counts$measurementPersons,
+          Observation = counts$observationPersons,
+          Visit = counts$visitPersons,
+          check.names = FALSE
+        ),
+        "No person counts have been computed for this phenotype's concept sets."
+      )
+      DT::formatRound(result, c("Overall", "Condition", "Procedure", "Drug", "Device", "Measurement", "Observation", "Visit"), digits = 0)
     })
 
     output$draftTargets <- DT::renderDT({
