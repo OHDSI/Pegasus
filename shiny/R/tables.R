@@ -13,8 +13,27 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 
-# Every table in the app is built through this wrapper so that each column has its own filter box:
-# a text box for text columns and a range slider for numeric columns.
+# Text columns with only a few distinct values become factors, which DT filters with a searchable multi-select
+# dropdown (several values can be chosen) instead of a text box. Columns with many distinct values (names,
+# dates) keep the text box, as do columns holding HTML, whose markup would show up in the dropdown.
+dropdownFilterMaxValues <- 25
+
+useDropdownFilters <- function(data, maxValues = dropdownFilterMaxValues) {
+  for (column in names(data)) {
+    values <- data[[column]]
+    if (!is.character(values)) {
+      next
+    }
+    distinct <- unique(values[!is.na(values)])
+    if (length(distinct) > 0 && length(distinct) <= maxValues && !any(grepl("[<&]", distinct))) {
+      data[[column]] <- factor(values, levels = sort(distinct))
+    }
+  }
+  data
+}
+
+# Every table in the app is built through this wrapper so that each column has its own filter: a dropdown
+# for text columns with few values, a text box for other text columns and a range slider for numbers.
 filterableTable <- function(data, ...) {
-  DT::datatable(data, filter = "top", ...)
+  DT::datatable(useDropdownFilters(data), filter = "top", ...)
 }

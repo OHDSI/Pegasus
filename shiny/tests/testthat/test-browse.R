@@ -169,3 +169,23 @@ test_that("findConceptSet finds a concept set even when it is linked to the phen
   expect_equal(findConceptSet(conceptSets, 4)$pertains, "doi")
   expect_null(findConceptSet(conceptSets, 99))
 })
+
+test_that("useDropdownFilters turns low-cardinality plain text columns into factors", {
+  data <- data.frame(
+    status = c("Valid", "Draft", "Valid", NA),
+    name = paste("Name", 1:4),
+    html = c("<b>a</b>", "<b>a</b>", "<b>b</b>", "<b>b</b>"),
+    amp = c("A &amp; B", "A &amp; B", "C", "C"),
+    count = 1:4,
+    stringsAsFactors = FALSE
+  )
+  result <- useDropdownFilters(data, maxValues = 3)
+  expect_s3_class(result$status, "factor")
+  expect_equal(levels(result$status), c("Draft", "Valid"))
+  expect_true(is.na(result$status[4]))
+  expect_type(result$name, "character")
+  expect_type(result$html, "character")
+  expect_type(result$amp, "character")
+  expect_type(result$count, "integer")
+  expect_equal(nrow(useDropdownFilters(data.frame(x = character(0)))), 0)
+})
