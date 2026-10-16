@@ -21,14 +21,14 @@ bslib::page_navbar(
   header = tags$head(tags$link(rel = "icon", type = "image/png", href = "LogoSmall.png")),
   bslib::nav_panel("Browse", browseUi("browse")),
   bslib::nav_panel("Performance", performanceUi("performance")),
-  bslib::nav_panel("New phenotype", createUi("create")),
-  bslib::nav_panel("Evaluation", evaluationUi("evaluation")),
   bslib::nav_panel("Concept Search", conceptsUi("concepts")),
   bslib::nav_panel(
     title = tagList("Shortlist ", uiOutput("shortlistCount", inline = TRUE)),
     value = "Shortlist",
     shortlistUi("shortlist")
   ),
+  bslib::nav_panel("New Phenotype", createUi("create")),
+  bslib::nav_panel("New Evaluation", evaluationUi("evaluation")),
   bslib::nav_spacer(),
   bslib::nav_item(tags$img(src = "LogoTiny.png", height = "40px", alt = "Pegasus logo"))
 )
