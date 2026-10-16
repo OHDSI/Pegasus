@@ -49,12 +49,14 @@ assignSeries <- function(values, order, otherLabel = "Other") {
   list(label = ifelse(is.na(slot), otherLabel, values), slot = slot)
 }
 
-seriesGroups <- function(data, colorBy, databaseOrder) {
+# The slot order lists the known values first and any other values alphabetically, so a value that is not
+# in the built-in lists (a different spelling, a new source type) still gets its own color.
+seriesGroups <- function(data, colorBy, databaseOrder, sourceLevels, evaluationTypeLevels) {
   switch(
     colorBy,
-    source = assignSeries(data$paSourceType, sourceTypeOrder, "Other source"),
+    source = assignSeries(data$paSourceType, sourceLevels, "Other source"),
     database = assignSeries(data$cdmSourceAbbreviation, databaseOrder, "Other databases"),
-    evaluationType = assignSeries(data$evaluationType, evaluationTypeOrder, "Other evaluation type"),
+    evaluationType = assignSeries(data$evaluationType, evaluationTypeLevels, "Other evaluation type"),
     stop("Unknown colorBy: ", colorBy)
   )
 }
@@ -73,8 +75,10 @@ hoverText <- function(data) {
   )
 }
 
-emptyPlot <- function(message) {
-  plot <- plotly::plot_ly()
+# The explicit empty trace avoids plotly's "No trace type specified" warnings, and registering the events
+# keeps event_data() from warning while there is nothing to show.
+emptyPlot <- function(message, source = "emptyPlot", events = character(0)) {
+  plot <- plotly::plot_ly(x = numeric(0), y = numeric(0), type = "scatter", mode = "markers", source = source)
   plot <- plotly::layout(
     plot,
     xaxis = list(visible = FALSE),
@@ -87,7 +91,11 @@ emptyPlot <- function(message) {
     plot_bgcolor = surfaceColor,
     font = chartFont
   )
-  plotly::config(plot, displayModeBar = FALSE)
+  plot <- plotly::config(plot, displayModeBar = FALSE)
+  for (event in events) {
+    plot <- plotly::event_register(plot, event)
+  }
+  plot
 }
 
 axisStyle <- function(title) {
@@ -107,14 +115,23 @@ buildScatter <- function(data,
                          colorBy = "source",
                          showCi = FALSE,
                          databaseOrder = unique(data$cdmSourceAbbreviation[order(data$databaseId)]),
+                         sourceLevels = orderedLevels(data$paSourceType, sourceTypeOrder),
+                         evaluationTypeLevels = orderedLevels(data$evaluationType, evaluationTypeOrder),
                          source = "performanceScatter",
                          clickable = TRUE,
                          selectable = clickable,
                          emptyMessage = "No evaluations match the current filters.") {
+  events <- c(if (clickable) "plotly_click", if (selectable) "plotly_selected")
+  # Points without a PPV or sensitivity cannot be placed (plotly would drop them with a warning).
+  data <- data[!is.na(data$ppv) & !is.na(data$sensitivity), , drop = FALSE]
   if (nrow(data) == 0) {
-    return(emptyPlot(emptyMessage))
+    return(emptyPlot(emptyMessage, source = source, events = events))
   }
-  groups <- seriesGroups(data, colorBy, databaseOrder)
+  for (column in c("ppvLb", "ppvUb", "sensitivityLb", "sensitivityUb")) {
+    estimate <- if (grepl("^ppv", column)) data$ppv else data$sensitivity
+    data[[column]] <- ifelse(is.na(data[[column]]), estimate, data[[column]])
+  }
+  groups <- seriesGroups(data, colorBy, databaseOrder, sourceLevels, evaluationTypeLevels)
   data$group <- groups$label
   data$slot <- groups$slot
   data$hover <- hoverText(data)
@@ -166,11 +183,8 @@ buildScatter <- function(data,
     font = chartFont
   )
   plot <- plotly::config(plot, displaylogo = FALSE, scrollZoom = TRUE)
-  if (clickable) {
-    plot <- plotly::event_register(plot, "plotly_click")
-  }
-  if (selectable) {
-    plot <- plotly::event_register(plot, "plotly_selected")
+  for (event in events) {
+    plot <- plotly::event_register(plot, event)
   }
   plot
 }
@@ -181,7 +195,7 @@ buildComparison <- function(data,
                             groupBy = "database",
                             databaseOrder = unique(data$cdmSourceAbbreviation[order(data$databaseId)])) {
   if (nrow(data) == 0) {
-    return(emptyPlot("No evaluations match the current filters."))
+    return(emptyPlot("No evaluations match the current filters.", source = "comparison"))
   }
   values <- switch(
     groupBy,

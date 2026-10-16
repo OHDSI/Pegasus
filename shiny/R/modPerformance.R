@@ -105,6 +105,10 @@ performanceServer <- function(id, evaluations, shortlist, onOpenPhenotype) {
       unique(data$cdmSourceAbbreviation[order(data$databaseId)])
     })
 
+    # Color slots come from all evaluations, so filtering does not repaint the remaining series.
+    sourceLevels <- reactive(orderedLevels(evaluations()$paSourceType, sourceTypeOrder))
+    evaluationTypeLevels <- reactive(orderedLevels(evaluations()$evaluationType, evaluationTypeOrder))
+
     observeEvent(evaluations(), {
       data <- evaluations()
       evalTypes <- orderedLevels(data$evaluationType, evaluationTypeOrder)
@@ -150,6 +154,8 @@ performanceServer <- function(id, evaluations, shortlist, onOpenPhenotype) {
         colorBy = input$colorBy,
         showCi = isTRUE(input$showCi),
         databaseOrder = databaseOrder(),
+        sourceLevels = sourceLevels(),
+        evaluationTypeLevels = evaluationTypeLevels(),
         source = scatterSource
       )
     })

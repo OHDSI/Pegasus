@@ -98,7 +98,24 @@ test_that("buildScatter adds error bars only when asked and handles empty data",
   expect_false(is.null(withCi[[1]]$error_x))
 
   empty <- buildScatter(emptyEvaluations())
-  expect_length(builtTraces(empty), 0)
+  expect_true(all(vapply(builtTraces(empty), function(trace) length(trace$x) == 0, TRUE)))
+  expect_equal(empty$x$source, "performanceScatter")
+})
+
+test_that("values outside the built-in lists still get their own colors and rows without PPV are dropped", {
+  skip_if_not_installed("plotly")
+  data <- seedEvaluations()
+  data$paSourceType <- c("Human", "Machine")[1 + (seq_len(nrow(data)) %% 2)]
+  data$evaluationType <- c("Alpha", "Beta")[1 + (seq_len(nrow(data)) %% 2)]
+  for (colorBy in c("source", "evaluationType")) {
+    traces <- builtTraces(buildScatter(data, colorBy = colorBy))
+    expect_length(traces, 2)
+    expect_false(any(vapply(traces, function(trace) trace$marker$color == otherColor, TRUE)))
+  }
+
+  data$ppv[1:2] <- NA
+  traces <- builtTraces(buildScatter(data, colorBy = "source"))
+  expect_equal(sum(vapply(traces, function(trace) length(trace$x), 1L)), nrow(data) - 2)
 })
 
 test_that("buildComparison makes a PPV and a sensitivity panel for every grouping", {
@@ -107,7 +124,7 @@ test_that("buildComparison makes a PPV and a sensitivity panel for every groupin
   for (groupBy in c("database", "source", "evaluationType")) {
     expect_length(builtTraces(buildComparison(data, groupBy)), 2)
   }
-  expect_length(builtTraces(buildComparison(emptyEvaluations())), 0)
+  expect_true(all(vapply(builtTraces(buildComparison(emptyEvaluations())), function(trace) length(trace$x) == 0, TRUE)))
 })
 
 test_that("filterEvaluations restricts by phenotype, database, type, source and thresholds", {
