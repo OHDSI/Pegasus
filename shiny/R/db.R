@@ -539,3 +539,35 @@ getConceptSetCounts <- function(connection, databaseSchema, conceptSetId) {
   ORDER BY d.cdm_source_abbreviation;"
   queryPegasus(connection, databaseSchema, sql, concept_set_id = as.integer(conceptSetId))
 }
+
+# The name of the entity a route points to, and for a cohort definition its phenotype, for the level bar in
+# the Browse tab. NULL when the entity does not exist.
+getRouteLabels <- function(connection, databaseSchema, page, id) {
+  if (page == "cohort_definition") {
+    row <- queryPegasus(
+      connection, databaseSchema,
+      "SELECT cd.cohort_definition_name, cd.phenotype_id, p.phenotype_name
+      FROM @database_schema.cohort_definition cd
+      INNER JOIN @database_schema.phenotype p
+        ON p.phenotype_id = cd.phenotype_id
+      WHERE cd.cohort_definition_id = @id;",
+      id = as.integer(id)
+    )
+    if (nrow(row) != 1) {
+      return(NULL)
+    }
+    return(list(name = row$cohortDefinitionName, parentId = row$phenotypeId, parentName = row$phenotypeName))
+  }
+  if (page == "concept_set") {
+    row <- queryPegasus(
+      connection, databaseSchema,
+      "SELECT concept_set_name FROM @database_schema.concept_set WHERE concept_set_id = @id;",
+      id = as.integer(id)
+    )
+    if (nrow(row) != 1) {
+      return(NULL)
+    }
+    return(list(name = row$conceptSetName, parentId = NULL, parentName = NULL))
+  }
+  NULL
+}

@@ -55,11 +55,60 @@ statusBadgeRender <- function() {
   ))
 }
 
+# The three levels of the Browse tab, each with its own color, from clinical intent down to vocabulary.
+browseLevels <- list(
+  list(page = "phenotype", title = "Phenotype", descriptor = "Clinical intent", color = ohdsiBlue),
+  list(page = "cohort_definition", title = "Cohort Definition", descriptor = "Implementation logic", color = ohdsiTeal),
+  list(page = "concept_set", title = "Concept Set", descriptor = "Vocabulary", color = ohdsiOrange)
+)
+
+# A bar of three side-by-side blocks that shows at which level the user is browsing: the active block is filled
+# with its color and names what is open. page is the route's page (NULL for the phenotype list); name is the open
+# entity's name; parent is list(id, name) of the phenotype a cohort definition belongs to, shown as a link.
+levelBar <- function(page = NULL, name = NULL, parent = NULL) {
+  active <- if (is.null(page)) "phenotype" else page
+  blocks <- lapply(browseLevels, function(level) {
+    isActive <- level$page == active
+    current <- if (isActive) {
+      if (is.null(page)) "All phenotypes" else if (is.null(name)) "Not found" else name
+    }
+    currentHtml <- if (isActive) {
+      htmltools::htmlEscape(current)
+    } else if (level$page == "phenotype" && !is.null(parent)) {
+      entityLink("phenotype", parent$id, parent$name)
+    } else {
+      "&nbsp;"
+    }
+    tags$div(
+      class = paste("level-block", if (isActive) "active"),
+      style = sprintf("--level-color: %s;", level$color),
+      `aria-current` = if (isActive) "page",
+      tags$div(class = "level-title", level$title),
+      tags$div(class = "level-descriptor", level$descriptor),
+      tags$div(class = "level-current", HTML(currentHtml))
+    )
+  })
+  tags$div(class = "level-bar", blocks)
+}
+
 browseUi <- function(id) {
   ns <- NS(id)
+  tagList(
+  uiOutput(ns("levelBar")),
   bslib::navset_hidden(
     id = ns("view"),
     header = tags$style(HTML("
+      .level-bar { display: flex; margin-bottom: 1rem; }
+      .level-block { flex: 1 1 0; min-width: 0; padding: 0.7rem 1.1rem; border: 2px solid var(--level-color);
+        color: var(--level-color); background: color-mix(in srgb, var(--level-color) 9%, white); }
+      .level-block:first-child { border-radius: 0.5rem 0 0 0.5rem; }
+      .level-block:last-child { border-radius: 0 0.5rem 0.5rem 0; }
+      .level-block + .level-block { border-left-width: 0; }
+      .level-block.active { background: var(--level-color); color: #ffffff; box-shadow: 0 3px 8px rgba(0, 0, 0, 0.25); }
+      .level-title { font-size: 1.25rem; font-weight: 700; line-height: 1.2; }
+      .level-descriptor { font-size: 0.8rem; opacity: 0.85; }
+      .level-current { font-weight: 600; margin-top: 0.25rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .level-block a { color: inherit; text-decoration: underline; }
       .clickable-rows tbody tr { cursor: pointer; }
       .clickable-rows .name-cell { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .clickable-rows th.narrow-col { writing-mode: vertical-rl; vertical-align: bottom; white-space: nowrap;
@@ -95,6 +144,7 @@ browseUi <- function(id) {
     bslib::nav_panel_hidden("phenotype", phenotypeDetailUi(ns("phenotype"))),
     bslib::nav_panel_hidden("cohort_definition", cohortUi(ns("cohort"))),
     bslib::nav_panel_hidden("concept_set", conceptSetUi(ns("conceptSet")))
+  )
   )
 }
 
@@ -200,6 +250,33 @@ browseServer <- function(id, connectionPool, databaseSchema, phenotypes, refresh
     observeEvent(route(), {
       bslib::nav_select("view", if (is.null(route())) "list" else route()$page, session = session)
     }, ignoreNULL = FALSE)
+
+    # What the level bar names: the open entity and, for a cohort definition, its phenotype.
+    levelContext <- reactive({
+      current <- route()
+      if (is.null(current)) {
+        return(NULL)
+      }
+      if (current$page == "phenotype") {
+        data <- phenotypes()
+        row <- data[data$phenotypeId == current$id, , drop = FALSE]
+        return(if (nrow(row) == 1) list(name = row$phenotypeName) else NULL)
+      }
+      tryCatch(
+        withConnection(connectionPool, function(connection) getRouteLabels(connection, databaseSchema, current$page, current$id)),
+        error = function(e) NULL
+      )
+    })
+
+    output$levelBar <- renderUI({
+      current <- route()
+      context <- levelContext()
+      levelBar(
+        page = current$page,
+        name = context$name,
+        parent = if (!is.null(context$parentId)) list(id = context$parentId, name = context$parentName)
+      )
+    })
 
     # The detail modules only see the ID when their own page is the current one.
     idFor <- function(page) {

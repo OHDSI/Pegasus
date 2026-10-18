@@ -178,3 +178,56 @@ test_that("statusBadgeRender knows a badge class for every status", {
   }
   expect_match(js, "text-bg-success", fixed = TRUE)
 })
+
+test_that("levelBar marks the level being browsed and names what is open", {
+  blockOf <- function(html, title) {
+    blocks <- strsplit(html, 'class="level-block', fixed = TRUE)[[1]][-1]
+    blocks[grepl(title, blocks, fixed = TRUE)][1]
+  }
+  list <- as.character(levelBar())
+  expect_match(blockOf(list, "Phenotype"), " active", fixed = TRUE)
+  expect_match(blockOf(list, "Phenotype"), "All phenotypes", fixed = TRUE)
+  expect_false(grepl(" active", blockOf(list, "Cohort Definition"), fixed = TRUE))
+  expect_false(grepl(" active", blockOf(list, "Concept Set"), fixed = TRUE))
+
+  cohort <- as.character(levelBar("cohort_definition", "My <cohort>", list(id = 4, name = "Parent")))
+  expect_match(blockOf(cohort, "Cohort Definition"), " active", fixed = TRUE)
+  expect_match(blockOf(cohort, "Cohort Definition"), "My &lt;cohort&gt;", fixed = TRUE)
+  expect_false(grepl(" active", blockOf(cohort, "Phenotype"), fixed = TRUE))
+  expect_match(blockOf(cohort, "Phenotype"), 'data-id="4"', fixed = TRUE)
+  expect_match(cohort, "aria-current", fixed = TRUE)
+
+  expect_match(blockOf(as.character(levelBar("concept_set", NULL)), "Concept Set"), "Not found", fixed = TRUE)
+})
+
+test_that("the browse server shows the level bar for the current route and looks up cohort and concept set names", {
+  pool <- createTestPool()
+  on.exit(pool::poolClose(pool))
+  loadSeedData(pool)
+  phenotypes <- reactiveVal(withConnection(pool, function(connection) getPhenotypeSummary(connection, "main")))
+  route <- reactiveVal(NULL)
+
+  labels <- withConnection(pool, function(connection) getRouteLabels(connection, "main", "cohort_definition", 3))
+  expect_equal(labels$name, "Asthma - user")
+  expect_equal(labels$parentName, "Asthma")
+  expect_equal(withConnection(pool, function(connection) getRouteLabels(connection, "main", "concept_set", 1))$name, "Asthma")
+  expect_null(withConnection(pool, function(connection) getRouteLabels(connection, "main", "concept_set", 999)))
+
+  testServer(
+    browseServer,
+    args = list(
+      connectionPool = pool, databaseSchema = "main", phenotypes = phenotypes, refreshPhenotypes = function() NULL,
+      route = route, navigate = function(page = NULL, id = NULL) NULL,
+      shortlist = reactiveVal(integer(0)), onRefine = function(id) NULL
+    ),
+    {
+      expect_match(as.character(output$levelBar$html), "All phenotypes", fixed = TRUE)
+      route(list(page = "cohort_definition", id = 3L))
+      html <- as.character(output$levelBar$html)
+      expect_match(html, "Asthma - user", fixed = TRUE)
+      expect_match(html, 'data-page="phenotype"', fixed = TRUE)
+      route(list(page = "phenotype", id = 1L))
+      expect_match(as.character(output$levelBar$html), "Asthma", fixed = TRUE)
+    }
+  )
+})
