@@ -86,6 +86,7 @@ conceptSetServer <- function(id, connectionPool, databaseSchema, conceptSetId, n
             cohorts = getConceptSetCohorts(connection, databaseSchema, conceptSetId()),
             phenotypes = getConceptSetPhenotypes(connection, databaseSchema, conceptSetId()),
             counts = getConceptSetCounts(connection, databaseSchema, conceptSetId()),
+            identical = getIdenticalConceptSets(connection, databaseSchema, conceptSetId()),
             atlasBaseUrl = getAtlasBaseUrl(connection, databaseSchema)
           )
         }),
@@ -132,6 +133,17 @@ conceptSetServer <- function(id, connectionPool, databaseSchema, conceptSetId, n
             HTML(paste0(" | ", atlasLink(detail$atlasBaseUrl, "conceptSet", row$atlasConceptSetId)))
           }
         ),
+        if (nrow(detail$identical) > 0) {
+          tags$div(
+            class = "alert alert-info small",
+            sprintf(
+              "%d other stored concept set%s the same content (same concepts, exclusions, descendants and mapped flags): ",
+              nrow(detail$identical), if (nrow(detail$identical) == 1) " has" else "s have"
+            ),
+            entityLinkList("concept_set", detail$identical$conceptSetId, detail$identical$conceptSetName),
+            ". Cohort definitions may use any of them, so check each one's list of cohort definitions."
+          )
+        },
         if (!is.na(row$clinicalDefinition) && nzchar(row$clinicalDefinition)) {
           tags$div(
             class = "card card-body bg-body-tertiary mb-3",

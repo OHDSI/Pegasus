@@ -4,9 +4,13 @@
 # Needs concept_set_item to be filled first (extras/PopulateConceptSetItems.R). Existing links are kept, so it is
 # safe to re-run. Run it from the repository root.
 #
-# Settings: matchByName = FALSE matches on content only (identical items); dryRun = TRUE only reports what would be
-# added, without changing the database.
+# The matching runs inside the database in one query: the items of every cohort's concept sets are uploaded to a
+# temporary table and compared with concept_set_item. A concept set matches when it has exactly the same items.
+#
+# Settings: matchByName = FALSE matches on content only (no name fallback); onDuplicates decides what happens when
+# several stored concept sets have identical content; dryRun = TRUE only reports, without changing the database.
 matchByName <- TRUE
+onDuplicates <- "all" # or "lowest": what to do when several stored concept sets have identical content
 dryRun <- FALSE
 library(DatabaseConnector)
 
@@ -35,14 +39,25 @@ existing <- queryPegasus(
   "SELECT cohort_definition_id, concept_set_id FROM @database_schema.cohort_definition_to_concept_set;"
 )
 
-links <- do.call(rbind, lapply(seq_len(nrow(cohorts)), function(i) {
-  ids <- matchCohortConceptSets(connection, databaseSchema, cohorts$circeCohortExpression[i], matchByName)
-  if (length(ids) == 0) {
-    return(NULL)
-  }
-  data.frame(cohortDefinitionId = cohorts$cohortDefinitionId[i], conceptSetId = ids)
-}))
-if (is.null(links)) {
+result <- matchCohortConceptSetsInDatabase(connection, databaseSchema, cohorts, matchByName, onDuplicates)
+report <- result$report
+message(
+  "Concept sets inside cohort definitions: ", report$conceptSets, ". Matched by content: ", report$matchedByContent,
+  ", by name: ", report$matchedByName, ", not matched: ", nrow(report$unmatched), "."
+)
+if (report$duplicateContent > 0) {
+  message(
+    report$duplicateContent, " concept set(s) in cohorts have identical content in several stored concept sets (",
+    if (onDuplicates == "all") "all of them are linked" else "only the lowest ID is linked", ")."
+  )
+}
+if (nrow(report$unmatched) > 0) {
+  message("Concept sets without a match (first 20):")
+  print(utils::head(report$unmatched, 20))
+}
+
+links <- result$links
+if (nrow(links) == 0) {
   stop("No concept sets in any cohort definition could be matched to a stored concept set.")
 }
 links <- links[!paste(links$cohortDefinitionId, links$conceptSetId) %in% paste(existing$cohortDefinitionId, existing$conceptSetId), ]

@@ -37,6 +37,40 @@ validityBadge <- function(valid) {
   }
 }
 
+# The concept sets of a cohort definition as table columns. `matches` says which concept set in the cohort's own
+# JSON (by name) matched each stored set; NULL when that comparison could not be made. A concept set in the JSON
+# can match several stored sets with identical content, and those rows point at each other.
+cohortConceptSetTable <- function(conceptSets, matches, atlasBaseUrl) {
+  table <- data.frame(
+    Name = entityLink("concept_set", conceptSets$conceptSetId, conceptSets$conceptSetName),
+    Source = htmltools::htmlEscape(conceptSets$csSourceType),
+    Status = draftOrValid(conceptSets$valid),
+    Descendants = ifelse(conceptSets$hasDescendants == 1, "Yes", "No"),
+    check.names = FALSE
+  )
+  if (!is.null(matches)) {
+    rows <- lapply(conceptSets$conceptSetId, function(id) {
+      own <- matches[matches$conceptSetId == id, , drop = FALSE]
+      others <- matches[matches$setIndex %in% own$setIndex & matches$conceptSetId != id, , drop = FALSE]
+      others <- others[!duplicated(others$conceptSetId), , drop = FALSE]
+      list(
+        inCohort = if (nrow(own) == 0) "" else paste(htmltools::htmlEscape(unique(ifelse(is.na(own$name), "(unnamed)", own$name))), collapse = ", "),
+        note = if (nrow(own) == 0) {
+          "Not found in the cohort's JSON"
+        } else if (nrow(others) > 0) {
+          paste("Same content as", paste(entityLink("concept_set", others$conceptSetId, others$conceptSetName), collapse = ", "))
+        } else {
+          ""
+        }
+      )
+    })
+    table[["In the cohort JSON as"]] <- vapply(rows, function(row) row$inCohort, "")
+    table$Note <- vapply(rows, function(row) row$note, "")
+  }
+  table$Atlas <- atlasLink(atlasBaseUrl, "conceptSet", conceptSets$atlasConceptSetId)
+  table
+}
+
 cohortUi <- function(id) {
   ns <- NS(id)
   tagList(
@@ -67,19 +101,29 @@ cohortServer <- function(id, connectionPool, databaseSchema, cohortDefinitionId,
       tryCatch(
         withConnection(connectionPool, function(connection) {
           cohort <- getCohortDefinition(connection, databaseSchema, cohortDefinitionId())
-          conceptSets <- getCohortConceptSets(connection, databaseSchema, cohortDefinitionId())
-          # Without rows in cohort_definition_to_concept_set, find the sets by reading the cohort's own JSON.
-          fromJson <- nrow(conceptSets) == 0 && nrow(cohort) == 1
-          if (fromJson) {
-            conceptSets <- getConceptSetSummaries(
-              connection, databaseSchema,
-              matchCohortConceptSets(connection, databaseSchema, cohort$circeCohortExpression)
+          linked <- getCohortConceptSets(connection, databaseSchema, cohortDefinitionId())
+          # Compare the concept sets inside the cohort's own JSON with the stored ones. This is only extra
+          # information, so the page still works when the comparison fails.
+          matched <- if (nrow(cohort) == 1) {
+            tryCatch(
+              matchCohortConceptSetsInDatabase(
+                connection, databaseSchema, cohort[, c("cohortDefinitionId", "circeCohortExpression")]
+              ),
+              error = function(e) {
+                logEvent("cohort concept sets could not be compared with the JSON: ", conditionMessage(e))
+                NULL
+              }
             )
           }
+          # Without rows in cohort_definition_to_concept_set, the matches from the JSON are the concept sets.
+          fromJson <- nrow(linked) == 0 && !is.null(matched) && nrow(matched$links) > 0
+          conceptSets <- if (fromJson) getConceptSetSummaries(connection, databaseSchema, matched$links$conceptSetId) else linked
           list(
             cohort = cohort,
             conceptSets = conceptSets,
-            conceptSetsFromJson = fromJson && nrow(conceptSets) > 0,
+            conceptSetsFromJson = fromJson,
+            conceptSetMatches = if (is.null(matched)) NULL else matched$matches,
+            jsonSetsWithoutMatch = if (is.null(matched)) NULL else matched$report$unmatched,
             evaluations = getEvaluations(connection, databaseSchema, cohortDefinitionId = cohortDefinitionId()),
             atlasBaseUrl = getAtlasBaseUrl(connection, databaseSchema)
           )
@@ -174,28 +218,40 @@ cohortServer <- function(id, connectionPool, databaseSchema, cohortDefinitionId,
     output$conceptSetNote <- renderUI({
       detail <- details()
       req(detail)
-      if (isTRUE(detail$conceptSetsFromJson)) {
-        tags$p(
-          class = "text-muted small",
-          "No concept sets are recorded for this cohort definition in cohort_definition_to_concept_set. These were found by ",
-          "matching the concept sets inside its Circe JSON with the stored concept sets."
-        )
-      }
+      unmatched <- detail$jsonSetsWithoutMatch
+      tagList(
+        if (isTRUE(detail$conceptSetsFromJson)) {
+          tags$p(
+            class = "text-muted small",
+            "No concept sets are recorded for this cohort definition in cohort_definition_to_concept_set. These were found by ",
+            "matching the concept sets inside its Circe JSON with the stored concept sets."
+          )
+        },
+        if (!is.null(unmatched) && nrow(unmatched) > 0) {
+          tags$div(
+            class = "alert alert-warning small",
+            sprintf(
+              "%d concept set%s in this cohort's JSON ha%s no stored match: ",
+              nrow(unmatched), if (nrow(unmatched) == 1) "" else "s", if (nrow(unmatched) == 1) "s" else "ve"
+            ),
+            paste(ifelse(is.na(unmatched$name), "(unnamed)", unmatched$name), collapse = ", ")
+          )
+        },
+        if (!is.null(detail$conceptSetMatches) && any(duplicated(detail$conceptSetMatches[, c("cohortDefinitionId", "setIndex")]))) {
+          tags$p(
+            class = "text-muted small",
+            "Some concept sets in this cohort's JSON have identical content in several stored concept sets; ",
+            "they are listed together and marked in the Note column."
+          )
+        }
+      )
     })
 
     output$conceptSets <- DT::renderDT({
       detail <- details()
       req(detail)
-      conceptSets <- detail$conceptSets
       filterableTable(
-        data.frame(
-          Name = entityLink("concept_set", conceptSets$conceptSetId, conceptSets$conceptSetName),
-          Source = htmltools::htmlEscape(conceptSets$csSourceType),
-          Status = draftOrValid(conceptSets$valid),
-          Descendants = ifelse(conceptSets$hasDescendants == 1, "Yes", "No"),
-          Atlas = atlasLink(detail$atlasBaseUrl, "conceptSet", conceptSets$atlasConceptSetId),
-          check.names = FALSE
-        ),
+        cohortConceptSetTable(detail$conceptSets, detail$conceptSetMatches, detail$atlasBaseUrl),
         rownames = FALSE,
         selection = "none",
         escape = FALSE,

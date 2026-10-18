@@ -194,28 +194,82 @@ test_that("phenotype page lists cohort definitions as links and reports an unkno
   )
 })
 
-test_that("matchCohortConceptSets finds stored concept sets by items and by name", {
+test_that("getConceptSetSummaries returns the listed concept sets and handles an empty list", {
   pool <- createTestPool()
   on.exit(pool::poolClose(pool))
   loadSeedData(pool)
-  circe <- paste0(
-    '{"ConceptSets":[',
-    # Same items as stored concept set 1 under a different name.
-    '{"id":0,"name":"Renamed in Atlas","expression":{"items":[{"concept":{"CONCEPT_ID":317009},"isExcluded":false,"includeDescendants":true,"includeMapped":false}]}},',
-    # Different items, but the same name as stored concept set 4 (COPD).
-    '{"id":1,"name":"copd","expression":{"items":[{"concept":{"CONCEPT_ID":999},"isExcluded":false}]}},',
-    # Nothing matches this one.
-    '{"id":2,"name":"Unknown","expression":{"items":[{"concept":{"CONCEPT_ID":888}}]}}',
-    '],"PrimaryCriteria":{}}'
-  )
-  ids <- withConnection(pool, function(connection) matchCohortConceptSets(connection, "main", circe))
-  expect_setequal(ids, c(1, 4))
-  expect_length(withConnection(pool, function(connection) matchCohortConceptSets(connection, "main", "not json")), 0)
-  expect_length(withConnection(pool, function(connection) matchCohortConceptSets(connection, "main", '{"ConceptSets":[]}')), 0)
-
-  summary <- withConnection(pool, function(connection) getConceptSetSummaries(connection, "main", ids))
+  summary <- withConnection(pool, function(connection) getConceptSetSummaries(connection, "main", c(1L, 4L)))
   expect_setequal(summary$conceptSetName, c("Asthma", "COPD"))
   expect_equal(nrow(withConnection(pool, function(connection) getConceptSetSummaries(connection, "main", integer(0)))), 0)
+})
+
+addIdenticalConceptSet <- function(pool) {
+  withConnection(pool, function(connection) {
+    # A second stored concept set with the same content as concept set 1.
+    DatabaseConnector::executeSql(
+      connection,
+      "INSERT INTO main.concept_set (concept_set_id, concept_set_name, circe_concept_set_expression, has_descendants, valid)
+         VALUES (20, 'Asthma copy', '{\"items\": []}', 1, 1);
+       INSERT INTO main.concept_set_item VALUES (20, 317009, 0, 1, 0);",
+      progressBar = FALSE, reportOverallTime = FALSE
+    )
+  })
+}
+
+test_that("getIdenticalConceptSets finds other stored sets with exactly the same content", {
+  pool <- createTestPool()
+  on.exit(pool::poolClose(pool))
+  loadSeedData(pool)
+  expect_equal(nrow(withConnection(pool, function(connection) getIdenticalConceptSets(connection, "main", 1))), 0)
+  addIdenticalConceptSet(pool)
+  expect_equal(withConnection(pool, function(connection) getIdenticalConceptSets(connection, "main", 1))$conceptSetId, 20)
+  expect_equal(withConnection(pool, function(connection) getIdenticalConceptSets(connection, "main", 20))$conceptSetId, 1)
+  # Concept set 8 has an extra, excluded item, so it is not the same as 1 or 20.
+  expect_equal(nrow(withConnection(pool, function(connection) getIdenticalConceptSets(connection, "main", 8))), 0)
+})
+
+test_that("the concept set page points to identical concept sets", {
+  pool <- createTestPool()
+  on.exit(pool::poolClose(pool))
+  loadSeedData(pool)
+  addIdenticalConceptSet(pool)
+  testServer(
+    conceptSetServer,
+    args = list(connectionPool = pool, databaseSchema = "main", conceptSetId = reactiveVal(1L), navigate = function(page = NULL, id = NULL) NULL),
+    {
+      header <- as.character(output$header$html)
+      expect_match(header, "same content", fixed = TRUE)
+      expect_match(header, "Asthma copy", fixed = TRUE)
+      expect_match(header, 'data-id="20"', fixed = TRUE)
+    }
+  )
+  testServer(
+    conceptSetServer,
+    args = list(connectionPool = pool, databaseSchema = "main", conceptSetId = reactiveVal(8L), navigate = function(page = NULL, id = NULL) NULL),
+    {
+      expect_false(grepl("same content", as.character(output$header$html), fixed = TRUE))
+    }
+  )
+})
+
+test_that("cohortConceptSetTable names the matching JSON concept set and marks identical stored sets", {
+  conceptSets <- data.frame(
+    conceptSetId = c(1L, 20L, 7L), conceptSetName = c("Asthma", "Asthma copy", "Psoriasis"), csSourceType = "user",
+    valid = 1L, hasDescendants = 1L, atlasConceptSetId = NA_integer_
+  )
+  matches <- data.frame(
+    cohortDefinitionId = 5L, setIndex = 1L, conceptSetId = c(1L, 20L), how = "content", name = "Atlas asthma",
+    conceptSetName = c("Asthma", "Asthma copy")
+  )
+  table <- cohortConceptSetTable(conceptSets, matches, NULL)
+  expect_equal(table[["In the cohort JSON as"]], c("Atlas asthma", "Atlas asthma", ""))
+  expect_match(table$Note[1], "Same content as", fixed = TRUE)
+  expect_match(table$Note[1], "Asthma copy", fixed = TRUE)
+  expect_match(table$Note[2], "Asthma</a>", fixed = TRUE)
+  expect_equal(table$Note[3], "Not found in the cohort's JSON")
+
+  withoutMatches <- cohortConceptSetTable(conceptSets, NULL, NULL)
+  expect_false("Note" %in% names(withoutMatches))
 })
 
 test_that("the cohort page finds concept sets from its JSON when the link table has no rows for it", {
@@ -248,6 +302,112 @@ test_that("the cohort page finds concept sets from its JSON when the link table 
     {
       expect_false(details()$conceptSetsFromJson)
       expect_equal(details()$conceptSets$conceptSetName, "Asthma (exact)")
+    }
+  )
+})
+
+circeSet <- function(name, ...) {
+  items <- vapply(list(...), function(item) {
+    sprintf(
+      '{"concept":{"CONCEPT_ID":%d},"isExcluded":%s,"includeDescendants":%s,"includeMapped":false}',
+      item[[1]], tolower(as.character(item[[2]])), tolower(as.character(item[[3]]))
+    )
+  }, "")
+  sprintf('{"id":0,"name":"%s","expression":{"items":[%s]}}', name, paste(items, collapse = ","))
+}
+
+cohortWithSets <- function(id, ...) {
+  data.frame(
+    cohortDefinitionId = id,
+    circeCohortExpression = sprintf('{"ConceptSets":[%s],"PrimaryCriteria":{}}', paste(c(...), collapse = ",")),
+    stringsAsFactors = FALSE
+  )
+}
+
+test_that("matchCohortConceptSetsInDatabase matches concept sets by identical content in one query", {
+  pool <- createTestPool()
+  on.exit(pool::poolClose(pool))
+  loadSeedData(pool)
+  addIdenticalConceptSet(pool)
+  cohorts <- rbind(
+    # Same content as sets 1 and 20 (under another name), and as set 8 (items in another order).
+    cohortWithSets(
+      1L,
+      circeSet("Whatever", list(317009, FALSE, TRUE)),
+      circeSet("Also whatever", list(255573, TRUE, TRUE), list(317009, FALSE, TRUE))
+    ),
+    # No content match for the first set but the same name as set 4; the second one has nothing to match.
+    cohortWithSets(2L, circeSet("copd", list(999, FALSE, TRUE)), circeSet("Nothing", list(888, FALSE, FALSE))),
+    # Two items where stored sets have one (set 1) or a different exclusion flag (set 8): not the same content.
+    cohortWithSets(3L, circeSet("Close", list(317009, FALSE, TRUE), list(255573, FALSE, TRUE))),
+    # No concept sets, and invalid JSON.
+    data.frame(cohortDefinitionId = 4L, circeCohortExpression = '{"ConceptSets":[]}', stringsAsFactors = FALSE),
+    data.frame(cohortDefinitionId = 5L, circeCohortExpression = "not json", stringsAsFactors = FALSE)
+  )
+
+  result <- withConnection(pool, function(connection) matchCohortConceptSetsInDatabase(connection, "main", cohorts))
+  links <- paste(result$links$cohortDefinitionId, result$links$conceptSetId)
+  expect_setequal(links, c("1 1", "1 20", "1 8", "2 4"))
+  expect_equal(result$report$conceptSets, 5)
+  expect_equal(result$report$matchedByContent, 2)
+  expect_equal(result$report$matchedByName, 1)
+  expect_equal(result$report$duplicateContent, 1)
+  expect_setequal(result$report$unmatched$name, c("Nothing", "Close"))
+
+  # Which concept set in each cohort's JSON matched which stored set, and how.
+  matches <- result$matches
+  expect_setequal(paste(matches$cohortDefinitionId, matches$conceptSetId, matches$how), c("1 1 content", "1 20 content", "1 8 content", "2 4 name"))
+  expect_equal(matches$name[matches$conceptSetId == 20], "Whatever")
+  expect_equal(matches$conceptSetName[matches$conceptSetId == 20], "Asthma copy")
+  expect_equal(matches$conceptSetName[matches$conceptSetId == 4], "COPD")
+
+  noNames <- withConnection(pool, function(connection) matchCohortConceptSetsInDatabase(connection, "main", cohorts, matchByName = FALSE))
+  expect_false("2 4" %in% paste(noNames$links$cohortDefinitionId, noNames$links$conceptSetId))
+  expect_equal(noNames$report$matchedByName, 0)
+
+  lowest <- withConnection(pool, function(connection) matchCohortConceptSetsInDatabase(connection, "main", cohorts, onDuplicates = "lowest"))
+  expect_setequal(paste(lowest$links$cohortDefinitionId, lowest$links$conceptSetId), c("1 1", "1 8", "2 4"))
+
+  # The temporary table is gone afterwards, so the function can run again on the same connection.
+  again <- withConnection(pool, function(connection) matchCohortConceptSetsInDatabase(connection, "main", cohorts))
+  expect_equal(nrow(again$links), 4)
+
+  none <- withConnection(pool, function(connection) matchCohortConceptSetsInDatabase(connection, "main", cohorts[4:5, ]))
+  expect_equal(nrow(none$links), 0)
+  expect_equal(none$report$conceptSets, 0)
+})
+
+test_that("the cohort page marks identical stored concept sets and reports JSON sets without a match", {
+  pool <- createTestPool()
+  on.exit(pool::poolClose(pool))
+  loadSeedData(pool)
+  addIdenticalConceptSet(pool)
+  withConnection(pool, function(connection) {
+    DatabaseConnector::executeSql(
+      connection,
+      paste0(
+        "UPDATE main.cohort_definition SET circe_cohort_expression = '",
+        '{"ConceptSets":[',
+        '{"id":0,"name":"Asthma in Atlas","expression":{"items":[{"concept":{"CONCEPT_ID":317009},"isExcluded":false,"includeDescendants":true,"includeMapped":false}]}},',
+        '{"id":1,"name":"Only in the JSON","expression":{"items":[{"concept":{"CONCEPT_ID":888}}]}}',
+        '],"PrimaryCriteria":{}}',
+        "' WHERE cohort_definition_id = 10;"
+      ),
+      progressBar = FALSE, reportOverallTime = FALSE
+    )
+  })
+  testServer(
+    cohortServer,
+    args = list(connectionPool = pool, databaseSchema = "main", cohortDefinitionId = reactiveVal(10L), navigate = function(page = NULL, id = NULL) NULL),
+    {
+      expect_setequal(details()$conceptSets$conceptSetId, c(1, 20))
+      table <- cohortConceptSetTable(details()$conceptSets, details()$conceptSetMatches, details()$atlasBaseUrl)
+      expect_true(all(table[["In the cohort JSON as"]] == "Asthma in Atlas"))
+      expect_true(all(grepl("Same content as", table$Note, fixed = TRUE)))
+      note <- as.character(output$conceptSetNote$html)
+      expect_match(note, "Only in the JSON", fixed = TRUE)
+      expect_match(note, "no stored match", fixed = TRUE)
+      expect_match(note, "identical content", fixed = TRUE)
     }
   )
 })
