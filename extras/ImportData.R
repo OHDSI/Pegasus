@@ -514,23 +514,20 @@ for (i in seq_len(nrow(remainingConceptSets))) {
 close(pb)
 
 conceptSetPersonCounts <- bind_rows(conceptSetPersonCounts)
+conceptSetPersonCounts <- bind_rows(conceptSetPersonCounts, priorCounts)
+conceptSetPersonCounts <- conceptSetPersonCounts |>
+  mutate(across(ends_with("Persons"), ~ coalesce(.x, 0)))
 saveRDS(conceptSetPersonCounts, "e:/temp/conceptSetPersonCounts.rds")
 
-# CREATE TABLE @database_schema.concept_set_person_count (
-#   concept_set_id INT NOT NULL,
-#   database_id INT NOT NULL,
-#   condition_persons INT NOT NULL,
-#   procedure_persons INT NOT NULL,
-#   drug_persons INT NOT NULL,
-#   device_persons INT NOT NULL,
-#   measurement_persons INT NOT NULL,
-#   observation_persons INT NOT NULL,
-#   visit_persons INT NOT NULL,
-#   overall_persons INT NOT NULL
-# );
-
-
-DatabaseConnector::disconnect(connection)
+DatabaseConnector::insertTable(
+  connection = connection,
+  databaseSchema = databaseSchema,
+  tableName = "concept_set_person_count",
+  data = conceptSetPersonCounts,
+  dropTableIfExists = FALSE,
+  createTable = FALSE,
+  camelCaseToSnakeCase = TRUE
+)
 
 # Upload draft_concept_set_target ------------------------------------------
 draftConceptSetTarget <- readr::read_csv("../largescalephentest/TargetsAsConceptsCleaned.csv")
@@ -607,4 +604,39 @@ DatabaseConnector::insertTable(
   createTable = FALSE,
   camelCaseToSnakeCase = TRUE
 )
+
+# Upload phenotype metadata ---------------------------------------------------------
+phenotypeMetaData <- readr::read_csv("e:/temp/ClinicalDefinitionMetadata.csv") |>
+  SqlRender::snakeCaseToCamelCaseNames()
+# writeLines(paste0("'", paste(unique(phenotypeMetaData$isPharmacovigilanceOutcome), collapse = "', '"), "'"))
+
+phenotypeMetaData <- phenotypeMetaData |>
+  inner_join(definitions |>
+               select(sourcePhenotype = "phenotypeName", "phenotypeId"),
+             by = join_by("sourcePhenotype")) |>
+  transmute(
+    phenotypeId,
+    isPharmacovigilanceOutcome,
+    clinicalCourse,
+    expectedCareSetting,
+    sexConstraint,
+    minAgeYears,
+    maxAgeYears,
+    minimumInterepisodeGapDays,
+    hasDiscreteRecordedSymptoms = as.integer(hasDiscreteRecordedSymptoms),
+    requiresDiagnosticTestOrProcedure = as.integer(requiresDiagnosticTestOrProcedure),
+    requiresActiveTreatmentWithin30d = as.integer(requiresActiveTreatmentWithin30d),
+    expectsConditionSpecificFollowupOrSequelae1yr = as.integer(expectsConditionSpecificFollowupOrSequelae1yr)
+  )
+DatabaseConnector::insertTable(
+  connection = connection,
+  databaseSchema = databaseSchema,
+  tableName = "phenotype_meta_data",
+  data = phenotypeMetaData,
+  dropTableIfExists = FALSE,
+  createTable = FALSE,
+  camelCaseToSnakeCase = TRUE
+)
+
+DatabaseConnector::disconnect(connection)
 
