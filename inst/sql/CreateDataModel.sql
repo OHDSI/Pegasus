@@ -9,6 +9,7 @@ DROP TABLE IF EXISTS @database_schema.cohort_definition_to_concept_set;
 DROP TABLE IF EXISTS @database_schema.cohort_definition_evaluation;
 DROP TABLE IF EXISTS @database_schema.database_meta_data;
 DROP TABLE IF EXISTS @database_schema.atlas_instance;
+DROP TABLE IF EXISTS @database_schema.phenotype_meta_data;
 
 CREATE TABLE @database_schema.phenotype (
   phenotype_id INT PRIMARY KEY,
