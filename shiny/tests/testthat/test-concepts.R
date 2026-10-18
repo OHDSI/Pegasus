@@ -195,8 +195,7 @@ conceptsTestArgs <- function(pool, vocabulary) {
     databaseSchema = "main",
     vocabularyRunner = if (is.null(vocabulary)) NULL else inlineVocabularyRunner(vocabulary),
     phenotypes = reactiveVal(withConnection(pool, function(connection) getPhenotypeSummary(connection, "main"))),
-    shortlist = reactiveVal(integer(0)),
-    onOpenPhenotype = function(id) NULL
+    shortlist = reactiveVal(integer(0))
   )
 }
 

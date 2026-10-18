@@ -217,7 +217,6 @@ getConceptSets <- function(connection, databaseSchema, phenotypeId) {
     cs.valid,
     cs.has_descendants,
     cs.capr_concept_set_expression,
-    cs.circe_concept_set_expression,
     cs.atlas_concept_set_id
   FROM @database_schema.phenotype_to_concept_set pcs
   INNER JOIN @database_schema.concept_set cs
@@ -275,8 +274,8 @@ getCohortDefinitions <- function(connection, databaseSchema, phenotypeId) {
   queryPegasus(connection, databaseSchema, sql, phenotype_id = as.integer(phenotypeId))
 }
 
-# All evaluations when phenotypeId is NULL, otherwise only those of one phenotype.
-getEvaluations <- function(connection, databaseSchema, phenotypeId = NULL) {
+# All evaluations, or only those of one phenotype and/or one cohort definition.
+getEvaluations <- function(connection, databaseSchema, phenotypeId = NULL, cohortDefinitionId = NULL) {
   sql <- "SELECT cd.phenotype_id,
     p.phenotype_name,
     cd.cohort_definition_id,
@@ -304,21 +303,25 @@ getEvaluations <- function(connection, databaseSchema, phenotypeId = NULL) {
     ON ev.cohort_definition_id = cd.cohort_definition_id
   INNER JOIN @database_schema.database_meta_data d
     ON d.database_id = ev.database_id"
-  if (is.null(phenotypeId)) {
-    evaluations <- queryPegasus(
-      connection,
-      databaseSchema,
-      paste(sql, "ORDER BY cd.cohort_definition_name, d.cdm_source_abbreviation, ev.evaluation_type;")
-    )
-  } else {
-    evaluations <- queryPegasus(
-      connection,
-      databaseSchema,
-      paste(sql, "WHERE cd.phenotype_id = @phenotype_id",
-            "ORDER BY cd.cohort_definition_name, d.cdm_source_abbreviation, ev.evaluation_type;"),
-      phenotype_id = as.integer(phenotypeId)
-    )
+  conditions <- c(
+    if (!is.null(phenotypeId)) "cd.phenotype_id = @phenotype_id",
+    if (!is.null(cohortDefinitionId)) "cd.cohort_definition_id = @cohort_definition_id"
+  )
+  where <- if (length(conditions) > 0) paste("WHERE", paste(conditions, collapse = " AND ")) else ""
+  parameters <- list()
+  if (!is.null(phenotypeId)) {
+    parameters$phenotype_id <- as.integer(phenotypeId)
   }
+  if (!is.null(cohortDefinitionId)) {
+    parameters$cohort_definition_id <- as.integer(cohortDefinitionId)
+  }
+  evaluations <- do.call(queryPegasus, c(
+    list(
+      connection, databaseSchema,
+      paste(sql, where, "ORDER BY cd.cohort_definition_name, d.cdm_source_abbreviation, ev.evaluation_type;")
+    ),
+    parameters
+  ))
   evaluations$evaluationType[is.na(evaluations$evaluationType)] <- "Unspecified"
   evaluations
 }
@@ -412,4 +415,127 @@ getCohortExpressions <- function(connection, databaseSchema, phenotypeIds) {
   WHERE phenotype_id IN (@phenotype_ids)
   ORDER BY phenotype_id, cohort_definition_id;"
   queryPegasus(connection, databaseSchema, sql, phenotype_ids = as.integer(phenotypeIds))
+}
+
+# ---- Landing page data: one cohort definition and one concept set ----
+
+# The cohort definition with its phenotype; zero rows when the ID does not exist.
+getCohortDefinition <- function(connection, databaseSchema, cohortDefinitionId) {
+  sql <- "SELECT cd.cohort_definition_id,
+    cd.cohort_definition_name,
+    cd.phenotype_id,
+    p.phenotype_name,
+    p.clinical_definition,
+    cd.circe_cohort_expression,
+    cd.pa_source_type,
+    cd.valid,
+    cd.atlas_cohort_definition_id
+  FROM @database_schema.cohort_definition cd
+  INNER JOIN @database_schema.phenotype p
+    ON p.phenotype_id = cd.phenotype_id
+  WHERE cd.cohort_definition_id = @cohort_definition_id;"
+  queryPegasus(connection, databaseSchema, sql, cohort_definition_id = as.integer(cohortDefinitionId))
+}
+
+# Concept sets used by a cohort definition.
+getCohortConceptSets <- function(connection, databaseSchema, cohortDefinitionId) {
+  sql <- "SELECT cs.concept_set_id,
+    cs.concept_set_name,
+    cs.cs_source_type,
+    cs.valid,
+    cs.has_descendants,
+    cs.atlas_concept_set_id
+  FROM @database_schema.cohort_definition_to_concept_set cdcs
+  INNER JOIN @database_schema.concept_set cs
+    ON cs.concept_set_id = cdcs.concept_set_id
+  WHERE cdcs.cohort_definition_id = @cohort_definition_id
+  ORDER BY cs.concept_set_name;"
+  queryPegasus(connection, databaseSchema, sql, cohort_definition_id = as.integer(cohortDefinitionId))
+}
+
+# A concept set with both expressions; zero rows when the ID does not exist.
+getConceptSet <- function(connection, databaseSchema, conceptSetId) {
+  sql <- "SELECT concept_set_id,
+    concept_set_name,
+    circe_concept_set_expression,
+    capr_concept_set_expression,
+    has_descendants,
+    clinical_definition,
+    valid,
+    atlas_concept_set_id,
+    cs_source_type
+  FROM @database_schema.concept_set
+  WHERE concept_set_id = @concept_set_id;"
+  queryPegasus(connection, databaseSchema, sql, concept_set_id = as.integer(conceptSetId))
+}
+
+# Cohort definitions that use a concept set, with their phenotypes.
+getConceptSetCohorts <- function(connection, databaseSchema, conceptSetId) {
+  sql <- "SELECT cd.cohort_definition_id,
+    cd.cohort_definition_name,
+    cd.pa_source_type,
+    cd.valid,
+    p.phenotype_id,
+    p.phenotype_name
+  FROM @database_schema.cohort_definition_to_concept_set cdcs
+  INNER JOIN @database_schema.cohort_definition cd
+    ON cd.cohort_definition_id = cdcs.cohort_definition_id
+  INNER JOIN @database_schema.phenotype p
+    ON p.phenotype_id = cd.phenotype_id
+  WHERE cdcs.concept_set_id = @concept_set_id
+  ORDER BY p.phenotype_name, cd.cohort_definition_name;"
+  queryPegasus(connection, databaseSchema, sql, concept_set_id = as.integer(conceptSetId))
+}
+
+# Phenotypes that reference a concept set, either directly or through one of their cohort definitions.
+getConceptSetPhenotypes <- function(connection, databaseSchema, conceptSetId) {
+  direct <- queryPegasus(
+    connection, databaseSchema,
+    "SELECT p.phenotype_id, p.phenotype_name, pcs.pertains, pcs.category
+    FROM @database_schema.phenotype_to_concept_set pcs
+    INNER JOIN @database_schema.phenotype p
+      ON p.phenotype_id = pcs.phenotype_id
+    WHERE pcs.concept_set_id = @concept_set_id;",
+    concept_set_id = as.integer(conceptSetId)
+  )
+  viaCohorts <- queryPegasus(
+    connection, databaseSchema,
+    "SELECT DISTINCT p.phenotype_id, p.phenotype_name
+    FROM @database_schema.cohort_definition_to_concept_set cdcs
+    INNER JOIN @database_schema.cohort_definition cd
+      ON cd.cohort_definition_id = cdcs.cohort_definition_id
+    INNER JOIN @database_schema.phenotype p
+      ON p.phenotype_id = cd.phenotype_id
+    WHERE cdcs.concept_set_id = @concept_set_id;",
+    concept_set_id = as.integer(conceptSetId)
+  )
+  viaCohorts <- viaCohorts[!viaCohorts$phenotypeId %in% direct$phenotypeId, , drop = FALSE]
+  result <- data.frame(
+    phenotypeId = c(direct$phenotypeId, viaCohorts$phenotypeId),
+    phenotypeName = c(direct$phenotypeName, viaCohorts$phenotypeName),
+    pertains = c(direct$pertains, rep(NA_character_, nrow(viaCohorts))),
+    category = c(direct$category, rep(NA_character_, nrow(viaCohorts))),
+    via = c(rep("Phenotype concept set", nrow(direct)), rep("Cohort definition", nrow(viaCohorts))),
+    stringsAsFactors = FALSE
+  )
+  result[order(result$phenotypeName), , drop = FALSE]
+}
+
+# Person counts of one concept set in every database.
+getConceptSetCounts <- function(connection, databaseSchema, conceptSetId) {
+  sql <- "SELECT d.cdm_source_abbreviation,
+    pc.condition_persons,
+    pc.procedure_persons,
+    pc.drug_persons,
+    pc.device_persons,
+    pc.measurement_persons,
+    pc.observation_persons,
+    pc.visit_persons,
+    pc.overall_persons
+  FROM @database_schema.concept_set_person_count pc
+  INNER JOIN @database_schema.database_meta_data d
+    ON d.database_id = pc.database_id
+  WHERE pc.concept_set_id = @concept_set_id
+  ORDER BY d.cdm_source_abbreviation;"
+  queryPegasus(connection, databaseSchema, sql, concept_set_id = as.integer(conceptSetId))
 }

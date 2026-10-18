@@ -53,12 +53,13 @@ assignSeries <- function(values, order, otherLabel = "Other") {
 
 # The slot order lists the known values first and any other values alphabetically, so a value that is not
 # in the built-in lists (a different spelling, a new source type) still gets its own color.
-seriesGroups <- function(data, colorBy, databaseOrder, sourceLevels, evaluationTypeLevels) {
+seriesGroups <- function(data, colorBy, databaseOrder, sourceLevels, evaluationTypeLevels, cohortLevels = character(0)) {
   switch(
     colorBy,
     source = assignSeries(data$paSourceType, sourceLevels, "Other source"),
     database = assignSeries(data$cdmSourceAbbreviation, databaseOrder, "Other databases"),
     evaluationType = assignSeries(data$evaluationType, evaluationTypeLevels, "Other evaluation type"),
+    cohort = assignSeries(data$cohortDefinitionName, cohortLevels, "Other cohorts"),
     stop("Unknown colorBy: ", colorBy)
   )
 }
@@ -119,6 +120,7 @@ buildScatter <- function(data,
                          databaseOrder = unique(data$cdmSourceAbbreviation[order(data$databaseId)]),
                          sourceLevels = orderedLevels(data$paSourceType, sourceTypeOrder),
                          evaluationTypeLevels = orderedLevels(data$evaluationType, evaluationTypeOrder),
+                         cohortLevels = orderedLevels(data$cohortDefinitionName, character(0)),
                          source = "performanceScatter",
                          clickable = TRUE,
                          selectable = clickable,
@@ -133,7 +135,7 @@ buildScatter <- function(data,
     estimate <- if (grepl("^ppv", column)) data$ppv else data$sensitivity
     data[[column]] <- ifelse(is.na(data[[column]]), estimate, data[[column]])
   }
-  groups <- seriesGroups(data, colorBy, databaseOrder, sourceLevels, evaluationTypeLevels)
+  groups <- seriesGroups(data, colorBy, databaseOrder, sourceLevels, evaluationTypeLevels, cohortLevels)
   data$group <- groups$label
   data$slot <- groups$slot
   data$hover <- hoverText(data)

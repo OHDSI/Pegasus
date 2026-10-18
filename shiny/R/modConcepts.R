@@ -95,8 +95,7 @@ conceptsUi <- function(id) {
 # vocabularyRunner is NULL when no vocabulary database is configured. Otherwise it is a function(task, args) that
 # starts a vocabulary task in the background and returns a handle (see backgroundVocabularyRunner()). The app stays
 # responsive while the vocabulary works, and the activity log follows the background process live.
-conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyRunner, phenotypes, shortlist, onOpenPhenotype,
-                           jobTimeoutSeconds = 180) {
+conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyRunner, phenotypes, shortlist, jobTimeoutSeconds = 180) {
   hasVocabulary <- !is.null(vocabularyRunner)
   moduleServer(id, function(input, output, session) {
     candidates <- reactiveVal(emptyConcepts())
@@ -456,16 +455,10 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyRunner,
         as.character(found$itemConceptId),
         sprintf("%s (%s)", found$itemConceptName, found$itemConceptId)
       )
-      openLink <- sprintf(
-        '<a href="#" onclick="Shiny.setInputValue(\'%s\', %d, {priority: \'event\'}); return false;">%s</a>',
-        session$ns("open"),
-        as.integer(found$phenotypeId),
-        htmltools::htmlEscape(found$phenotypeName)
-      )
       table <- data.frame(
-        Phenotype = openLink,
+        Phenotype = entityLink("phenotype", found$phenotypeId, found$phenotypeName),
         Status = statusBadge(status),
-        "Concept set" = htmltools::htmlEscape(found$conceptSetName),
+        "Concept set" = entityLink("concept_set", found$conceptSetId, found$conceptSetName),
         Pertains = htmltools::htmlEscape(found$pertains),
         Category = htmltools::htmlEscape(found$category),
         Match = found$matchType,
@@ -495,8 +488,6 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyRunner,
         )
       )
     })
-
-    observeEvent(input$open, onOpenPhenotype(as.integer(input$open)))
 
     observeEvent(input$addAll, {
       found <- matches()

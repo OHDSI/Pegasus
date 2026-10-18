@@ -106,7 +106,8 @@ test_that("statusBadge covers every status level", {
   expect_match(statusBadge("Evaluated"), "badge text-bg-success")
 })
 
-test_that("browse server filters by status and creator and selects a phenotype", {
+test_that("browse server filters by status and creator and navigates to a phenotype", {
+  navigated <- NULL
   pool <- createTestPool()
   on.exit(pool::poolClose(pool))
   loadSeedData(pool)
@@ -119,7 +120,8 @@ test_that("browse server filters by status and creator and selects a phenotype",
       databaseSchema = "main",
       phenotypes = phenotypes,
       refreshPhenotypes = function() NULL,
-      selectedId = reactiveVal(NULL),
+      route = reactiveVal(NULL),
+      navigate = function(page = NULL, id = NULL) navigated <<- list(page = page, id = id),
       shortlist = reactiveVal(integer(0)),
       onRefine = function(id) NULL
     ),
@@ -135,10 +137,10 @@ test_that("browse server filters by status and creator and selects a phenotype",
 
       session$setInputs(status = statusLevels, creator = NULL)
       session$setInputs(openPhenotype = 5)
-      expect_equal(selectedId(), 5L)
+      expect_equal(navigated, list(page = "phenotype", id = 5))
 
-      session$setInputs(`detail-back` = 1)
-      expect_null(selectedId())
+      session$setInputs(`phenotype-back` = 1)
+      expect_null(navigated$page)
     }
   )
 })
@@ -147,27 +149,6 @@ test_that("prettyJson indents JSON and falls back to the original text", {
   expect_match(prettyJson('{"a":1}'), "\n", fixed = TRUE)
   expect_equal(prettyJson("not json"), "not json")
   expect_equal(prettyJson(NA_character_), "Not available")
-})
-
-test_that("expressionModal shows both expressions and tolerates a missing Capr expression", {
-  pool <- createTestPool()
-  on.exit(pool::poolClose(pool))
-  loadSeedData(pool)
-  conceptSets <- withConnection(pool, function(connection) getConceptSets(connection, "main", 1))
-  html <- as.character(expressionModal(conceptSets[1, ]))
-  expect_match(html, "Capr expression", fixed = TRUE)
-  expect_match(html, "Circe expression", fixed = TRUE)
-  expect_match(html, "includeDescendants", fixed = TRUE)
-
-  conceptSets$caprConceptSetExpression[1] <- NA
-  expect_match(as.character(expressionModal(conceptSets[1, ])), "Not available", fixed = TRUE)
-})
-
-test_that("findConceptSet finds a concept set even when it is linked to the phenotype more than once", {
-  conceptSets <- data.frame(conceptSetId = c(4L, 7L, 7L), pertains = c("doi", "doi", "alternative diagnoses"))
-  expect_equal(nrow(findConceptSet(conceptSets, "7")), 1)
-  expect_equal(findConceptSet(conceptSets, 4)$pertains, "doi")
-  expect_null(findConceptSet(conceptSets, 99))
 })
 
 test_that("useDropdownFilters turns low-cardinality plain text columns into factors", {

@@ -92,11 +92,13 @@ browseUi <- function(id) {
         )
       )
     ),
-    bslib::nav_panel_hidden("detail", phenotypeDetailUi(ns("detail")))
+    bslib::nav_panel_hidden("phenotype", phenotypeDetailUi(ns("phenotype"))),
+    bslib::nav_panel_hidden("cohort_definition", cohortUi(ns("cohort"))),
+    bslib::nav_panel_hidden("concept_set", conceptSetUi(ns("conceptSet")))
   )
 }
 
-browseServer <- function(id, connectionPool, databaseSchema, phenotypes, refreshPhenotypes, selectedId, shortlist, onRefine) {
+browseServer <- function(id, connectionPool, databaseSchema, phenotypes, refreshPhenotypes, route, navigate, shortlist, onRefine) {
   # Evaluate eagerly so a missing argument fails at startup instead of on the first click.
   force(onRefine)
   moduleServer(id, function(input, output, session) {
@@ -179,7 +181,7 @@ browseServer <- function(id, connectionPool, databaseSchema, phenotypes, refresh
     })
 
     observeEvent(input$openPhenotype, {
-      selectedId(as.integer(input$openPhenotype))
+      navigate("phenotype", input$openPhenotype)
     })
 
     observeEvent(input$toggleShortlist, {
@@ -194,26 +196,39 @@ browseServer <- function(id, connectionPool, databaseSchema, phenotypes, refresh
       notifyAdded(addToShortlist(shortlist, data$phenotypeId[rowsShown]))
     })
 
-    observeEvent(selectedId(), {
-      bslib::nav_select("view", "detail", session = session)
-    })
+    # The route decides which page the Browse tab shows.
+    observeEvent(route(), {
+      bslib::nav_select("view", if (is.null(route())) "list" else route()$page, session = session)
+    }, ignoreNULL = FALSE)
 
-    # onBack runs inside the detail module's observer, so the session must be explicit; otherwise
-    # nav_select would namespace "view" with the detail module's id and miss this navset.
-    backToList <- function() {
-      selectedId(NULL)
-      bslib::nav_select("view", "list", session = session)
+    # The detail modules only see the ID when their own page is the current one.
+    idFor <- function(page) {
+      reactive(if (!is.null(route()) && route()$page == page) route()$id else NULL)
     }
 
     phenotypeDetailServer(
-      "detail",
+      "phenotype",
       connectionPool = connectionPool,
       databaseSchema = databaseSchema,
       phenotypes = phenotypes,
-      selectedId = selectedId,
+      phenotypeId = idFor("phenotype"),
       shortlist = shortlist,
-      onBack = backToList,
+      navigate = navigate,
       onRefine = onRefine
+    )
+    cohortServer(
+      "cohort",
+      connectionPool = connectionPool,
+      databaseSchema = databaseSchema,
+      cohortDefinitionId = idFor("cohort_definition"),
+      navigate = navigate
+    )
+    conceptSetServer(
+      "conceptSet",
+      connectionPool = connectionPool,
+      databaseSchema = databaseSchema,
+      conceptSetId = idFor("concept_set"),
+      navigate = navigate
     )
   })
 }

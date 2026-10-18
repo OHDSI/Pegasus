@@ -17,7 +17,8 @@
 function(input, output, session) {
   phenotypes <- reactiveVal(emptyPhenotypeSummary())
   evaluations <- reactiveVal(emptyEvaluations())
-  selectedPhenotypeId <- reactiveVal(NULL)
+  # The landing page being shown (NULL is the Browse list); see routing.R.
+  route <- reactiveVal(NULL)
   shortlist <- reactiveVal(integer(0))
   cloneSource <- reactiveVal(NULL)
   returnToEvaluation <- reactiveVal(FALSE)
@@ -41,10 +42,37 @@ function(input, output, session) {
   }
   refreshPhenotypes()
 
+  # Shows a landing page (or the Browse list when page is NULL) and, unless the change came from the
+  # browser's own back or forward button, adds it to the browser history so that history and the address
+  # bar follow along.
+  navigate <- createNavigator(
+    route,
+    updateUrl = function(query) updateQueryString(query, mode = "push", session = session),
+    showBrowse = function() bslib::nav_select("mainNav", "Browse", session = session)
+  )
+
   openPhenotype <- function(phenotypeId) {
-    selectedPhenotypeId(phenotypeId)
-    bslib::nav_select("mainNav", "Browse", session = session)
+    navigate("phenotype", phenotypeId)
   }
+
+  # Links in tables and text (see entityLink in routing.R) report the page they point to.
+  observeEvent(input$navigateTo, {
+    navigate(input$navigateTo$page, input$navigateTo$id)
+  })
+
+  # A shared URL opens its page when the app loads.
+  observeEvent(session$clientData$url_search, {
+    initial <- parseRoute(session$clientData$url_search)
+    if (!is.null(initial)) {
+      navigate(initial$page, initial$id, push = FALSE)
+    }
+  }, once = TRUE)
+
+  # The browser's back and forward buttons report the address they went to.
+  observeEvent(input$routeSearch, {
+    target <- parseRoute(input$routeSearch)
+    navigate(target$page, target$id, push = FALSE)
+  })
 
   # Opens the New phenotype wizard seeded with an existing phenotype's definition. The nonce makes
   # refining the same phenotype twice restart the wizard.
@@ -91,7 +119,8 @@ function(input, output, session) {
     databaseSchema = config$databaseSchema,
     phenotypes = phenotypes,
     refreshPhenotypes = refreshPhenotypes,
-    selectedId = selectedPhenotypeId,
+    route = route,
+    navigate = navigate,
     shortlist = shortlist,
     onRefine = refinePhenotype
   )
@@ -112,8 +141,7 @@ function(input, output, session) {
     databaseSchema = config$databaseSchema,
     vocabularyRunner = vocabularyRunner,
     phenotypes = phenotypes,
-    shortlist = shortlist,
-    onOpenPhenotype = openPhenotype
+    shortlist = shortlist
   )
   shortlistServer(
     "shortlist",

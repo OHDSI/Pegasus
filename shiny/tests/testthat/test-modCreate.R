@@ -109,9 +109,9 @@ test_that("Refine this hands the selected phenotype to the wizard callback", {
       connectionPool = pool,
       databaseSchema = "main",
       phenotypes = phenotypes,
-      selectedId = reactiveVal(1L),
+      phenotypeId = reactiveVal(1L),
       shortlist = reactiveVal(integer(0)),
-      onBack = function() NULL,
+      navigate = function(page = NULL, id = NULL) NULL,
       onRefine = function(id) refined <<- id
     ),
     {

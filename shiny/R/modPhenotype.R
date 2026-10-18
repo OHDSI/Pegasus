@@ -51,39 +51,62 @@ prettyJson <- function(text) {
   tryCatch(as.character(jsonlite::prettify(text)), error = function(e) text)
 }
 
-# A concept set can be linked to a phenotype more than once (different pertains or category), so several rows
-# can share an ID; any one of them has the same expressions.
-findConceptSet <- function(conceptSets, conceptSetId) {
-  row <- match(as.integer(conceptSetId), conceptSets$conceptSetId)
-  if (is.na(row)) NULL else conceptSets[row, , drop = FALSE]
+# Specificity (true negative rate) from the confusion matrix counts; NA when there are no negatives.
+specificity <- function(trueNegatives, falsePositives) {
+  negatives <- trueNegatives + falsePositives
+  ifelse(is.na(negatives) | negatives == 0, NA_real_, trueNegatives / negatives)
 }
 
-expressionModal <- function(conceptSet) {
-  modalDialog(
-    title = conceptSet$conceptSetName,
-    size = "l",
-    easyClose = TRUE,
-    footer = modalButton("Close"),
-    tags$h6("Capr expression"),
-    tags$pre(style = "white-space: pre-wrap;", if (is.na(conceptSet$caprConceptSetExpression)) "Not available" else conceptSet$caprConceptSetExpression),
-    tags$h6("Circe expression"),
-    tags$pre(style = "white-space: pre-wrap; max-height: 40vh; overflow: auto;", prettyJson(conceptSet$circeConceptSetExpression))
-  )
+draftOrValid <- function(valid) {
+  ifelse(valid == 1, "Valid", "Draft (awaiting validation)")
 }
 
-linkList <- function(ns, ids, names) {
-  if (length(ids) == 0) {
-    return("none")
+# One row per cohort definition with what its evaluations show (best values over all databases and types).
+summarizeCohorts <- function(cohorts, evaluations) {
+  cohorts$evaluationCount <- vapply(cohorts$cohortDefinitionId, function(id) sum(evaluations$cohortDefinitionId == id), 1L)
+  best <- function(column) {
+    vapply(cohorts$cohortDefinitionId, function(id) {
+      values <- evaluations[[column]][evaluations$cohortDefinitionId == id]
+      if (length(values) == 0 || all(is.na(values))) NA_real_ else max(values, na.rm = TRUE)
+    }, 1)
   }
-  links <- mapply(function(id, name) {
-    as.character(tags$a(
-      href = "#",
-      onclick = sprintf("Shiny.setInputValue('%s', %d, {priority: 'event'}); return false;", ns("goto"), as.integer(id)),
-      name
-    ))
-  }, ids, names)
-  HTML(paste(links, collapse = ", "))
+  cohorts$bestPpv <- best("ppv")
+  cohorts$bestSensitivity <- best("sensitivity")
+  cohorts
 }
+
+# The evaluation columns shared by the phenotype and the cohort definition pages, as HTML (text is escaped,
+# so tables built from it use escape = FALSE). The cohort column is a link, and is left out when the table is
+# already about a single cohort.
+evaluationTable <- function(evaluations, linkCohorts = TRUE) {
+  table <- data.frame(
+    Cohort = if (linkCohorts) {
+      entityLink("cohort_definition", evaluations$cohortDefinitionId, evaluations$cohortDefinitionName)
+    } else {
+      htmltools::htmlEscape(evaluations$cohortDefinitionName)
+    },
+    Source = htmltools::htmlEscape(evaluations$paSourceType),
+    Database = htmltools::htmlEscape(evaluations$cdmSourceAbbreviation),
+    "Evaluation type" = htmltools::htmlEscape(evaluations$evaluationType),
+    Subjects = evaluations$cohortSubjects,
+    "PPV % (95% CI)" = formatPercentWithInterval(evaluations$ppv, evaluations$ppvLb, evaluations$ppvUb),
+    "Sensitivity % (95% CI)" = formatPercentWithInterval(
+      evaluations$sensitivity, evaluations$sensitivityLb, evaluations$sensitivityUb
+    ),
+    "Specificity %" = round(100 * specificity(evaluations$trueNegatives, evaluations$falsePositives), 1),
+    TP = evaluations$truePositives,
+    FP = evaluations$falsePositives,
+    FN = evaluations$falseNegatives,
+    TN = evaluations$trueNegatives,
+    check.names = FALSE
+  )
+  if (!linkCohorts) {
+    table$Cohort <- NULL
+  }
+  table
+}
+
+phenotypeColorByChoices <- c("Cohort definition" = "cohort", "Database" = "database", "Evaluation type" = "evaluationType")
 
 phenotypeDetailUi <- function(id) {
   ns <- NS(id)
@@ -93,43 +116,42 @@ phenotypeDetailUi <- function(id) {
     bslib::navset_card_tab(
       id = ns("tabs"),
       height = "80vh",
-      bslib::nav_panel("Definition", uiOutput(ns("definition"))),
-      bslib::nav_panel("Concept sets", DT::DTOutput(ns("conceptSets"))),
-      bslib::nav_panel("Person counts", DT::DTOutput(ns("personCounts"))),
-      bslib::nav_panel("Draft targets", DT::DTOutput(ns("draftTargets"))),
-      bslib::nav_panel("Cohorts", DT::DTOutput(ns("cohorts"))),
       bslib::nav_panel(
-        "Performance",
+        "Cohort comparison",
+        radioButtons(ns("colorBy"), "Color by", choices = phenotypeColorByChoices, selected = "cohort", inline = TRUE),
         plotly::plotlyOutput(ns("scatter"), height = "380px"),
         DT::DTOutput(ns("evaluations"))
-      )
+      ),
+      bslib::nav_panel("Cohort definitions", DT::DTOutput(ns("cohorts"))),
+      bslib::nav_panel("Concept sets", DT::DTOutput(ns("conceptSets"))),
+      bslib::nav_panel("Person counts", DT::DTOutput(ns("personCounts"))),
+      bslib::nav_panel("Draft targets", DT::DTOutput(ns("draftTargets")))
     )
   )
 }
 
-phenotypeDetailServer <- function(id, connectionPool, databaseSchema, phenotypes, selectedId, shortlist, onBack, onRefine) {
+phenotypeDetailServer <- function(id, connectionPool, databaseSchema, phenotypes, phenotypeId, shortlist, navigate, onRefine) {
   # Evaluate eagerly so a missing argument fails at startup instead of on the first click.
   force(onRefine)
   moduleServer(id, function(input, output, session) {
-    observeEvent(input$back, onBack())
-    observeEvent(input$goto, selectedId(as.integer(input$goto)))
-    observeEvent(input$toggleShortlist, toggleShortlist(shortlist, selectedId()))
-    observeEvent(input$refine, onRefine(selectedId()))
+    observeEvent(input$back, navigate())
+    observeEvent(input$toggleShortlist, toggleShortlist(shortlist, phenotypeId()))
+    observeEvent(input$refine, onRefine(phenotypeId()))
 
-    # Every newly opened phenotype starts on the definition, not on the previous phenotype's tab.
-    observeEvent(selectedId(), bslib::nav_select("tabs", "Definition", session = session))
+    # Every newly opened phenotype starts on the cohort comparison, not on the previous phenotype's tab.
+    observeEvent(phenotypeId(), bslib::nav_select("tabs", "Cohort comparison", session = session))
 
     phenotype <- reactive({
-      req(selectedId())
+      req(phenotypeId())
       data <- phenotypes()
-      data[data$phenotypeId == selectedId(), , drop = FALSE]
+      data[data$phenotypeId == phenotypeId(), , drop = FALSE]
     })
 
     details <- reactive({
-      req(selectedId())
+      req(phenotypeId(), nrow(phenotype()) == 1)
       tryCatch(
         withConnection(connectionPool, function(connection) {
-          getPhenotypeDetails(connection, databaseSchema, selectedId())
+          getPhenotypeDetails(connection, databaseSchema, phenotypeId())
         }),
         error = function(e) {
           showNotification(paste("Unable to load phenotype details:", conditionMessage(e)), type = "error")
@@ -139,8 +161,11 @@ phenotypeDetailServer <- function(id, connectionPool, databaseSchema, phenotypes
     })
 
     output$header <- renderUI({
+      req(phenotypeId())
       row <- phenotype()
-      req(nrow(row) == 1)
+      if (nrow(row) != 1) {
+        return(tags$div(class = "alert alert-warning", sprintf("Phenotype %d was not found.", phenotypeId())))
+      }
       detail <- details()
       onShortlist <- row$phenotypeId %in% shortlist()
       tagList(
@@ -149,6 +174,7 @@ phenotypeDetailServer <- function(id, connectionPool, databaseSchema, phenotypes
           tags$h3(row$phenotypeName, HTML(" "), HTML(statusBadge(row$status))),
           tags$div(
             class = "d-flex gap-2",
+            copyLinkButton(list(page = "phenotype", id = row$phenotypeId)),
             actionButton(session$ns("refine"), "Refine this", icon = icon("pen"), class = "btn-outline-primary"),
             actionButton(
               session$ns("toggleShortlist"),
@@ -165,17 +191,16 @@ phenotypeDetailServer <- function(id, connectionPool, databaseSchema, phenotypes
         if (!is.null(detail)) {
           tags$p(
             class = "small",
-            "Refined from: ", linkList(session$ns, detail$parents$phenotypeId, detail$parents$phenotypeName),
-            " | Refined into: ", linkList(session$ns, detail$children$phenotypeId, detail$children$phenotypeName)
+            "Refined from: ", entityLinkList("phenotype", detail$parents$phenotypeId, detail$parents$phenotypeName),
+            " | Refined into: ", entityLinkList("phenotype", detail$children$phenotypeId, detail$children$phenotypeName)
           )
-        }
+        },
+        tags$div(
+          class = "card card-body bg-body-tertiary mb-3",
+          tags$h6("Clinical definition"),
+          tags$p(class = "mb-0", style = "white-space: pre-wrap; max-height: 12em; overflow: auto;", row$clinicalDefinition)
+        )
       )
-    })
-
-    output$definition <- renderUI({
-      row <- phenotype()
-      req(nrow(row) == 1)
-      tags$p(style = "white-space: pre-wrap;", row$clinicalDefinition)
     })
 
     showTable <- function(data, emptyMessage, ...) {
@@ -188,57 +213,72 @@ phenotypeDetailServer <- function(id, connectionPool, databaseSchema, phenotypes
       )
     }
 
+    output$scatter <- plotly::renderPlotly({
+      detail <- details()
+      req(detail, input$colorBy)
+      buildScatter(
+        detail$evaluations,
+        colorBy = input$colorBy,
+        showCi = TRUE,
+        source = "phenotypeScatter",
+        clickable = FALSE,
+        emptyMessage = "No cohort definition of this phenotype has been evaluated."
+      )
+    })
+
+    output$evaluations <- DT::renderDT({
+      detail <- details()
+      req(detail)
+      showTable(
+        evaluationTable(detail$evaluations),
+        "No cohort definition of this phenotype has been evaluated.",
+        escape = FALSE
+      )
+    })
+
+    output$cohorts <- DT::renderDT({
+      detail <- details()
+      req(detail)
+      cohorts <- summarizeCohorts(detail$cohorts, detail$evaluations)
+      showTable(
+        data.frame(
+          Name = entityLink("cohort_definition", cohorts$cohortDefinitionId, cohorts$cohortDefinitionName),
+          Source = htmltools::htmlEscape(cohorts$paSourceType),
+          Status = draftOrValid(cohorts$valid),
+          Evaluations = cohorts$evaluationCount,
+          "Best PPV (%)" = toPercent(cohorts$bestPpv),
+          "Best sensitivity (%)" = toPercent(cohorts$bestSensitivity),
+          Atlas = atlasLink(detail$atlasBaseUrl, "cohort", cohorts$atlasCohortDefinitionId),
+          check.names = FALSE
+        ),
+        "No cohort definitions for this phenotype.",
+        escape = FALSE
+      )
+    })
+
     output$conceptSets <- DT::renderDT({
       detail <- details()
       req(detail)
       conceptSets <- addPersonCountColumns(detail$conceptSets, detail$personCounts, detail$databaseNames)
       databaseColumns <- setdiff(names(conceptSets), names(detail$conceptSets))
       table <- data.frame(
-        Name = htmltools::htmlEscape(conceptSets$conceptSetName),
+        Name = entityLink("concept_set", conceptSets$conceptSetId, conceptSets$conceptSetName),
         Pertains = htmltools::htmlEscape(conceptSets$pertains),
         Category = htmltools::htmlEscape(conceptSets$category),
         Source = htmltools::htmlEscape(conceptSets$csSourceType),
-        Status = ifelse(conceptSets$valid == 1, "Valid", "Draft (awaiting validation)"),
+        Status = draftOrValid(conceptSets$valid),
         Descendants = ifelse(conceptSets$hasDescendants == 1, "Yes", "No"),
         check.names = FALSE
       )
-      # Persons with the concept set per database come before the long expression so they are not scrolled away.
       for (column in databaseColumns) {
         table[[paste(column, "persons")]] <- conceptSets[[column]]
       }
-      table$Expression <- sprintf(
-        "<a href='#' class='expression-link' data-id='%d'>View</a>",
-        as.integer(conceptSets$conceptSetId)
-      )
       table$Atlas <- atlasLink(detail$atlasBaseUrl, "conceptSet", conceptSets$atlasConceptSetId)
-      # A delegated handler on the table; inline onclick attributes inside table cells proved unreliable.
-      result <- showTable(
-        table, "No concept sets for this phenotype.",
-        escape = FALSE,
-        callback = DT::JS(sprintf(
-          "table.on('click', 'a.expression-link', function(e) {
-             e.preventDefault();
-             Shiny.setInputValue('%s', $(this).data('id'), {priority: 'event'});
-           });",
-          session$ns("showExpression")
-        ))
-      )
+      result <- showTable(table, "No concept sets for this phenotype.", escape = FALSE)
       if (length(databaseColumns) > 0) {
         result <- DT::formatRound(result, paste(databaseColumns, "persons"), digits = 0)
       }
       result
-    })
-
-    observeEvent(input$showExpression, {
-      conceptSet <- findConceptSet(details()$conceptSets, input$showExpression)
-      if (is.null(conceptSet)) {
-        showNotification("That concept set could not be found.", type = "warning")
-        return()
-      }
-      tryCatch(
-        showModal(expressionModal(conceptSet)),
-        error = function(e) showNotification(paste("Unable to show the expression:", conditionMessage(e)), type = "error")
-      )
     })
 
     output$personCounts <- DT::renderDT({
@@ -285,58 +325,5 @@ phenotypeDetailServer <- function(id, connectionPool, databaseSchema, phenotypes
       )
     })
 
-    output$cohorts <- DT::renderDT({
-      detail <- details()
-      req(detail)
-      cohorts <- detail$cohorts
-      showTable(
-        data.frame(
-          Name = htmltools::htmlEscape(cohorts$cohortDefinitionName),
-          Source = htmltools::htmlEscape(cohorts$paSourceType),
-          Status = ifelse(cohorts$valid == 1, "Valid", "Draft (awaiting validation)"),
-          Atlas = atlasLink(detail$atlasBaseUrl, "cohort", cohorts$atlasCohortDefinitionId)
-        ),
-        "No cohort definitions for this phenotype.",
-        escape = FALSE
-      )
-    })
-
-    output$scatter <- plotly::renderPlotly({
-      detail <- details()
-      req(detail)
-      buildScatter(
-        detail$evaluations,
-        colorBy = "source",
-        showCi = TRUE,
-        source = "phenotypeScatter",
-        clickable = FALSE,
-        emptyMessage = "This phenotype has not been evaluated."
-      )
-    })
-
-    output$evaluations <- DT::renderDT({
-      detail <- details()
-      req(detail)
-      evaluations <- detail$evaluations
-      showTable(
-        data.frame(
-          Cohort = evaluations$cohortDefinitionName,
-          Source = evaluations$paSourceType,
-          Database = evaluations$cdmSourceAbbreviation,
-          "Evaluation type" = evaluations$evaluationType,
-          Subjects = evaluations$cohortSubjects,
-          "PPV % (95% CI)" = formatPercentWithInterval(evaluations$ppv, evaluations$ppvLb, evaluations$ppvUb),
-          "Sensitivity % (95% CI)" = formatPercentWithInterval(
-            evaluations$sensitivity, evaluations$sensitivityLb, evaluations$sensitivityUb
-          ),
-          TP = evaluations$truePositives,
-          FP = evaluations$falsePositives,
-          FN = evaluations$falseNegatives,
-          TN = evaluations$trueNegatives,
-          check.names = FALSE
-        ),
-        "This phenotype has not been evaluated."
-      )
-    })
   })
 }

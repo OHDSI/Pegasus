@@ -18,7 +18,7 @@ bslib::page_navbar(
   title = "Pegasus",
   id = "mainNav",
   theme = pegasusTheme(),
-  header = tags$head(tags$link(rel = "icon", type = "image/png", href = "LogoSmall.png")),
+  header = tags$head(tags$link(rel = "icon", type = "image/png", href = "LogoSmall.png"), routingHead()),
   bslib::nav_panel("Browse", browseUi("browse")),
   bslib::nav_panel("Performance", performanceUi("performance")),
   bslib::nav_panel("Concept Search", conceptsUi("concepts")),

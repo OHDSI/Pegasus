@@ -99,7 +99,8 @@ test_that("browse server toggles single phenotypes and adds all shown rows to th
       databaseSchema = "main",
       phenotypes = phenotypes,
       refreshPhenotypes = function() NULL,
-      selectedId = reactiveVal(NULL),
+      route = reactiveVal(NULL),
+      navigate = function(page = NULL, id = NULL) NULL,
       shortlist = shortlist,
       onRefine = function(id) NULL
     ),
