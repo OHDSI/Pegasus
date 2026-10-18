@@ -234,8 +234,16 @@ conceptSetServer <- function(id, connectionPool, databaseSchema, conceptSetId, n
     output$raw <- renderUI({
       row <- conceptSet()
       tagList(
-        tags$h6("Circe expression"),
-        tags$pre(style = "white-space: pre-wrap; max-height: 35vh; overflow: auto;", prettyJson(row$circeConceptSetExpression)),
+        tags$div(
+          class = "d-flex justify-content-between align-items-center mb-2",
+          tags$h6(class = "mb-0", "Circe expression"),
+          copyTextButton(session$ns("circeText"))
+        ),
+        tags$pre(
+          id = session$ns("circeText"),
+          style = "white-space: pre-wrap; max-height: 35vh; overflow: auto;",
+          prettyJson(row$circeConceptSetExpression)
+        ),
         tags$h6("Capr expression"),
         tags$pre(
           style = "white-space: pre-wrap;",

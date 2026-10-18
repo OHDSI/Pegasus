@@ -101,6 +101,17 @@ createNavigator <- function(route, updateUrl, showBrowse) {
   }
 }
 
+# A button that copies the text of the element with the given ID (for example a block of JSON).
+copyTextButton <- function(targetId, label = "Copy to clipboard") {
+  htmltools::tags$button(
+    type = "button",
+    class = "btn btn-outline-secondary btn-sm",
+    onclick = sprintf("pegasusCopyText('%s', this)", targetId),
+    shiny::icon("copy"),
+    paste0(" ", label)
+  )
+}
+
 routingScript <- "
 document.addEventListener('click', function(event) {
   var link = event.target.closest ? event.target.closest('a.entity-link') : null;
@@ -111,20 +122,25 @@ document.addEventListener('click', function(event) {
 window.addEventListener('popstate', function() {
   Shiny.setInputValue('routeSearch', window.location.search, {priority: 'event'});
 });
-function pegasusCopyLink(page, id, button) {
-  var url = window.location.origin + window.location.pathname + '?page=' + page + '&id=' + id;
+function pegasusCopy(text, button, promptLabel) {
   var done = function() {
     var original = button.innerHTML;
     button.textContent = 'Copied';
     setTimeout(function() { button.innerHTML = original; }, 1500);
   };
   if (navigator.clipboard && window.isSecureContext) {
-    navigator.clipboard.writeText(url).then(done, function() { window.prompt('Copy this link:', url); });
+    navigator.clipboard.writeText(text).then(done, function() { window.prompt(promptLabel, text); });
   } else {
-    window.prompt('Copy this link:', url);
+    window.prompt(promptLabel, text);
   }
 }
-"
+function pegasusCopyLink(page, id, button) {
+  pegasusCopy(window.location.origin + window.location.pathname + '?page=' + page + '&id=' + id, button, 'Copy this link:');
+}
+function pegasusCopyText(elementId, button) {
+  var element = document.getElementById(elementId);
+  if (element) { pegasusCopy(element.textContent, button, 'Copy this text:'); }
+}"
 
 routingHead <- function() {
   htmltools::tags$script(htmltools::HTML(routingScript))

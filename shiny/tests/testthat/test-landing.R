@@ -132,7 +132,9 @@ test_that("cohort page loads its data, shows the phenotype link and falls back t
       expect_match(header, "Asthma - user", fixed = TRUE)
       expect_match(header, 'data-page="phenotype"', fixed = TRUE)
       expect_match(header, "pegasusCopyLink('cohort_definition', 3", fixed = TRUE)
-      expect_match(as.character(output$json$html), "cohortName", fixed = TRUE)
+      json <- as.character(output$json$html)
+      expect_match(json, "cohortName", fixed = TRUE)
+      expect_match(json, "pegasusCopyText", fixed = TRUE)
       expect_true(nzchar(as.character(output$logic$html)))
       session$setInputs(back = 1)
       expect_true(goneBack)
@@ -188,6 +190,64 @@ test_that("phenotype page lists cohort definitions as links and reports an unkno
 
       id(999L)
       expect_match(as.character(output$header$html), "was not found", fixed = TRUE)
+    }
+  )
+})
+
+test_that("matchCohortConceptSets finds stored concept sets by items and by name", {
+  pool <- createTestPool()
+  on.exit(pool::poolClose(pool))
+  loadSeedData(pool)
+  circe <- paste0(
+    '{"ConceptSets":[',
+    # Same items as stored concept set 1 under a different name.
+    '{"id":0,"name":"Renamed in Atlas","expression":{"items":[{"concept":{"CONCEPT_ID":317009},"isExcluded":false,"includeDescendants":true,"includeMapped":false}]}},',
+    # Different items, but the same name as stored concept set 4 (COPD).
+    '{"id":1,"name":"copd","expression":{"items":[{"concept":{"CONCEPT_ID":999},"isExcluded":false}]}},',
+    # Nothing matches this one.
+    '{"id":2,"name":"Unknown","expression":{"items":[{"concept":{"CONCEPT_ID":888}}]}}',
+    '],"PrimaryCriteria":{}}'
+  )
+  ids <- withConnection(pool, function(connection) matchCohortConceptSets(connection, "main", circe))
+  expect_setequal(ids, c(1, 4))
+  expect_length(withConnection(pool, function(connection) matchCohortConceptSets(connection, "main", "not json")), 0)
+  expect_length(withConnection(pool, function(connection) matchCohortConceptSets(connection, "main", '{"ConceptSets":[]}')), 0)
+
+  summary <- withConnection(pool, function(connection) getConceptSetSummaries(connection, "main", ids))
+  expect_setequal(summary$conceptSetName, c("Asthma", "COPD"))
+  expect_equal(nrow(withConnection(pool, function(connection) getConceptSetSummaries(connection, "main", integer(0)))), 0)
+})
+
+test_that("the cohort page finds concept sets from its JSON when the link table has no rows for it", {
+  pool <- createTestPool()
+  on.exit(pool::poolClose(pool))
+  loadSeedData(pool)
+  withConnection(pool, function(connection) {
+    DatabaseConnector::executeSql(
+      connection,
+      paste0(
+        "UPDATE main.cohort_definition SET circe_cohort_expression = '",
+        '{"ConceptSets":[{"id":0,"name":"Asthma","expression":{"items":[{"concept":{"CONCEPT_ID":317009},"isExcluded":false,"includeDescendants":true,"includeMapped":false}]}}],"PrimaryCriteria":{}}',
+        "' WHERE cohort_definition_id = 10;"
+      ),
+      progressBar = FALSE, reportOverallTime = FALSE
+    )
+  })
+  testServer(
+    cohortServer,
+    args = list(connectionPool = pool, databaseSchema = "main", cohortDefinitionId = reactiveVal(10L), navigate = function(page = NULL, id = NULL) NULL),
+    {
+      expect_equal(details()$conceptSets$conceptSetName, "Asthma")
+      expect_true(details()$conceptSetsFromJson)
+      expect_match(as.character(output$conceptSetNote$html), "cohort_definition_to_concept_set", fixed = TRUE)
+    }
+  )
+  testServer(
+    cohortServer,
+    args = list(connectionPool = pool, databaseSchema = "main", cohortDefinitionId = reactiveVal(3L), navigate = function(page = NULL, id = NULL) NULL),
+    {
+      expect_false(details()$conceptSetsFromJson)
+      expect_equal(details()$conceptSets$conceptSetName, "Asthma (exact)")
     }
   )
 })

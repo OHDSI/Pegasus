@@ -95,3 +95,10 @@ test_that("the navigator changes the route, records history once and ignores inv
     expect_equal(urls[3], "?")
   })
 })
+
+test_that("copyTextButton names the element whose text it copies", {
+  html <- as.character(copyTextButton("cohort-jsonText"))
+  expect_match(html, "pegasusCopyText('cohort-jsonText', this)", fixed = TRUE)
+  expect_match(html, "Copy to clipboard", fixed = TRUE)
+  expect_match(routingScript, "function pegasusCopyText", fixed = TRUE)
+})

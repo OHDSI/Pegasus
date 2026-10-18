@@ -46,7 +46,7 @@ cohortUi <- function(id) {
       id = ns("tabs"),
       height = "80vh",
       bslib::nav_panel("Logic", uiOutput(ns("logic"))),
-      bslib::nav_panel("Concept sets", DT::DTOutput(ns("conceptSets"))),
+      bslib::nav_panel("Concept sets", uiOutput(ns("conceptSetNote")), DT::DTOutput(ns("conceptSets"))),
       bslib::nav_panel(
         "Performance",
         plotly::plotlyOutput(ns("scatter"), height = "380px"),
@@ -66,9 +66,20 @@ cohortServer <- function(id, connectionPool, databaseSchema, cohortDefinitionId,
       req(cohortDefinitionId())
       tryCatch(
         withConnection(connectionPool, function(connection) {
+          cohort <- getCohortDefinition(connection, databaseSchema, cohortDefinitionId())
+          conceptSets <- getCohortConceptSets(connection, databaseSchema, cohortDefinitionId())
+          # Without rows in cohort_definition_to_concept_set, find the sets by reading the cohort's own JSON.
+          fromJson <- nrow(conceptSets) == 0 && nrow(cohort) == 1
+          if (fromJson) {
+            conceptSets <- getConceptSetSummaries(
+              connection, databaseSchema,
+              matchCohortConceptSets(connection, databaseSchema, cohort$circeCohortExpression)
+            )
+          }
           list(
-            cohort = getCohortDefinition(connection, databaseSchema, cohortDefinitionId()),
-            conceptSets = getCohortConceptSets(connection, databaseSchema, cohortDefinitionId()),
+            cohort = cohort,
+            conceptSets = conceptSets,
+            conceptSetsFromJson = fromJson && nrow(conceptSets) > 0,
             evaluations = getEvaluations(connection, databaseSchema, cohortDefinitionId = cohortDefinitionId()),
             atlasBaseUrl = getAtlasBaseUrl(connection, databaseSchema)
           )
@@ -148,8 +159,28 @@ cohortServer <- function(id, connectionPool, databaseSchema, cohortDefinitionId,
 
     output$logic <- renderUI(logic())
 
+    # The button sits above a scrolling block, so it stays in view however long the JSON is.
     output$json <- renderUI({
-      tags$pre(style = "white-space: pre-wrap;", prettyJson(cohort()$circeCohortExpression))
+      tagList(
+        tags$div(class = "mb-2", copyTextButton(session$ns("jsonText"))),
+        tags$pre(
+          id = session$ns("jsonText"),
+          style = "white-space: pre-wrap; max-height: 60vh; overflow: auto;",
+          prettyJson(cohort()$circeCohortExpression)
+        )
+      )
+    })
+
+    output$conceptSetNote <- renderUI({
+      detail <- details()
+      req(detail)
+      if (isTRUE(detail$conceptSetsFromJson)) {
+        tags$p(
+          class = "text-muted small",
+          "No concept sets are recorded for this cohort definition in cohort_definition_to_concept_set. These were found by ",
+          "matching the concept sets inside its Circe JSON with the stored concept sets."
+        )
+      }
     })
 
     output$conceptSets <- DT::renderDT({
