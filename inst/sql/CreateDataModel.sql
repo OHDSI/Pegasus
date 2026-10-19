@@ -1,5 +1,6 @@
 DROP TABLE IF EXISTS @database_schema.phenotype;
 DROP TABLE IF EXISTS @database_schema.phenotype_ancestor;
+DROP TABLE IF EXISTS @database_schema.phenotype_meta_data;
 DROP TABLE IF EXISTS @database_schema.draft_concept_set_target;
 DROP TABLE IF EXISTS @database_schema.draft_target_to_concept_set;
 DROP TABLE IF EXISTS @database_schema.concept_set;
@@ -27,6 +28,21 @@ CREATE TABLE @database_schema.phenotype (
 CREATE TABLE @database_schema.phenotype_ancestor (
   phenotype_id INT NOT NULL,
   parent_phenotype_id INT NOT NULL
+);
+
+CREATE TABLE @database_schema.phenotype_meta_data (
+  phenotype_id INT PRIMARY KEY,
+  is_pharmacovigilance_outcome VARCHAR, -- 'CONDITIONAL', 'NO', or 'YES'
+  clinical_course VARCHAR, -- 'TRANSIENT_RECURRENT', 'PERSISTENT_STABLE', 'PERSISTENT_RELAPSING', or 'TRANSIENT_SINGLE'
+  expected_care_setting VARCHAR, --'ACUTE_CARE_COMMON', 'OUTPATIENT_EXPECTED', or 'ACUTE_CARE_EXPECTED'
+  sex_constraint VARCHAR, -- 'BOTH_SEXES', 'FEMALE_ONLY', or 'MALE_ONLY'
+  min_age_years INT,
+  max_age_years INT,
+  minimum_interepisode_gap_days INT,
+  has_discrete_recorded_symptoms INT,
+  requires_diagnostic_test_or_procedure INT,
+  requires_active_treatment_within_30d INT,
+  expects_condition_specific_followup_or_sequelae_1yr INT
 );
 
 CREATE TABLE @database_schema.draft_concept_set_target (

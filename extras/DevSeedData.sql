@@ -24,6 +24,11 @@ INSERT INTO @database_schema.phenotype (phenotype_id, phenotype_name, clinical_d
 INSERT INTO @database_schema.phenotype_ancestor (phenotype_id, parent_phenotype_id) VALUES
   (8, 1);
 
+INSERT INTO @database_schema.phenotype_meta_data (phenotype_id, is_pharmacovigilance_outcome, clinical_course, expected_care_setting, sex_constraint, min_age_years, max_age_years, minimum_interepisode_gap_days, has_discrete_recorded_symptoms, requires_diagnostic_test_or_procedure, requires_active_treatment_within_30d, expects_condition_specific_followup_or_sequelae_1yr) VALUES
+  (1, 'NO', 'PERSISTENT_RELAPSING', 'OUTPATIENT_EXPECTED', 'BOTH_SEXES', 0, NULL, 30, 1, 1, 1, 1),
+  (2, 'NO', 'PERSISTENT_STABLE', 'OUTPATIENT_EXPECTED', 'BOTH_SEXES', 18, NULL, NULL, 0, 1, 1, 1),
+  (5, 'YES', 'TRANSIENT_SINGLE', 'ACUTE_CARE_EXPECTED', 'BOTH_SEXES', 0, NULL, 90, 1, 1, 0, 1);
+
 INSERT INTO @database_schema.concept_set (concept_set_id, concept_set_name, circe_concept_set_expression, capr_concept_set_expression, has_descendants, clinical_definition, concept_id, valid, atlas_concept_set_id, cs_source_type) VALUES
   (1, 'Asthma', '{"items": [{"concept": {"CONCEPT_ID": 317009, "CONCEPT_NAME": "Asthma"}, "isExcluded": false, "includeDescendants": true, "includeMapped": false}]}', 'cs(descendants(317009), name = "Asthma")', 1, NULL, 317009, 1, NULL, 'concept + descendants'),
   (2, 'Asthma (exact)', '{"items": [{"concept": {"CONCEPT_ID": 317009, "CONCEPT_NAME": "Asthma"}, "isExcluded": false, "includeDescendants": false, "includeMapped": false}]}', 'cs(317009, name = "Asthma (exact)")', 0, NULL, 317009, 1, NULL, 'concept'),

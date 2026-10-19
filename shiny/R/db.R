@@ -379,8 +379,26 @@ getAtlasBaseUrl <- function(connection, databaseSchema) {
   if (length(baseUrl) == 0 || is.na(baseUrl[1]) || !nzchar(baseUrl[1])) NULL else baseUrl[1]
 }
 
+# One row, or none when the phenotype has no metadata. Databases created before the phenotype_meta_data table
+# existed give no rows rather than an error.
+getPhenotypeMetaData <- function(connection, databaseSchema, phenotypeId) {
+  tryCatch(
+    queryPegasus(
+      connection,
+      databaseSchema,
+      "SELECT * FROM @database_schema.phenotype_meta_data WHERE phenotype_id = @phenotype_id;",
+      phenotype_id = as.integer(phenotypeId)
+    ),
+    error = function(e) {
+      logEvent("phenotype metadata could not be read: ", conditionMessage(e))
+      data.frame()
+    }
+  )
+}
+
 getPhenotypeDetails <- function(connection, databaseSchema, phenotypeId) {
   list(
+    metaData = getPhenotypeMetaData(connection, databaseSchema, phenotypeId),
     conceptSets = getConceptSets(connection, databaseSchema, phenotypeId),
     personCounts = getConceptSetPersonCounts(connection, databaseSchema, phenotypeId),
     databaseNames = getDatabases(connection, databaseSchema)$cdmSourceAbbreviation,

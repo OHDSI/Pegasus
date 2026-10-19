@@ -106,6 +106,37 @@ evaluationTable <- function(evaluations, linkCohorts = TRUE) {
   table
 }
 
+metaDataLabel <- function(value) {
+  if (is.null(value) || is.na(value)) return("Not recorded")
+  paste0(toupper(substring(tolower(gsub("_", " ", value)), 1, 1)), substring(tolower(gsub("_", " ", value)), 2))
+}
+
+# Long format (one row per attribute) so the table reads like a fact sheet. Yes/no flags are stored as 0/1.
+phenotypeMetaDataTable <- function(metaData) {
+  if (is.null(metaData) || nrow(metaData) == 0) {
+    return(data.frame(Attribute = character(0), Value = character(0)))
+  }
+  row <- metaData[1, ]
+  yesNo <- function(value) if (is.na(value)) "Not recorded" else if (value == 1) "Yes" else "No"
+  number <- function(value, unit) if (is.na(value)) "Not recorded" else paste(value, unit)
+  data.frame(
+    Attribute = c(
+      "Pharmacovigilance outcome", "Clinical course", "Expected care setting", "Sex constraint",
+      "Minimum age", "Maximum age", "Minimum gap between episodes",
+      "Has discrete recorded symptoms", "Requires a diagnostic test or procedure",
+      "Requires active treatment within 30 days", "Expects condition-specific follow-up or sequelae within 1 year"
+    ),
+    Value = c(
+      metaDataLabel(row$isPharmacovigilanceOutcome), metaDataLabel(row$clinicalCourse),
+      metaDataLabel(row$expectedCareSetting), metaDataLabel(row$sexConstraint),
+      number(row$minAgeYears, "years"), number(row$maxAgeYears, "years"),
+      number(row$minimumInterepisodeGapDays, "days"),
+      yesNo(row$hasDiscreteRecordedSymptoms), yesNo(row$requiresDiagnosticTestOrProcedure),
+      yesNo(row$requiresActiveTreatmentWithin30d), yesNo(row$expectsConditionSpecificFollowupOrSequelae1yr)
+    )
+  )
+}
+
 phenotypeColorByChoices <- c("Cohort definition" = "cohort", "Database" = "database", "Evaluation type" = "evaluationType")
 
 phenotypeDetailUi <- function(id) {
@@ -125,7 +156,8 @@ phenotypeDetailUi <- function(id) {
       bslib::nav_panel("Cohort definitions", DT::DTOutput(ns("cohorts"))),
       bslib::nav_panel("Concept sets", DT::DTOutput(ns("conceptSets"))),
       bslib::nav_panel("Person counts", DT::DTOutput(ns("personCounts"))),
-      bslib::nav_panel("Draft targets", DT::DTOutput(ns("draftTargets")))
+      bslib::nav_panel("Draft targets", DT::DTOutput(ns("draftTargets"))),
+      bslib::nav_panel("Metadata", DT::DTOutput(ns("metaData")))
     )
   )
 }
@@ -303,6 +335,12 @@ phenotypeDetailServer <- function(id, connectionPool, databaseSchema, phenotypes
         "No person counts are stored for this phenotype's concept sets (the concept_set_person_count table has no rows for them)."
       )
       DT::formatRound(result, c("Overall", "Condition", "Procedure", "Drug", "Device", "Measurement", "Observation", "Visit"), digits = 0)
+    })
+
+    output$metaData <- DT::renderDT({
+      detail <- details()
+      req(detail)
+      showTable(phenotypeMetaDataTable(detail$metaData), "No metadata is recorded for this phenotype.")
     })
 
     output$draftTargets <- DT::renderDT({
