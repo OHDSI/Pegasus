@@ -28,7 +28,8 @@ Imports:
 	readr,
 	dplyr,
 	rlang,
-	checkmate
+	checkmate,
+	SnowballC
 Suggests:
 	testthat,
 	duckdb,

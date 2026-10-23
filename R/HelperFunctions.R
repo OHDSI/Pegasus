@@ -153,3 +153,13 @@ createCostTracker <- function() {
   class(costTracker) <- c("CostTracker", class(costTracker))
   return(costTracker)
 }
+
+normalizeName <- function(name) {
+  words <- strsplit(tolower(gsub("[^[:alnum:]]+", " ", name)), " ")[[1]]
+  words <- sapply(words, SnowballC::wordStem)
+  return(paste(words, collapse = " "))
+}
+
+normalizeNames <- function(names) {
+  return(sapply(names, normalizeName))
+}

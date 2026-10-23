@@ -201,9 +201,12 @@ mapToConcepts <- function(termsPerCategory,
         by = join_by(lowercaseName)
       ) |>
       select(-"lowercaseName") |>
+
       group_by(.data$term) |>
-      filter(row_number() == 1) |>
+      slice_head(n = 1) |>
+      ungroup() |>
       mutate(match = "Verbatim")
+
 
     # Do vector matching for remaining terms:
     remainingTerms <- terms[!terms %in% verbatimMatches$term]
@@ -371,12 +374,12 @@ generateConceptSetTargets <- function(
   result <- bind_rows(
     targets |>
       mutate(phenotype = !!phenotype,
-             target = "Disease of interest"),
+             pertains = "Disease of interest"),
     targetsAd |>
       mutate(phenotype = !!phenotype,
-             target = "Alternative diagnoses")
+             pertains = "Alternative diagnoses")
   ) |>
-    relocate(phenotype, "target")
+    relocate("phenotype", "pertains")
 
   return(result)
 }

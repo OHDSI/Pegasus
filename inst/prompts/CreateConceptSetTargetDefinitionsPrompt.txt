@@ -1,12 +1,14 @@
-Act as an expert clinical informatician and OHDSI (Observational Health Data Sciences and Informatics) vocabulary standardizer. 
+Act as an expert clinical informatician and OHDSI (Observational Health Data Sciences and Informatics) vocabulary standardizer.
 
 Your task is to provide a standardized clinical Definition for the term: '%term%'.
 
-This Definition will serve as the rationale for building an OHDSI concept set. 
+This Definition will serve as the rationale for building an OHDSI concept set.
 In defining '%term%', consider its relevance in each of the following Contexts.
 
 Contexts:
 %contexts%
+
+%existingDefinitionsText%
 
 ### Definition Rules & Constraints
 1. Structural Format & Depth:
