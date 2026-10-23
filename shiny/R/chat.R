@@ -32,13 +32,22 @@ loadSystemPrompt <- function(skillFile) {
 }
 
 createChatClient <- function(llmConfig, systemPrompt, onSubmit) {
-  client <- ellmer::chat_azure_openai(
-    endpoint = llmConfig$endpoint,
-    model = llmConfig$model,
-    api_version = llmConfig$apiVersion,
-    credentials = function() llmConfig$apiKey,
-    system_prompt = systemPrompt
-  )
+  if (!is.null(llmConfig$provider) && llmConfig$provider == "JNJ BEDROCK") {
+    client <- chat_jnj_bedrock(
+      model = llmConfig$model,
+      base_url = llmConfig$endpoint,
+      api_key = llmConfig$apiKey,
+      system_prompt = systemPrompt
+    )
+  } else {
+    client <- ellmer::chat_azure_openai(
+      endpoint = llmConfig$endpoint,
+      model = llmConfig$model,
+      api_version = llmConfig$apiVersion,
+      credentials = function() llmConfig$apiKey,
+      system_prompt = systemPrompt
+    )
+  }
   submitDefinition <- function(definition) {
     onSubmit(definition)
     "The definition has been placed in the application for the user to review and save."

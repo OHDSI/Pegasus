@@ -46,6 +46,7 @@ loadConfig <- function() {
     vocabulary = loadVocabularyConfig(),
     databaseSchema = getEnv("PEGASUS_DATABASE_SCHEMA"),
     llm = list(
+      provider = getEnv("PEGASUS_LLM_PROVIDER", required = FALSE),
       endpoint = getEnv("PEGASUS_LLM_ENDPOINT"),
       apiKey = getEnv("PEGASUS_LLM_API_KEY"),
       model = getEnv("PEGASUS_LLM_MODEL"),
