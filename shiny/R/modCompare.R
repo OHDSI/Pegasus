@@ -20,7 +20,12 @@
 compareStyle <- "
 ins.diff-add { background: rgba(40, 167, 69, 0.25); text-decoration: none; }
 del.diff-del { background: rgba(220, 53, 69, 0.25); }
-.compare-definition { white-space: pre-wrap; line-height: 1.5; }"
+.compare-definition { white-space: pre-wrap; line-height: 1.5; }
+.cohort-diff { font-family: var(--bs-font-monospace); font-size: 0.8rem; border: 1px solid var(--bs-border-color); max-height: 70vh; overflow: auto; }
+.cohort-diff div { padding: 0 0.4rem; white-space: pre-wrap; }
+.cohort-diff .line-add { background: rgba(40, 167, 69, 0.25); }
+.cohort-diff .line-del { background: rgba(220, 53, 69, 0.25); }
+.cohort-diff .line-skip { color: var(--bs-secondary-color); background: var(--bs-tertiary-bg); font-style: italic; }"
 
 compareUi <- function(id) {
   ns <- NS(id)
@@ -85,6 +90,57 @@ compareServer <- function(id, connectionPool, databaseSchema, phenotypes, evalua
       updateSelectInput(session, "evaluationType", choices = types, selected = keep(isolate(input$evaluationType), types, default$evaluationType))
     }, ignoreNULL = FALSE)
 
+    # Every cohort definition of the chosen phenotypes; one of each is compared.
+    cohortExpressions <- reactive({
+      ids <- selectedIds()
+      req(length(ids) >= 2)
+      tryCatch(
+        withConnection(connectionPool, function(connection) getCohortExpressions(connection, databaseSchema, ids)),
+        error = function(e) {
+          showNotification(paste("Unable to load the cohort definitions:", conditionMessage(e)), type = "error")
+          NULL
+        }
+      )
+    })
+
+    cohortInputId <- function(phenotypeId) paste0("cohort_", phenotypeId)
+
+    # The cohort definition chosen for each phenotype, as phenotype ID -> cohort definition ID. A phenotype
+    # starts on its first cohort definition.
+    cohortChoices <- reactive({
+      expressions <- cohortExpressions()
+      choices <- list()
+      for (phenotypeId in selectedIds()) {
+        available <- expressions$cohortDefinitionId[expressions$phenotypeId == phenotypeId]
+        if (length(available) == 0) {
+          next
+        }
+        chosen <- suppressWarnings(as.integer(input[[cohortInputId(phenotypeId)]]))
+        choices[[as.character(phenotypeId)]] <- if (length(chosen) == 1 && chosen %in% available) chosen else available[1]
+      }
+      choices
+    })
+
+    output$cohortChoosers <- renderUI({
+      expressions <- cohortExpressions()
+      data <- phenotypes()
+      selectors <- lapply(selectedIds(), function(phenotypeId) {
+        rows <- expressions[expressions$phenotypeId == phenotypeId, , drop = FALSE]
+        label <- data$phenotypeName[match(phenotypeId, data$phenotypeId)]
+        if (nrow(rows) == 0) {
+          return(tags$div(class = "text-muted small", paste0(label, ": no cohort definition")))
+        }
+        current <- suppressWarnings(as.integer(isolate(input[[cohortInputId(phenotypeId)]])))
+        selectInput(
+          session$ns(cohortInputId(phenotypeId)), paste("Cohort definition:", label),
+          choices = setNames(rows$cohortDefinitionId, rows$cohortDefinitionName),
+          selected = if (length(current) == 1 && current %in% rows$cohortDefinitionId) current else rows$cohortDefinitionId[1],
+          width = "100%"
+        )
+      })
+      do.call(bslib::layout_columns, c(list(col_widths = rep(floor(12 / max(1, length(selectors))), length(selectors)), fill = FALSE), selectors))
+    })
+
     comparison <- reactive({
       ids <- selectedIds()
       baselineId <- suppressWarnings(as.integer(input$baseline))
@@ -101,10 +157,13 @@ compareServer <- function(id, connectionPool, databaseSchema, phenotypes, evalua
       req(expressions)
       assembleComparison(
         phenotypes(), evaluations(), expressions, ids, baselineId,
-        database = input$database, evaluationType = input$evaluationType
+        database = input$database, evaluationType = input$evaluationType,
+        cohortTexts = cohortTextsFor(cohortExpressions(), cohortChoices(), cohortLogicMarkdown)
       )
     })
 
+    # The page itself only depends on whether enough phenotypes are chosen; each part fills itself in. Choosing a
+    # different cohort definition therefore redraws only the cohort part, and keeps the choices made.
     output$body <- renderUI({
       if (length(selectedIds()) < 2) {
         return(tags$div(
@@ -112,13 +171,11 @@ compareServer <- function(id, connectionPool, databaseSchema, phenotypes, evalua
           "Choose at least two phenotypes above. You can also start from the Shortlist or Performance tab."
         ))
       }
-      comparison <- comparison()
-      count <- nrow(comparison$phenotypes)
       tagList(
         bslib::card(
           fill = FALSE,
           bslib::card_header("Summary of differences from the baseline"),
-          tags$ul(lapply(comparison$notes, tags$li)),
+          uiOutput(session$ns("notes")),
           tags$p(
             class = "small text-muted mb-0",
             "Worked out from the stored definitions, concept sets and evaluations; nothing here is written by a language model."
@@ -143,20 +200,22 @@ compareServer <- function(id, connectionPool, databaseSchema, phenotypes, evalua
             "Compared with the baseline: ", HTML('<ins class="diff-add">added words</ins>'), " and ",
             HTML('<del class="diff-del">removed words</del>'), "."
           ),
-          do.call(bslib::layout_columns, c(
-            list(col_widths = rep(floor(12 / count), count), fill = FALSE),
-            lapply(comparison$phenotypes$phenotypeId, function(phenotypeId) {
-              name <- comparison$phenotypes$phenotypeName[comparison$phenotypes$phenotypeId == phenotypeId]
-              bslib::card(
-                fill = FALSE,
-                bslib::card_header(
-                  HTML(entityLink("phenotype", phenotypeId, name)),
-                  if (phenotypeId == comparison$baselineId) tags$span(class = "badge text-bg-secondary ms-2", "Baseline")
-                ),
-                tags$div(class = "compare-definition", HTML(comparison$definitionHtml[[as.character(phenotypeId)]]))
-              )
-            })
-          ))
+          uiOutput(session$ns("definitions"))
+        ),
+        bslib::card(
+          fill = FALSE,
+          bslib::card_header(
+            class = "d-flex justify-content-between align-items-center",
+            "Cohort definitions",
+            checkboxInput(session$ns("changesOnly"), "Show only changes", value = TRUE, width = "auto")
+          ),
+          tags$p(
+            class = "small text-muted",
+            "Choose which cohort definition of each phenotype to compare. Each one is compared line by line with the",
+            "baseline's, using the readable description that the cohort page shows."
+          ),
+          uiOutput(session$ns("cohortChoosers")),
+          uiOutput(session$ns("cohortDiffs"))
         ),
         bslib::card(
           fill = FALSE,
@@ -164,6 +223,50 @@ compareServer <- function(id, connectionPool, databaseSchema, phenotypes, evalua
           DT::DTOutput(session$ns("conceptSets"))
         )
       )
+    })
+
+    output$notes <- renderUI(tags$ul(lapply(comparison()$notes, tags$li)))
+
+    output$definitions <- renderUI({
+      comparison <- comparison()
+      count <- nrow(comparison$phenotypes)
+      do.call(bslib::layout_columns, c(
+        list(col_widths = rep(floor(12 / count), count), fill = FALSE),
+        lapply(comparison$phenotypes$phenotypeId, function(phenotypeId) {
+          name <- comparison$phenotypes$phenotypeName[comparison$phenotypes$phenotypeId == phenotypeId]
+          bslib::card(
+            fill = FALSE,
+            bslib::card_header(
+              HTML(entityLink("phenotype", phenotypeId, name)),
+              if (phenotypeId == comparison$baselineId) tags$span(class = "badge text-bg-secondary ms-2", "Baseline")
+            ),
+            tags$div(class = "compare-definition", HTML(comparison$definitionHtml[[as.character(phenotypeId)]]))
+          )
+        })
+      ))
+    })
+
+    output$cohortDiffs <- renderUI({
+      diffs <- comparison()$cohortDiffs
+      phenotypes <- comparison()$phenotypes
+      contextLines <- if (isTRUE(input$changesOnly)) 2 else NULL
+      if (length(diffs) == 0) {
+        return(NULL)
+      }
+      tagList(lapply(names(diffs), function(id) {
+        entry <- diffs[[id]]
+        name <- phenotypes$phenotypeName[phenotypes$phenotypeId == as.integer(id)]
+        if (!isTRUE(entry$available)) {
+          return(tags$div(class = "alert alert-warning", paste0(name, ": a cohort definition is missing, so nothing can be compared.")))
+        }
+        tagList(
+          tags$h6(class = "mt-3", sprintf("%s: %s compared with %s", name, entry$otherName, entry$baselineName)),
+          if (!isTRUE(entry$readable)) {
+            tags$p(class = "small text-warning", "The readable description is not available, so the Circe JSON is compared.")
+          },
+          tags$div(class = "cohort-diff", HTML(lineDiffHtml(entry$diff, contextLines)))
+        )
+      }))
     })
 
     output$metrics <- DT::renderDT({

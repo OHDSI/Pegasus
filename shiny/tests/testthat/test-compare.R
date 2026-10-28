@@ -136,6 +136,16 @@ test_that("the Compare module builds the comparison from the chosen phenotypes",
       expect_equal(result$baselineId, 1)
       expect_equal(result$database, "DEVCLM")
 
+      # Without CirceR (or with a placeholder cohort) the pretty-printed JSON is compared, starting on each
+      # phenotype's first cohort definition.
+      expect_true(comparison()$cohortDiffs[["2"]]$available)
+      expect_equal(comparison()$cohortDiffs[["2"]]$baselineName, "Asthma - template")
+      expect_equal(comparison()$cohortDiffs[["2"]]$otherName, "T2DM - template")
+      session$setInputs(cohort_2 = "5")
+      expect_equal(comparison()$cohortDiffs[["2"]]$otherName, "T2DM - AI")
+      session$setInputs(cohort_2 = "1")
+      expect_equal(comparison()$cohortDiffs[["2"]]$otherName, "T2DM - template")
+
       session$setInputs(baseline = "2")
       expect_equal(comparison()$baselineId, 2)
     }
@@ -196,4 +206,66 @@ test_that("the summary row of a phenotype is the median of its cohort definition
   expect_equal(comparisonMetrics(evaluations, phenotypes, c(1, 2), 1, "DB", "T")$ppv[1], 0.7)
   evaluations$ppv[3] <- NA
   expect_true(is.na(comparisonMetrics(evaluations, phenotypes, c(1, 2), 1, "DB", "T")$ppv[1]))
+})
+
+test_that("cohort descriptions are compared line by line and shown with context", {
+  old <- "# Cohort\n\nEntry: asthma\nExit: end of observation\nAge >= 18\n"
+  new <- "# Cohort\n\nEntry: asthma\nExit: 30 days later\nAge >= 18\nNo COPD"
+  diff <- cohortLineDiff(old, new)
+  expect_equal(diff$op, c("same", "same", "del", "add", "same", "add"))
+  expect_equal(diff$line[diff$op == "del"], "Exit: end of observation")
+  expect_null(cohortLineDiff(paste(rep("a", 900), collapse = "\n"), "b"))
+
+  html <- lineDiffHtml(diff)
+  expect_match(html, '<div class="line-add">+ No COPD</div>', fixed = TRUE)
+  expect_match(html, '<div class="line-del">- Exit: end of observation</div>', fixed = TRUE)
+  long <- cohortLineDiff(paste0("line", 1:30, collapse = "\n"), paste0(c(paste0("line", 1:30), "extra"), collapse = "\n"))
+  trimmed <- lineDiffHtml(long, contextLines = 2)
+  expect_match(trimmed, "28 unchanged lines hidden", fixed = TRUE)
+  expect_match(lineDiffHtml(cohortLineDiff("a", "a"), contextLines = 2), "read the same")
+  expect_match(lineDiffHtml(cohortLineDiff("<b>", "<i>")), "&lt;i&gt;", fixed = TRUE)
+  expect_match(lineDiffHtml(NULL), "too long")
+})
+
+test_that("cohortTextsFor uses the readable text and falls back to the JSON", {
+  expressions <- data.frame(
+    cohortDefinitionId = c(10L, 11L), cohortDefinitionName = c("First", "Second"), phenotypeId = c(1L, 2L),
+    circeCohortExpression = c('{"a": 1}', '{"b": 2}'), stringsAsFactors = FALSE
+  )
+  readable <- cohortTextsFor(expressions, list("1" = 10L, "2" = 11L), render = function(json) paste("Readable", json))
+  expect_equal(readable[["1"]]$text, 'Readable {"a": 1}')
+  expect_true(readable[["1"]]$readable)
+  expect_equal(readable[["2"]]$name, "Second")
+
+  fallback <- cohortTextsFor(expressions, list("1" = 10L), render = function(json) stop("no Java"))
+  expect_false(fallback[["1"]]$readable)
+  expect_match(fallback[["1"]]$text, '"a"', fixed = TRUE)
+
+  # A choice that does not belong to the phenotype is left out.
+  expect_length(cohortTextsFor(expressions, list("1" = 11L), render = identity), 0)
+})
+
+test_that("the comparison includes the cohort definition differences and the report shows them", {
+  pool <- createTestPool()
+  on.exit(pool::poolClose(pool))
+  loadSeedData(pool)
+  phenotypes <- withConnection(pool, function(connection) getPhenotypeSummary(connection, "main"))
+  evaluations <- withConnection(pool, function(connection) getEvaluations(connection, "main"))
+  expressions <- withConnection(pool, function(connection) getPhenotypeConceptSetExpressions(connection, "main", c(1L, 2L)))
+  texts <- list(
+    "1" = list(cohortDefinitionId = 1L, name = "Asthma - template", text = "Entry: asthma\nExit: end", readable = TRUE),
+    "2" = list(cohortDefinitionId = 4L, name = "T2DM - template", text = "Entry: diabetes\nExit: end\nAge >= 18", readable = TRUE)
+  )
+  comparison <- assembleComparison(phenotypes, evaluations, expressions, c(1L, 2L), 1L, "DEVCLM", "KEEPER + llm", cohortTexts = texts)
+  expect_true(comparison$cohortDiffs[["2"]]$available)
+  expect_equal(comparison$cohortDiffs[["2"]]$baselineName, "Asthma - template")
+  expect_match(comparison$notes, "cohort definition: 2 lines added, 1 removed", fixed = TRUE)
+
+  html <- comparisonReport(comparison)
+  expect_match(html, "T2DM - template compared with Asthma - template", fixed = TRUE)
+  expect_match(html, '<div class="line-add">+ Age &gt;= 18</div>', fixed = TRUE)
+
+  missing <- assembleComparison(phenotypes, evaluations, expressions, c(1L, 2L), 1L, "DEVCLM", "KEEPER + llm", cohortTexts = texts[1])
+  expect_false(missing$cohortDiffs[["2"]]$available)
+  expect_match(comparisonReport(missing), "cohort definition is missing")
 })

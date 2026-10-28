@@ -29,12 +29,10 @@ tokenizeWords <- function(text) {
   strsplit(trimws(text), "\\s+")[[1]]
 }
 
-# A word-by-word difference between two texts (longest common subsequence). Returns a data frame with one row per
-# word and op "same", "add" (only in new) or "del" (only in old), or NULL when a text is too long to compare.
-wordDiff <- function(old, new, maxTokens = 800) {
-  a <- tokenizeWords(old)
-  b <- tokenizeWords(new)
-  if (length(a) > maxTokens || length(b) > maxTokens) {
+# A difference between two sequences (longest common subsequence). Returns a data frame with one row per item and
+# op "same", "add" (only in new) or "del" (only in old), or NULL when a sequence is longer than maxItems.
+sequenceDiff <- function(a, b, maxItems) {
+  if (length(a) > maxItems || length(b) > maxItems) {
     return(NULL)
   }
   n <- length(a)
@@ -45,35 +43,44 @@ wordDiff <- function(old, new, maxTokens = 800) {
       common[i, j] <- if (a[i] == b[j]) common[i + 1, j + 1] + 1L else max(common[i + 1, j], common[i, j + 1])
     }
   }
-  tokens <- character(0)
+  items <- character(0)
   ops <- character(0)
   i <- 1
   j <- 1
   while (i <= n && j <= m) {
     if (a[i] == b[j]) {
-      tokens <- c(tokens, a[i])
+      items <- c(items, a[i])
       ops <- c(ops, "same")
       i <- i + 1
       j <- j + 1
     } else if (common[i + 1, j] >= common[i, j + 1]) {
-      tokens <- c(tokens, a[i])
+      items <- c(items, a[i])
       ops <- c(ops, "del")
       i <- i + 1
     } else {
-      tokens <- c(tokens, b[j])
+      items <- c(items, b[j])
       ops <- c(ops, "add")
       j <- j + 1
     }
   }
   if (i <= n) {
-    tokens <- c(tokens, a[i:n])
+    items <- c(items, a[i:n])
     ops <- c(ops, rep("del", n - i + 1))
   }
   if (j <= m) {
-    tokens <- c(tokens, b[j:m])
+    items <- c(items, b[j:m])
     ops <- c(ops, rep("add", m - j + 1))
   }
-  data.frame(token = tokens, op = ops, stringsAsFactors = FALSE)
+  data.frame(item = items, op = ops, stringsAsFactors = FALSE)
+}
+
+# Word by word; the column holding the words is called token.
+wordDiff <- function(old, new, maxTokens = 800) {
+  diff <- sequenceDiff(tokenizeWords(old), tokenizeWords(new), maxTokens)
+  if (!is.null(diff)) {
+    names(diff)[1] <- "token"
+  }
+  diff
 }
 
 # The new text with its differences from the old one marked: added words in <ins>, removed words in <del>.
@@ -91,6 +98,97 @@ diffHtml <- function(old, new) {
     ifelse(diff$op == "del", paste0('<del class="diff-del">', escaped, "</del>"), escaped)
   )
   paste(marked, collapse = " ")
+}
+
+# ---- Cohort definitions -------------------------------------------------------------------------------------
+
+maxCohortLines <- 800
+
+cohortLines <- function(text) {
+  lines <- if (is.null(text) || is.na(text)) character(0) else sub("\\s+$", "", strsplit(text, "\r?\n")[[1]])
+  lines[nzchar(trimws(lines))]
+}
+
+# Line by line difference of two cohort descriptions; NULL when they are too long to compare.
+cohortLineDiff <- function(old, new) {
+  diff <- sequenceDiff(cohortLines(old), cohortLines(new), maxCohortLines)
+  if (!is.null(diff)) {
+    names(diff)[1] <- "line"
+  }
+  diff
+}
+
+# The readable text of the chosen cohort definition of each phenotype. expressions has the columns of
+# getCohortExpressions(); choices maps each phenotype ID (as text) to the cohort definition ID chosen. render turns
+# Circe JSON into readable text and may fail (it needs CirceR and Java); the pretty-printed JSON is then used, and
+# readable says which one it is. A phenotype without a cohort definition is left out.
+cohortTextsFor <- function(expressions, choices, render) {
+  texts <- list()
+  for (phenotypeId in names(choices)) {
+    row <- expressions[expressions$cohortDefinitionId == choices[[phenotypeId]] &
+                         expressions$phenotypeId == as.integer(phenotypeId), , drop = FALSE]
+    if (nrow(row) != 1) {
+      next
+    }
+    json <- row$circeCohortExpression
+    rendered <- tryCatch(render(json), error = function(e) NULL)
+    texts[[phenotypeId]] <- list(
+      cohortDefinitionId = row$cohortDefinitionId,
+      name = row$cohortDefinitionName,
+      text = if (is.null(rendered)) prettyJson(json) else rendered,
+      readable = !is.null(rendered)
+    )
+  }
+  texts
+}
+
+# HTML for a line diff: added lines green with +, removed lines red with -, unchanged lines plain. With
+# contextLines, unchanged lines further than that from a change are replaced by a count.
+lineDiffHtml <- function(diff, contextLines = NULL) {
+  if (is.null(diff)) {
+    return("<em>The cohort definitions are too long to compare line by line.</em>")
+  }
+  if (nrow(diff) == 0) {
+    return("<em>Nothing to show.</em>")
+  }
+  changed <- diff$op != "same"
+  near <- if (is.null(contextLines)) {
+    rep(TRUE, nrow(diff))
+  } else {
+    positions <- which(changed)
+    keep <- rep(FALSE, nrow(diff))
+    for (position in positions) {
+      keep[max(1, position - contextLines):min(nrow(diff), position + contextLines)] <- TRUE
+    }
+    keep
+  }
+  html <- character(0)
+  hidden <- 0
+  flush <- function() {
+    if (hidden > 0) {
+      html <<- c(html, sprintf('<div class="line-skip">%d unchanged line%s hidden</div>', hidden, if (hidden == 1) "" else "s"))
+      hidden <<- 0
+    }
+  }
+  for (i in seq_len(nrow(diff))) {
+    if (!near[i]) {
+      hidden <- hidden + 1
+      next
+    }
+    flush()
+    line <- htmltools::htmlEscape(diff$line[i])
+    html <- c(html, switch(
+      diff$op[i],
+      add = sprintf('<div class="line-add">+ %s</div>', line),
+      del = sprintf('<div class="line-del">- %s</div>', line),
+      sprintf('<div class="line-same">&nbsp; %s</div>', line)
+    ))
+  }
+  flush()
+  if (!any(changed)) {
+    html <- c('<div class="line-skip">The two cohort definitions read the same.</div>', html)
+  }
+  paste(html, collapse = "")
 }
 
 # ---- Concept sets -------------------------------------------------------------------------------------------
@@ -301,7 +399,8 @@ comparisonMetrics <- function(evaluations, phenotypes, phenotypeIds, baselineId,
 signedPoints <- function(x) sprintf("%+.1f pts", x)
 
 # Everything the Compare tab and the report show. phenotypeIds are in display order; the baseline is one of them.
-assembleComparison <- function(phenotypes, evaluations, conceptSetExpressions, phenotypeIds, baselineId, database, evaluationType) {
+assembleComparison <- function(phenotypes, evaluations, conceptSetExpressions, phenotypeIds, baselineId, database, evaluationType,
+                               cohortTexts = list()) {
   phenotypeIds <- as.integer(phenotypeIds)
   selected <- phenotypes[match(phenotypeIds, phenotypes$phenotypeId), , drop = FALSE]
   base <- selected[selected$phenotypeId == baselineId, , drop = FALSE]
@@ -331,6 +430,19 @@ assembleComparison <- function(phenotypes, evaluations, conceptSetExpressions, p
 
   metrics <- comparisonMetrics(evaluations, phenotypes, phenotypeIds, baselineId, database, evaluationType)
 
+  baseCohort <- cohortTexts[[as.character(baselineId)]]
+  cohortDiffs <- setNames(lapply(others, function(id) {
+    other <- cohortTexts[[as.character(id)]]
+    if (is.null(baseCohort) || is.null(other)) {
+      return(list(available = FALSE, baselineName = if (is.null(baseCohort)) NA_character_ else baseCohort$name,
+                  otherName = if (is.null(other)) NA_character_ else other$name))
+    }
+    list(
+      available = TRUE, baselineName = baseCohort$name, otherName = other$name,
+      readable = baseCohort$readable && other$readable, diff = cohortLineDiff(baseCohort$text, other$text)
+    )
+  }), others)
+
   notes <- vapply(others, function(id) {
     name <- selected$phenotypeName[selected$phenotypeId == id]
     parts <- character(0)
@@ -355,12 +467,19 @@ assembleComparison <- function(phenotypes, evaluations, conceptSetExpressions, p
     if (!is.null(diff)) {
       parts <- c(parts, sprintf("definition text: %d words added, %d removed", sum(diff$op == "add"), sum(diff$op == "del")))
     }
+    cohortDiff <- cohortDiffs[[as.character(id)]]
+    if (isTRUE(cohortDiff$available) && !is.null(cohortDiff$diff)) {
+      parts <- c(parts, sprintf(
+        "cohort definition: %d lines added, %d removed", sum(cohortDiff$diff$op == "add"), sum(cohortDiff$diff$op == "del")
+      ))
+    }
     sprintf("%s: %s", name, paste(parts, collapse = "; "))
   }, "")
 
   list(
     phenotypes = selected, baselineId = baselineId, database = database, evaluationType = evaluationType,
-    definitionHtml = definitionHtml, conceptChanges = conceptChanges, metrics = metrics, notes = unname(notes)
+    definitionHtml = definitionHtml, conceptChanges = conceptChanges, metrics = metrics, cohortDiffs = cohortDiffs,
+    notes = unname(notes)
   )
 }
 
@@ -406,7 +525,10 @@ comparisonReport <- function(comparison) {
     .definition { border: 1px solid #ccc; padding: .6rem; margin-bottom: 1rem; line-height: 1.5; }
     ins.diff-add { background: #d4edda; text-decoration: none; }
     del.diff-del { background: #f8d7da; }
-    .muted { color: #666; font-size: .85rem; }"
+    .muted { color: #666; font-size: .85rem; }
+    .cohort-diff { font-family: monospace; font-size: .8rem; border: 1px solid #ccc; margin-bottom: 1rem; }
+    .cohort-diff div { padding: 0 .4rem; white-space: pre-wrap; }
+    .line-add { background: #d4edda; } .line-del { background: #f8d7da; } .line-skip { color: #666; background: #f2f2f2; font-style: italic; }"
   page <- tags$html(
     tags$head(tags$meta(charset = "utf-8"), tags$title("Pegasus phenotype comparison"), tags$style(htmltools::HTML(style))),
     tags$body(
@@ -428,6 +550,25 @@ comparisonReport <- function(comparison) {
         htmltools::tagList(
           tags$h3(if (id == comparison$baselineId) paste0(name, " (baseline)") else name),
           tags$div(class = "definition", htmltools::HTML(comparison$definitionHtml[[as.character(id)]]))
+        )
+      }),
+      tags$h2("Cohort definitions"),
+      tags$p(class = "muted", "Compared line by line with the baseline's cohort definition: green lines (+) were added, red lines (-) removed."),
+      if (length(comparison$cohortDiffs) == 0) tags$p("Nothing to compare."),
+      lapply(names(comparison$cohortDiffs), function(id) {
+        entry <- comparison$cohortDiffs[[id]]
+        name <- comparison$phenotypes$phenotypeName[comparison$phenotypes$phenotypeId == as.integer(id)]
+        htmltools::tagList(
+          tags$h3(name),
+          if (!isTRUE(entry$available)) {
+            tags$p("A cohort definition is missing for this comparison.")
+          } else {
+            htmltools::tagList(
+              tags$p(class = "muted", sprintf("%s compared with %s.%s", entry$otherName, entry$baselineName,
+                                              if (isTRUE(entry$readable)) "" else " The readable description was not available, so the Circe JSON is compared.")),
+              tags$div(class = "cohort-diff", htmltools::HTML(lineDiffHtml(entry$diff, contextLines = 2)))
+            )
+          }
         )
       }),
       tags$h2("Concept sets"),
