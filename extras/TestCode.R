@@ -1,15 +1,27 @@
 library(Pegasus)
+library(dplyr)
 
 options(sqlRenderTempEmulationSchema = "scratch.scratch_mschuemi")
 
-connectionDetails <- DatabaseConnector::createConnectionDetails(
+pegasusConnectionDetails <- DatabaseConnector::createConnectionDetails(
+  dbms = Sys.getenv("PEGASUS_DBMS"),
+  server = Sys.getenv("PEGASUS_SERVER"),
+  connectionString = Sys.getenv("PEGASUS_CONNECTION_STRING"),
+  user = Sys.getenv("PEGASUS_DB_USER"),
+  password = Sys.getenv("PEGASUS_DB_PASSWORD")
+)
+
+pegasusDatabaseSchema <- Sys.getenv("PEGASUS_DATABASE_SCHEMA")
+
+cdmConnectionDetails <- DatabaseConnector::createConnectionDetails(
   dbms = "spark",
   connectionString = keyring::key_get("databricksConnectionString"),
   user = "token",
   password = keyring::key_get("databricksToken")
 )
+cdmDatabaseSchema <- "optum_extended_dod.cdm_optum_extended_dod_v4020"
 
-databaseSchema <- "scratch.scratch_mschuemi"
+options(sqlRenderTempEmulationSchema = "scratch.scratch_mschuemi")
 
 # llmClient <- ellmer::chat_lmstudio(
 #   model = "qwen3.8-27b-splash"
@@ -28,3 +40,22 @@ refineDefinition("Acute liver injury", llmClient = llmClient)
 # Create data model --------------------------------------------------------
 createDataModel(connectionDetails = connectionDetails,
                 databaseSchema = databaseSchema)
+
+# Create concept set targets ---------------------------------
+phenotypes <- tibble(
+  phenotype = "Acute liver failure",
+  clinicalDefinition = "Acute liver failure is a rare but life-threatening syndrome characterized by the rapid deterioration of hepatocellular function, manifesting as significant coagulopathy and hepatic encephalopathy of any grade, developing within 28 days of the onset of jaundice or initial hepatic symptoms in an individual without evidence of pre-existing chronic liver disease or cirrhosis. The syndrome arises from a direct, primary insult to hepatocytes â€” including viral, toxic, drug-induced, autoimmune, metabolic, or indeterminate causes â€” and is conceptually distinct from liver dysfunction occurring as a secondary consequence of hemodynamic compromise (e.g., ischemic hepatitis, shock liver), systemic sepsis, or passive hepatic congestion from right-sided heart failure, all of which are explicitly excluded."
+)
+
+costTracker <- createCostTracker()
+targets <- generateConceptSetTargets(
+  phenotype = phenotypes$phenotype[1],
+  clinicalDefinition = phenotypes$clinicalDefinition[1],
+  connectionDetails = connectionDetails,
+  vocabDatabaseSchema = cdmDatabaseSchema,
+  llmClient = llmClient,
+  costTracker = costTracker)
+saveRDS(targets, "e:/temp/PegasusTargets.rds")
+
+# Create concept set target definitions --------------------------------
+conceptSetTargets <- readRDS("e:/temp/PegasusTargets.rds")

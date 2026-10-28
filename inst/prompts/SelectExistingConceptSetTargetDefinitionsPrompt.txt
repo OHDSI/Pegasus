@@ -1,0 +1,30 @@
+Act as an expert clinical informatician and OHDSI (Observational Health Data Sciences and Informatics) vocabulary standardizer.
+
+Your task is to either select a standardized clinical Definition for the term: '%term%', or indicate when none are applicable.
+
+This Definition will serve as the rationale for building an OHDSI concept set.
+In selecting definitions, consider the relevance of '%term%' in each of the following Contexts.
+
+Contexts:
+%contexts%
+
+Existing definitions:
+%existingDefinitions%
+
+### Definition Rules & Constraints
+1. Selecting none:
+   - Select 'none' when all candidate definitions are semantically incompatible with the context. For example, when the definition specifies s hereditary disease, but the context (e.g the complication of some disease) implies an acquired nature.
+2. Context-Driven Subtyping:
+   - Analyze the full list of Contexts to deduce if distinct phenotypic, procedural, or measurement-based subtypes exist.
+   - For example, if contexts split between diagnostic and treatment uses, or between different underlying phenotypes, select distinct definitions for each variant.
+   - You MUST identify which Contexts each Definition covers. You may use the "all" shorthand ONLY if a single Definition applies to every single context. Otherwise, you must list the exact strings of the covered contexts. Treat the task as a partitioning problem: assign each context exactly once to the best matching definition label or to "none". The set of assignments must collectively cover all provided contexts.
+
+### Output Requirements
+Respond **only** with a valid JSON array of objects matching the following exact structure:
+
+[
+  {
+    "label": "Use the label provided with the definition or 'none",
+    "coveredContexts": ["List of EXACT strings from the contexts provided", "or 'all'"]
+  }
+]

@@ -13,6 +13,7 @@ DROP TABLE IF EXISTS @database_schema.cohort_definition_evaluation;
 DROP TABLE IF EXISTS @database_schema.evaluation_request;
 DROP TABLE IF EXISTS @database_schema.database_meta_data;
 DROP TABLE IF EXISTS @database_schema.atlas_instance;
+DROP TABLE IF EXISTS @database_schema.phenotype_meta_data;
 
 CREATE TABLE @database_schema.phenotype (
   phenotype_id INT PRIMARY KEY,
@@ -69,7 +70,7 @@ CREATE TABLE @database_schema.draft_target_to_concept_set (
 
 CREATE TABLE @database_schema.concept_set (
   concept_set_id INT PRIMARY KEY,
-  concept_set_name VARCHAR NOT NULL UNIQUE,
+  concept_set_name VARCHAR NOT NULL,
   circe_concept_set_expression VARCHAR NOT NULL,
   capr_concept_set_expression VARCHAR,
   has_descendants INT NOT NULL,
@@ -77,7 +78,7 @@ CREATE TABLE @database_schema.concept_set (
   concept_id INT,
   valid INT NOT NULL,
   atlas_concept_set_id INT,
-  cs_source_type VARCHAR -- 'from human definition', 'from AI definition', 'concept + descendants', 'concept', or 'user'
+  cs_source_type VARCHAR -- 'From human definition', 'From AI definition', 'Concept + descendants', 'Concept', or 'User'
 );
 
 -- Flattened (unexpanded) items of the Circe concept set expressions, used to find concept sets by concept
@@ -91,8 +92,8 @@ CREATE TABLE @database_schema.concept_set_item (
 
 CREATE TABLE @database_schema.phenotype_to_concept_set (
   phenotype_id INT NOT NULL,
-  pertains VARCHAR NOT NULL, -- 'doi' or 'alternative diagnoses'
-  category VARCHAR NOT NULL, -- 'doi', 'symptom', 'diagnostic procedure', etc.
+  pertains VARCHAR NOT NULL, -- 'Disease of interest' or 'Alternative diagnoses'
+  category VARCHAR NOT NULL, -- 'Hypernym', 'Disease of interest', 'Clinical presentation', etc.
   concept_set_id INT NOT NULL
 );
 
@@ -115,12 +116,11 @@ CREATE TABLE @database_schema.cohort_definition (
   phenotype_id INT NOT NULL,
   circe_cohort_expression VARCHAR NOT NULL,
   capr_cohort_expression VARCHAR,
-  pa_source_type VARCHAR NOT NULL, -- 'template', 'ai', or 'user'
+  cd_source_type VARCHAR NOT NULL, -- 'Templates', 'User', 'MonoFlow', 'PhenotypeDesigner'
   valid INT NOT NULL,
   atlas_cohort_definition_id INT
 );
 
--- Do we really need this?
 CREATE TABLE @database_schema.cohort_definition_to_concept_set (
   cohort_definition_id INT NOT NULL,
   concept_set_id INT NOT NULL
@@ -136,13 +136,19 @@ CREATE TABLE @database_schema.cohort_definition_evaluation (
   false_positives INT NOT NULL,
   true_negatives INT NOT NULL,
   false_negatives INT NOT NULL,
-  ppv FLOAT NOT NULL,
-  ppv_lb FLOAT NOT NULL,
-  ppv_ub FLOAT NOT NULL,
-  sensitivity FLOAT NOT NULL,
-  sensitivity_lb FLOAT NOT NULL,
-  sensitivity_ub FLOAT NOT NULL,
-  evaluation_type VARCHAR -- 'keeper + llm', 'phevaluator', or 'keeper + human'
+  ppv FLOAT,
+  ppv_lb FLOAT,
+  ppv_ub FLOAT,
+  sensitivity FLOAT,
+  sensitivity_lb FLOAT,
+  sensitivity_ub FLOAT,
+  specificity FLOAT,
+  specificity_lb FLOAT,
+  specificity_ub FLOAT,
+  npv FLOAT,
+  npv_lb FLOAT,
+  npv_ub FLOAT,
+  evaluation_type VARCHAR -- 'KEEPER + llm', 'PheValuator', or 'KEEPER + human'
 );
 
 -- Evaluation runs requested through the app. A request is complete once a matching
@@ -172,3 +178,19 @@ CREATE TABLE @database_schema.database_meta_data (
 CREATE TABLE @database_schema.atlas_instance (
   base_url VARCHAR NOT NuLL
 );
+
+CREATE TABLE @database_schema.phenotype_meta_data (
+  phenotype_id INT PRIMARY KEY,
+  is_pharmacovigilance_outcome VARCHAR, -- 'CONDITIONAL', 'NO', or 'YES'
+  clinical_course VARCHAR, -- 'TRANSIENT_RECURRENT', 'PERSISTENT_STABLE', 'PERSISTENT_RELAPSING', or 'TRANSIENT_SINGLE'
+  expected_care_setting VARCHAR, --'ACUTE_CARE_COMMON', 'OUTPATIENT_EXPECTED', or 'ACUTE_CARE_EXPECTED'
+  sex_constraint VARCHAR, -- 'BOTH_SEXES', 'FEMALE_ONLY', or 'MALE_ONLY'
+  min_age_years INT,
+  max_age_years INT,
+  minimum_interepisode_gap_days INT,
+  has_discrete_recorded_symptoms INT,
+  requires_diagnostic_test_or_procedure INT,
+  requires_active_treatment_within_30d INT,
+  expects_condition_specific_followup_or_sequelae_1yr INT
+);
+
