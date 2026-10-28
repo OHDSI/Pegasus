@@ -27,7 +27,7 @@ test_that("getEvaluations returns all evaluations or one phenotype's", {
 })
 
 test_that("orderedLevels puts known levels first in fixed order", {
-  expect_equal(orderedLevels(c("user", "zeta", "template", NA, "alpha"), sourceTypeOrder), c("template", "user", "alpha", "zeta"))
+  expect_equal(orderedLevels(c("User", "zeta", "Templates", NA, "alpha"), sourceTypeOrder), c("Templates", "User", "alpha", "zeta"))
   expect_equal(orderedLevels(character(0), sourceTypeOrder), character(0))
 })
 
@@ -46,7 +46,7 @@ test_that("hoverText escapes untrusted names", {
     phenotypeName = "<a href='x'>Evil</a>",
     cohortDefinitionName = "cohort & more",
     cdmSourceAbbreviation = "DB",
-    evaluationType = "phevaluator",
+    evaluationType = "PheValuator",
     ppv = 0.9,
     sensitivity = 0.8,
     cohortSubjects = 1234
@@ -63,7 +63,7 @@ test_that("buildScatter makes one trace per series and folds extra databases int
   data <- seedEvaluations()
 
   bySource <- builtTraces(buildScatter(data, colorBy = "source"))
-  expect_setequal(vapply(bySource, function(trace) trace$name, ""), c("template", "ai", "user"))
+  expect_setequal(vapply(bySource, function(trace) trace$name, ""), c("Templates", "MonoFlow", "User"))
 
   byEvaluationType <- builtTraces(buildScatter(data, colorBy = "evaluationType"))
   expect_length(byEvaluationType, 3)
@@ -83,8 +83,8 @@ test_that("buildScatter keeps colors stable when the data is filtered", {
     trace <- traces[[which(vapply(traces, function(t) t$name, "") == name)]]
     trace$marker$color
   }
-  full <- colorOf(buildScatter(data, colorBy = "source"), "user")
-  filtered <- colorOf(buildScatter(data[data$paSourceType %in% c("user", "ai"), ], colorBy = "source"), "user")
+  full <- colorOf(buildScatter(data, colorBy = "source"), "User")
+  filtered <- colorOf(buildScatter(data[data$cdSourceType %in% c("User", "MonoFlow"), ], colorBy = "source"), "User")
   expect_equal(full, filtered)
 })
 
@@ -105,7 +105,7 @@ test_that("buildScatter adds error bars only when asked and handles empty data",
 test_that("values outside the built-in lists still get their own colors and rows without PPV are dropped", {
   skip_if_not_installed("plotly")
   data <- seedEvaluations()
-  data$paSourceType <- c("Human", "Machine")[1 + (seq_len(nrow(data)) %% 2)]
+  data$cdSourceType <- c("Human", "Machine")[1 + (seq_len(nrow(data)) %% 2)]
   data$evaluationType <- c("Alpha", "Beta")[1 + (seq_len(nrow(data)) %% 2)]
   for (colorBy in c("source", "evaluationType")) {
     traces <- builtTraces(buildScatter(data, colorBy = colorBy))
@@ -130,7 +130,7 @@ test_that("buildComparison makes a PPV and a sensitivity panel for every groupin
 test_that("filterEvaluations restricts by phenotype, database, type, source and thresholds", {
   data <- seedEvaluations()
   allTypes <- orderedLevels(data$evaluationType, evaluationTypeOrder)
-  allSources <- orderedLevels(data$paSourceType, sourceTypeOrder)
+  allSources <- orderedLevels(data$cdSourceType, sourceTypeOrder)
   filterWith <- function(databases = character(0), phenotypeIds = character(0), minPpv = 0, minSensitivity = 0,
                          evalTypes = allTypes, sources = allSources) {
     filterEvaluations(data, evalTypes, sources, databases, phenotypeIds, minPpv, minSensitivity)
@@ -144,7 +144,7 @@ test_that("filterEvaluations restricts by phenotype, database, type, source and 
   expect_equal(nrow(filterWith(phenotypeIds = "1", databases = "DEVREG")), 1)
   expect_true(all(filterWith(minPpv = 90)$ppv >= 0.9))
   expect_equal(nrow(filterWith(evalTypes = character(0))), 0)
-  expect_true(all(filterWith(sources = "ai")$paSourceType == "ai"))
+  expect_true(all(filterWith(sources = "MonoFlow")$cdSourceType == "MonoFlow"))
 })
 
 test_that("data colors come from the OHDSI plot palette", {

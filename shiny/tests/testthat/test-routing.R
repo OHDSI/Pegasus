@@ -102,3 +102,11 @@ test_that("copyTextButton names the element whose text it copies", {
   expect_match(html, "Copy to clipboard", fixed = TRUE)
   expect_match(routingScript, "function pegasusCopyText", fixed = TRUE)
 })
+
+test_that("the address bar shows a landing page only on the Browse tab", {
+  route <- makeRoute("phenotype", 5)
+  expect_equal(tabQuery("Browse", route), "?page=phenotype&id=5")
+  expect_equal(tabQuery("Browse", NULL), "?")
+  expect_equal(tabQuery("Performance", route), "?")
+  expect_equal(tabQuery("New Phenotype", route), "?")
+})

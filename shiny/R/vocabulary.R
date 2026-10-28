@@ -195,6 +195,36 @@ getPhenotypesForConceptSets <- function(connection, databaseSchema, conceptSetId
   queryPegasus(connection, databaseSchema, sql, concept_set_ids = as.integer(conceptSetIds))
 }
 
+emptyCohortMatches <- function() {
+  data.frame(
+    conceptSetId = integer(0), cohortDefinitionId = integer(0), cohortDefinitionName = character(0),
+    cdSourceType = character(0), valid = integer(0), phenotypeId = integer(0), phenotypeName = character(0)
+  )
+}
+
+# The executable cohort definitions that use any of the given concept sets. A phenotype can list a concept set in its
+# full spectrum without any cohort definition using it, so this is a narrower question than getPhenotypesForConceptSets.
+getCohortsForConceptSets <- function(connection, databaseSchema, conceptSetIds) {
+  if (length(conceptSetIds) == 0) {
+    return(emptyCohortMatches())
+  }
+  sql <- "SELECT cdcs.concept_set_id,
+    cd.cohort_definition_id,
+    cd.cohort_definition_name,
+    cd.cd_source_type,
+    cd.valid,
+    p.phenotype_id,
+    p.phenotype_name
+  FROM @database_schema.cohort_definition_to_concept_set cdcs
+  INNER JOIN @database_schema.cohort_definition cd
+    ON cd.cohort_definition_id = cdcs.cohort_definition_id
+  INNER JOIN @database_schema.phenotype p
+    ON p.phenotype_id = cd.phenotype_id
+  WHERE cdcs.concept_set_id IN (@concept_set_ids)
+  ORDER BY p.phenotype_name, cd.cohort_definition_name;"
+  queryPegasus(connection, databaseSchema, sql, concept_set_ids = as.integer(conceptSetIds))
+}
+
 # Decides which concept sets contain a concept, following the Circe rules: an item covers the concept when
 # it is the concept itself, an ancestor with "include descendants", or (with "include mapped") a concept the
 # concept maps to. A concept set is excluded when an excluded item covers the concept.
@@ -312,6 +342,62 @@ findPhenotypesByConcept <- function(connection, databaseSchema, conceptId, vocab
   findPhenotypesForContext(connection, databaseSchema, conceptId, context)
 }
 
+emptySourceCodes <- function() {
+  data.frame(
+    sourceConceptId = integer(0), sourceConceptName = character(0), sourceConceptCode = character(0),
+    sourceVocabularyId = character(0), sourceDomainId = character(0),
+    standardConceptId = integer(0), standardConceptName = character(0)
+  )
+}
+
+# The source codes (ICD-10, ICD-9, ...) behind a concept set, as Atlas shows them: every source concept that maps
+# ('Maps to') to a standard concept the set resolves to. The set resolves to its non-excluded items (plus their
+# descendants when asked) minus the excluded items (likewise). items has the columns of parseConceptSetItems().
+# The expansion stays inside the database, because a large set resolves to many thousands of concepts.
+getConceptSetSourceCodes <- function(connection, vocabularySchema, items, limit = 10000) {
+  if (is.null(items) || nrow(items) == 0) {
+    return(emptySourceCodes())
+  }
+  # -1 is no concept; it keeps an empty list a valid SQL list.
+  ids <- function(rows) c(-1L, as.integer(rows$conceptId))
+  resolved <- function(excluded) {
+    rows <- items[items$isExcluded == as.integer(excluded) & !is.na(items$conceptId), , drop = FALSE]
+    list(self = ids(rows), withDescendants = ids(rows[rows$includeDescendants == 1, , drop = FALSE]))
+  }
+  included <- resolved(FALSE)
+  excluded <- resolved(TRUE)
+  sql <- "SELECT TOP @limit src.concept_id AS source_concept_id,
+    src.concept_name AS source_concept_name,
+    src.concept_code AS source_concept_code,
+    src.vocabulary_id AS source_vocabulary_id,
+    src.domain_id AS source_domain_id,
+    std.concept_id AS standard_concept_id,
+    std.concept_name AS standard_concept_name
+  FROM @vocabulary_schema.concept_relationship cr
+  INNER JOIN @vocabulary_schema.concept src
+    ON src.concept_id = cr.concept_id_1
+  INNER JOIN @vocabulary_schema.concept std
+    ON std.concept_id = cr.concept_id_2
+  WHERE cr.relationship_id = 'Maps to'
+    AND cr.invalid_reason IS NULL
+    AND cr.concept_id_1 <> cr.concept_id_2
+    AND cr.concept_id_2 IN (
+      SELECT concept_id FROM @vocabulary_schema.concept WHERE concept_id IN (@included_self)
+      UNION
+      SELECT descendant_concept_id FROM @vocabulary_schema.concept_ancestor WHERE ancestor_concept_id IN (@included_descendants))
+    AND cr.concept_id_2 NOT IN (
+      SELECT concept_id FROM @vocabulary_schema.concept WHERE concept_id IN (@excluded_self)
+      UNION
+      SELECT descendant_concept_id FROM @vocabulary_schema.concept_ancestor WHERE ancestor_concept_id IN (@excluded_descendants))
+  ORDER BY src.vocabulary_id, src.concept_code, std.concept_name;"
+  queryVocabulary(
+    connection, vocabularySchema, sql,
+    limit = as.integer(limit),
+    included_self = included$self, included_descendants = included$withDescendants,
+    excluded_self = excluded$self, excluded_descendants = excluded$withDescendants
+  )
+}
+
 # The OMOP vocabulary table keeps the vocabulary release in the row with vocabulary_id 'None'.
 # Returns NA when the table or row is missing.
 getVocabularyVersion <- function(connection, vocabularySchema) {
@@ -348,6 +434,7 @@ runVocabularyTask <- function(task, args, connection, vocabularySchema, log = fu
       log(sprintf("Found %d related concepts; reading their names...", length(ids)))
       list(context = context, concepts = getConcepts(connection, vocabularySchema, ids))
     },
+    sourceCodes = getConceptSetSourceCodes(connection, vocabularySchema, args$items),
     stop("Unknown vocabulary task: ", task)
   )
 }

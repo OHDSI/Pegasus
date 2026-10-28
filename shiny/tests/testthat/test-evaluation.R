@@ -24,7 +24,7 @@ test_that("canonical JSON ignores whitespace so a re-pasted definition is recogn
 })
 
 submitTo <- function(connection, json = validCohortJson(), name = "Liver custom", phenotypeId = 5L,
-                     databases = c(1, 2), types = "keeper + llm", notes = "") {
+                     databases = c(1, 2), types = "KEEPER + llm", notes = "") {
   submitEvaluationRequest(connection, "main", phenotypeId, name, json, NA, databases, types, "tester", notes)
 }
 
@@ -46,7 +46,7 @@ test_that("submitEvaluationRequest saves a user cohort and queues one request pe
   })
   expect_equal(cohort$COHORT_DEFINITION_NAME, "Liver custom")
   expect_equal(cohort$PHENOTYPE_ID, 5)
-  expect_equal(cohort$PA_SOURCE_TYPE, "user")
+  expect_equal(cohort$CD_SOURCE_TYPE, "User")
   expect_equal(cohort$VALID, 0)
 
   requests <- withConnection(pool, function(connection) {
@@ -71,7 +71,7 @@ test_that("pasting the same definition again reuses the cohort and skips existin
   expect_equal(nrow(again$queued), 0)
   expect_equal(nrow(again$skipped), 2)
 
-  more <- withConnection(pool, function(connection) submitTo(connection, types = c("keeper + llm", "phevaluator")))
+  more <- withConnection(pool, function(connection) submitTo(connection, types = c("KEEPER + llm", "PheValuator")))
   expect_equal(nrow(more$queued), 2)
   expect_equal(nrow(more$skipped), 2)
   expect_equal(withConnection(pool, function(connection) {
@@ -102,9 +102,9 @@ test_that("queueEvaluations skips combinations that already have results", {
   on.exit(pool::poolClose(pool))
   loadSeedData(pool)
 
-  # Seed cohort 1 already has keeper + llm evaluations for databases 1 and 2.
+  # Seed cohort 1 already has KEEPER + llm evaluations for databases 1 and 2.
   result <- withConnection(pool, function(connection) {
-    queueEvaluations(connection, "main", 1L, c(1, 2, 3), "keeper + llm", "tester")
+    queueEvaluations(connection, "main", 1L, c(1, 2, 3), "KEEPER + llm", "tester")
   })
   expect_equal(result$queued$databaseId, 3)
   expect_equal(nrow(result$skipped), 2)
@@ -125,7 +125,7 @@ test_that("getEvaluationRequests derives the status from stored evaluations", {
     DatabaseConnector::executeSql(
       connection,
       sprintf(
-        "INSERT INTO main.cohort_definition_evaluation VALUES (%d, 1, 100, 90, 5, 80, 10, 800, 20, 0.89, 0.8, 0.95, 0.8, 0.7, 0.9, 'keeper + llm')",
+        "INSERT INTO main.cohort_definition_evaluation VALUES (%d, 1, 100, 90, 5, 80, 10, 800, 20, 0.89, 0.8, 0.95, 0.8, 0.7, 0.9, NULL, NULL, NULL, NULL, NULL, NULL, 'KEEPER + llm')",
         result$cohortDefinitionId
       ),
       progressBar = FALSE,
@@ -174,7 +174,7 @@ test_that("saving a pasted cohort stores its concept sets as draft sets linked t
   conceptSets <- withConnection(pool, function(connection) getConceptSets(connection, "main", 5L))
   expect_equal(nrow(conceptSets), 3) # seed set 6 plus the two from the cohort
   expect_true(1 %in% conceptSets$conceptSetId) # reused, not duplicated
-  newSet <- conceptSets[conceptSets$csSourceType == "user", ]
+  newSet <- conceptSets[conceptSets$csSourceType == "User", ]
   expect_equal(nrow(newSet), 1)
   expect_equal(newSet$valid, 0)
   expect_match(newSet$conceptSetName, "COPD (Liver custom)", fixed = TRUE)

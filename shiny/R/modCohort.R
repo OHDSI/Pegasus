@@ -164,7 +164,7 @@ cohortServer <- function(id, connectionPool, databaseSchema, cohortDefinitionId,
         tags$p(
           class = "small",
           "Phenotype: ", HTML(entityLink("phenotype", row$phenotypeId, row$phenotypeName)),
-          sprintf(" | ID %d | Source: %s", row$cohortDefinitionId, row$paSourceType),
+          sprintf(" | ID %d | Source: %s", row$cohortDefinitionId, row$cdSourceType),
           if (!is.na(row$atlasCohortDefinitionId)) {
             HTML(paste0(" | ", atlasLink(detail$atlasBaseUrl, "cohort", row$atlasCohortDefinitionId)))
           }

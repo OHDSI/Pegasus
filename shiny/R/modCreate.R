@@ -16,46 +16,50 @@
 
 createUi <- function(id) {
   ns <- NS(id)
-  bslib::navset_hidden(
-    id = ns("wizard"),
-    bslib::nav_panel_hidden(
-      "start",
-      bslib::card(
-        bslib::card_header("Start a new phenotype"),
-        uiOutput(ns("cloneHintStart")),
-        textInput(ns("name"), "Phenotype name", width = "100%"),
-        textAreaInput(ns("initialDefinition"), "Initial definition (optional)", rows = 5, width = "100%"),
-        actionButton(ns("start"), "Start", class = "btn-primary", width = "200px")
-      )
-    ),
-    bslib::nav_panel_hidden(
-      "refine",
-      bslib::layout_columns(
-        col_widths = c(7, 5),
+  tagList(
+    # The conversation grows without bound, so it scrolls inside the card instead of stretching the page.
+    tags$style(HTML(sprintf("#%s shiny-chat-messages { max-height: 480px; overflow-y: auto; }", ns("chat")))),
+    bslib::navset_hidden(
+      id = ns("wizard"),
+      bslib::nav_panel_hidden(
+        "start",
         bslib::card(
-          bslib::card_header(
-            class = "d-flex justify-content-between align-items-center",
-            "Refine the clinical definition",
-            actionButton(ns("startOver"), "Start over", icon = icon("arrow-rotate-left"), class = "btn-sm")
+          bslib::card_header("Start a new phenotype"),
+          uiOutput(ns("cloneHintStart")),
+          textInput(ns("name"), "Phenotype name", width = "100%"),
+          textAreaInput(ns("initialDefinition"), "Initial definition (optional)", rows = 5, width = "100%"),
+          actionButton(ns("start"), "Start", class = "btn-primary", width = "200px")
+        )
+      ),
+      bslib::nav_panel_hidden(
+        "refine",
+        bslib::layout_columns(
+          col_widths = c(7, 5),
+          bslib::card(
+            bslib::card_header(
+              class = "d-flex justify-content-between align-items-center",
+              "Refine the clinical definition",
+              actionButton(ns("startOver"), "Start over", icon = icon("arrow-rotate-left"), class = "btn-sm")
+            ),
+            uiOutput(ns("cloneHintRefine")),
+            uiOutput(ns("similarWarning")),
+            shinychat::chat_ui(
+              ns("chat"),
+              drawer = FALSE,
+              show_history = FALSE,
+              enable_cancel = FALSE,
+              height = "600px",
+              fill = FALSE
+            )
           ),
-          uiOutput(ns("cloneHintRefine")),
-          uiOutput(ns("similarWarning")),
-          shinychat::chat_ui(
-            ns("chat"),
-            drawer = FALSE,
-            show_history = FALSE,
-            enable_cancel = FALSE,
-            height = "600px",
-            fill = FALSE
+          bslib::card(
+            bslib::card_header("Review and save"),
+            textInput(ns("saveName"), "Phenotype name", width = "100%"),
+            textAreaInput(ns("definition"), "Clinical definition", rows = 12, width = "100%",
+                          placeholder = "The final definition will appear here when the conversation is done. You can edit it before saving."),
+            uiOutput(ns("creator")),
+            actionButton(ns("save"), "Save phenotype", class = "btn-success", icon = icon("floppy-disk"))
           )
-        ),
-        bslib::card(
-          bslib::card_header("Review and save"),
-          textInput(ns("saveName"), "Phenotype name", width = "100%"),
-          textAreaInput(ns("definition"), "Clinical definition", rows = 12, width = "100%",
-                        placeholder = "The final definition will appear here when the conversation is done. You can edit it before saving."),
-          uiOutput(ns("creator")),
-          actionButton(ns("save"), "Save phenotype", class = "btn-success", icon = icon("floppy-disk"))
         )
       )
     )
@@ -67,7 +71,9 @@ createServer <- function(id, connectionPool, databaseSchema, llmConfig, systemPr
   moduleServer(id, function(input, output, session) {
     client <- NULL
     toolCalledThisTurn <- FALSE
+    # list(text, nonce): the nonce makes a resubmission of identical text still update the definition box.
     submittedDefinition <- reactiveVal(NULL)
+    submit <- function(text) submittedDefinition(list(text = text, nonce = as.numeric(Sys.time())))
     similarNames <- reactiveVal(character(0))
 
     output$creator <- renderUI({
@@ -120,7 +126,7 @@ createServer <- function(id, connectionPool, databaseSchema, llmConfig, systemPr
           if (!toolCalledThisTurn) {
             definition <- extractFinalDefinition(text)
             if (!is.null(definition)) {
-              submittedDefinition(definition)
+              submit(definition)
             }
           }
         },
@@ -170,7 +176,7 @@ createServer <- function(id, connectionPool, databaseSchema, llmConfig, systemPr
       client <<- tryCatch(
         createChatClient(llmConfig, systemPrompt, onSubmit = function(definition) {
           toolCalledThisTurn <<- TRUE
-          submittedDefinition(trimws(definition))
+          submit(trimws(definition))
         }),
         error = function(e) {
           showNotification(paste("Unable to create LLM client:", conditionMessage(e)), type = "error")
@@ -194,7 +200,7 @@ createServer <- function(id, connectionPool, databaseSchema, llmConfig, systemPr
     })
 
     observeEvent(submittedDefinition(), {
-      updateTextAreaInput(session, "definition", value = submittedDefinition())
+      updateTextAreaInput(session, "definition", value = submittedDefinition()$text)
       showNotification("The definition is ready for review.", type = "message")
     })
 

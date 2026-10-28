@@ -29,8 +29,8 @@ otherColor <- ohdsiNavy
 otherSymbol <- "triangle-up"
 maxSeries <- length(seriesColors)
 
-sourceTypeOrder <- c("template", "ai", "user")
-evaluationTypeOrder <- c("keeper + llm", "phevaluator", "keeper + human")
+sourceTypeOrder <- c("Templates", "User", "MonoFlow", "PhenotypeDesigner")
+evaluationTypeOrder <- c("KEEPER + llm", "PheValuator", "KEEPER + human")
 
 colorByChoices <- c("Source type" = "source", "Database" = "database", "Evaluation type" = "evaluationType")
 groupByChoices <- c("Database" = "database", "Source type" = "source", "Evaluation type" = "evaluationType")
@@ -56,7 +56,7 @@ assignSeries <- function(values, order, otherLabel = "Other") {
 seriesGroups <- function(data, colorBy, databaseOrder, sourceLevels, evaluationTypeLevels, cohortLevels = character(0)) {
   switch(
     colorBy,
-    source = assignSeries(data$paSourceType, sourceLevels, "Other source"),
+    source = assignSeries(data$cdSourceType, sourceLevels, "Other source"),
     database = assignSeries(data$cdmSourceAbbreviation, databaseOrder, "Other databases"),
     evaluationType = assignSeries(data$evaluationType, evaluationTypeLevels, "Other evaluation type"),
     cohort = assignSeries(data$cohortDefinitionName, cohortLevels, "Other cohorts"),
@@ -118,7 +118,7 @@ buildScatter <- function(data,
                          colorBy = "source",
                          showCi = FALSE,
                          databaseOrder = unique(data$cdmSourceAbbreviation[order(data$databaseId)]),
-                         sourceLevels = orderedLevels(data$paSourceType, sourceTypeOrder),
+                         sourceLevels = orderedLevels(data$cdSourceType, sourceTypeOrder),
                          evaluationTypeLevels = orderedLevels(data$evaluationType, evaluationTypeOrder),
                          cohortLevels = orderedLevels(data$cohortDefinitionName, character(0)),
                          source = "performanceScatter",
@@ -204,7 +204,7 @@ buildComparison <- function(data,
   values <- switch(
     groupBy,
     database = data$cdmSourceAbbreviation,
-    source = data$paSourceType,
+    source = data$cdSourceType,
     evaluationType = data$evaluationType,
     stop("Unknown groupBy: ", groupBy)
   )

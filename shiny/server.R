@@ -51,6 +51,11 @@ function(input, output, session) {
     showBrowse = function() bslib::nav_select("mainNav", "Browse", session = session)
   )
 
+  # Switching tabs clears the address of the landing page; returning to Browse restores it.
+  observeEvent(input$mainNav, {
+    updateQueryString(tabQuery(input$mainNav, route()), mode = "replace", session = session)
+  }, ignoreInit = TRUE)
+
   openPhenotype <- function(phenotypeId) {
     navigate("phenotype", phenotypeId)
   }
@@ -103,6 +108,8 @@ function(input, output, session) {
       returnToEvaluation(FALSE)
       evaluationPreselect(list(id = phenotypeId, nonce = as.numeric(Sys.time())))
       bslib::nav_select("mainNav", "New Evaluation", session = session)
+    } else {
+      openPhenotype(phenotypeId)
     }
   }
 
@@ -122,7 +129,8 @@ function(input, output, session) {
     route = route,
     navigate = navigate,
     shortlist = shortlist,
-    onRefine = refinePhenotype
+    onRefine = refinePhenotype,
+    vocabularyRunner = vocabularyRunner
   )
   performanceServer("performance", evaluations, shortlist = shortlist, onOpenPhenotype = openPhenotype)
   evaluationServer(

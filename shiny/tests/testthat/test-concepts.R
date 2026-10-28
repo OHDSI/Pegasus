@@ -386,3 +386,39 @@ test_that("concepts server: code mode lists codes and resolves the selected one 
     expect_equal(nrow(candidates()), 0)
   })
 })
+
+test_that("cohort definitions are found for concept sets, separately from the phenotypes that list them", {
+  pool <- createTestPool()
+  on.exit(pool::poolClose(pool))
+  loadSeedData(pool)
+  cohorts <- withConnection(pool, function(connection) getCohortsForConceptSets(connection, "main", c(1L, 6L)))
+  expect_setequal(cohorts$cohortDefinitionId[cohorts$conceptSetId == 1], c(1, 2))
+  expect_equal(cohorts$cohortDefinitionId[cohorts$conceptSetId == 6], 9)
+  # Concept set 8 is in a phenotype's spectrum but no cohort definition uses it.
+  none <- withConnection(pool, function(connection) getCohortsForConceptSets(connection, "main", 8L))
+  expect_equal(nrow(none), 0)
+  expect_equal(nrow(withConnection(pool, function(connection) getCohortsForConceptSets(connection, "main", integer(0)))), 0)
+})
+
+test_that("source codes of a concept set are the source concepts mapping to what it resolves to", {
+  vocabulary <- createVocabularyPool()
+  on.exit(pool::poolClose(vocabulary))
+  codes <- function(items) {
+    result <- withConnection(vocabulary, function(connection) {
+      runVocabularyTask("sourceCodes", list(items = items), connection, "main")
+    })
+    sort(result$sourceConceptCode)
+  }
+  item <- function(id, excluded = 0L, descendants = 0L) {
+    data.frame(conceptId = id, isExcluded = excluded, includeDescendants = descendants)
+  }
+  # Asthma alone: J45.9 and 493.90 (the invalid mapping and the self-mapping are ignored).
+  expect_equal(codes(item(317009L)), c("493.90", "J45.9"))
+  # With descendants, the child's source code J45.0 joins.
+  expect_equal(codes(item(317009L, descendants = 1L)), c("493.90", "J45.0", "J45.9"))
+  # Excluding the child removes its code again.
+  expect_equal(codes(rbind(item(317009L, descendants = 1L), item(4051466L, excluded = 1L))), c("493.90", "J45.9"))
+  expect_equal(nrow(withConnection(vocabulary, function(connection) {
+    getConceptSetSourceCodes(connection, "main", data.frame(conceptId = integer(0), isExcluded = integer(0), includeDescendants = integer(0)))
+  })), 0)
+})

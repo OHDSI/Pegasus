@@ -85,7 +85,7 @@ evaluationTable <- function(evaluations, linkCohorts = TRUE) {
     } else {
       htmltools::htmlEscape(evaluations$cohortDefinitionName)
     },
-    Source = htmltools::htmlEscape(evaluations$paSourceType),
+    Source = htmltools::htmlEscape(evaluations$cdSourceType),
     Database = htmltools::htmlEscape(evaluations$cdmSourceAbbreviation),
     "Evaluation type" = htmltools::htmlEscape(evaluations$evaluationType),
     Subjects = evaluations$cohortSubjects,
@@ -275,7 +275,7 @@ phenotypeDetailServer <- function(id, connectionPool, databaseSchema, phenotypes
       showTable(
         data.frame(
           Name = entityLink("cohort_definition", cohorts$cohortDefinitionId, cohorts$cohortDefinitionName),
-          Source = htmltools::htmlEscape(cohorts$paSourceType),
+          Source = htmltools::htmlEscape(cohorts$cdSourceType),
           Status = draftOrValid(cohorts$valid),
           Evaluations = cohorts$evaluationCount,
           "Best PPV (%)" = toPercent(cohorts$bestPpv),

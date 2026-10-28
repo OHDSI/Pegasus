@@ -46,6 +46,12 @@ routeQuery <- function(route) {
   if (is.null(route)) "?" else sprintf("?page=%s&id=%d", route$page, route$id)
 }
 
+# The address bar belongs to the Browse tab: it shows the landing page being viewed there and is empty on every
+# other tab, so a stale page address is never left behind (or copied) while the user works elsewhere.
+tabQuery <- function(tab, route) {
+  if (identical(tab, "Browse")) routeQuery(route) else "?"
+}
+
 # A link to a landing page for use in HTML strings (table cells). The href is a real URL, so the link can be
 # copied or opened in a new tab; an ordinary click is handled by the script below without reloading the page.
 entityLink <- function(page, id, label) {

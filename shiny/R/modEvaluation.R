@@ -155,7 +155,7 @@ saveCohortConceptSets <- function(connection, databaseSchema, phenotypeId, cohor
         conceptId = NA_integer_,
         valid = 0L,
         atlasConceptSetId = NA_integer_,
-        csSourceType = "user"
+        csSourceType = "User"
       ))
       if (nrow(items) > 0) {
         insertPegasusRows(connection, databaseSchema, "concept_set_item", cbind(conceptSetId = as.integer(conceptSetId), items))
@@ -226,7 +226,7 @@ saveCohortDefinition <- function(connection, databaseSchema, phenotypeId, cohort
       cohortDefinitionName = cohortName,
       phenotypeId = as.integer(phenotypeId),
       circeCohortExpression = trimws(json),
-      paSourceType = "user",
+      cdSourceType = "User",
       valid = 0L,
       atlasCohortDefinitionId = as.integer(atlasCohortDefinitionId)
     ),

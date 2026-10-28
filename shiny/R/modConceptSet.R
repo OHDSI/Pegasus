@@ -65,13 +65,16 @@ conceptSetUi <- function(id) {
       bslib::nav_panel("Expression", DT::DTOutput(ns("items"))),
       bslib::nav_panel("Cohort definitions", DT::DTOutput(ns("cohorts"))),
       bslib::nav_panel("Phenotypes", DT::DTOutput(ns("phenotypes"))),
+      bslib::nav_panel("Source codes", uiOutput(ns("sourceCodesNote")), DT::DTOutput(ns("sourceCodes"))),
       bslib::nav_panel("Person counts", DT::DTOutput(ns("counts"))),
       bslib::nav_panel("Circe and Capr", uiOutput(ns("raw")))
     )
   )
 }
 
-conceptSetServer <- function(id, connectionPool, databaseSchema, conceptSetId, navigate) {
+# vocabularyRunner is NULL when no vocabulary database is configured (see backgroundVocabularyRunner()).
+conceptSetServer <- function(id, connectionPool, databaseSchema, conceptSetId, navigate, vocabularyRunner = NULL,
+                             sourceCodesTimeoutSeconds = 180) {
   moduleServer(id, function(input, output, session) {
     # Every newly opened concept set starts on its expression.
     observeEvent(conceptSetId(), bslib::nav_select("tabs", "Expression", session = session))
@@ -197,7 +200,7 @@ conceptSetServer <- function(id, connectionPool, databaseSchema, conceptSetId, n
         data.frame(
           Cohort = entityLink("cohort_definition", cohorts$cohortDefinitionId, cohorts$cohortDefinitionName),
           Phenotype = entityLink("phenotype", cohorts$phenotypeId, cohorts$phenotypeName),
-          Source = htmltools::htmlEscape(cohorts$paSourceType),
+          Source = htmltools::htmlEscape(cohorts$cdSourceType),
           Status = draftOrValid(cohorts$valid),
           check.names = FALSE
         ),
@@ -241,6 +244,99 @@ conceptSetServer <- function(id, connectionPool, databaseSchema, conceptSetId, n
         "No person counts are stored for this concept set."
       )
       DT::formatRound(result, c("Overall", "Condition", "Procedure", "Drug", "Device", "Measurement", "Observation", "Visit"), digits = 0)
+    })
+
+    # Source codes need the vocabulary, which is slow, so they load in the background the first time the tab is
+    # opened for a concept set (the result is kept per concept set).
+    sourceCodes <- reactiveVal(list(id = NA_integer_, state = "idle", data = NULL, error = NULL))
+    sourceJob <- reactiveVal(NULL)
+
+    startSourceCodes <- function() {
+      id <- conceptSetId()
+      items <- parseConceptSetItems(conceptSet()$circeConceptSetExpression)
+      handle <- tryCatch(vocabularyRunner("sourceCodes", list(items = items)), error = function(e) e)
+      if (inherits(handle, "error")) {
+        sourceCodes(list(id = id, state = "failed", data = NULL, error = conditionMessage(handle)))
+        return()
+      }
+      sourceCodes(list(id = id, state = "loading", data = NULL, error = NULL))
+      sourceJob(list(handle = handle, id = id, started = Sys.time()))
+    }
+
+    observeEvent(list(input$tabs, conceptSetId()), {
+      if (!identical(input$tabs, "Source codes") || is.null(vocabularyRunner)) {
+        return()
+      }
+      loaded <- sourceCodes()
+      if (identical(loaded$id, conceptSetId()) && loaded$state %in% c("loading", "ready")) {
+        return()
+      }
+      req(details(), nrow(details()$conceptSet) == 1)
+      startSourceCodes()
+    })
+
+    observe({
+      job <- sourceJob()
+      req(job)
+      invalidateLater(500)
+      isolate({
+        outcome <- NULL
+        polled <- job$handle$poll()
+        if (isTRUE(polled$done)) {
+          outcome <- polled
+        } else if (as.numeric(Sys.time() - job$started, units = "secs") > sourceCodesTimeoutSeconds) {
+          job$handle$kill()
+          outcome <- list(ok = FALSE, error = sprintf("timed out after %d seconds", as.integer(sourceCodesTimeoutSeconds)))
+        }
+        if (!is.null(outcome)) {
+          sourceJob(NULL)
+          # A concept set opened in the meantime has its own request; this one is stale.
+          if (identical(job$id, conceptSetId())) {
+            sourceCodes(if (isTRUE(outcome$ok)) {
+              list(id = job$id, state = "ready", data = outcome$value, error = NULL)
+            } else {
+              list(id = job$id, state = "failed", data = NULL, error = outcome$error)
+            })
+          }
+        }
+      })
+    })
+
+    output$sourceCodesNote <- renderUI({
+      if (is.null(vocabularyRunner)) {
+        return(tags$div(class = "alert alert-warning", "No vocabulary database is configured, so source codes are not available."))
+      }
+      state <- sourceCodes()
+      if (!identical(state$id, conceptSetId())) {
+        return(NULL)
+      }
+      switch(
+        state$state,
+        loading = tags$div(class = "text-muted", "Reading the vocabulary..."),
+        failed = tags$div(class = "alert alert-danger", paste("Unable to read the source codes:", state$error)),
+        ready = tags$p(
+          class = "small text-muted",
+          "Source codes that map to the standard concepts this concept set resolves to (items and their descendants,",
+          "minus excluded items)."
+        )
+      )
+    })
+
+    output$sourceCodes <- DT::renderDT({
+      state <- sourceCodes()
+      req(identical(state$id, conceptSetId()), state$state == "ready")
+      codes <- state$data
+      showTable(
+        data.frame(
+          Vocabulary = htmltools::htmlEscape(codes$sourceVocabularyId),
+          Code = htmltools::htmlEscape(codes$sourceConceptCode),
+          Name = htmltools::htmlEscape(codes$sourceConceptName),
+          Domain = htmltools::htmlEscape(codes$sourceDomainId),
+          "Maps to" = htmltools::htmlEscape(sprintf("%s (%s)", codes$standardConceptName, codes$standardConceptId)),
+          check.names = FALSE
+        ),
+        "No source codes map to this concept set."
+      )
     })
 
     output$raw <- renderUI({

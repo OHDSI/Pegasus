@@ -265,7 +265,7 @@ getDraftTargets <- function(connection, databaseSchema, phenotypeId) {
 getCohortDefinitions <- function(connection, databaseSchema, phenotypeId) {
   sql <- "SELECT cohort_definition_id,
     cohort_definition_name,
-    pa_source_type,
+    cd_source_type,
     valid,
     atlas_cohort_definition_id
   FROM @database_schema.cohort_definition
@@ -280,7 +280,7 @@ getEvaluations <- function(connection, databaseSchema, phenotypeId = NULL, cohor
     p.phenotype_name,
     cd.cohort_definition_id,
     cd.cohort_definition_name,
-    cd.pa_source_type,
+    cd.cd_source_type,
     d.database_id,
     d.cdm_source_abbreviation,
     ev.evaluation_type,
@@ -332,7 +332,7 @@ emptyEvaluations <- function() {
     phenotypeName = character(0),
     cohortDefinitionId = integer(0),
     cohortDefinitionName = character(0),
-    paSourceType = character(0),
+    cdSourceType = character(0),
     databaseId = integer(0),
     cdmSourceAbbreviation = character(0),
     evaluationType = character(0),
@@ -418,7 +418,7 @@ getCohortExpressions <- function(connection, databaseSchema, phenotypeIds) {
       cohortDefinitionId = integer(0),
       cohortDefinitionName = character(0),
       phenotypeId = integer(0),
-      paSourceType = character(0),
+      cdSourceType = character(0),
       valid = integer(0),
       circeCohortExpression = character(0)
     ))
@@ -426,7 +426,7 @@ getCohortExpressions <- function(connection, databaseSchema, phenotypeIds) {
   sql <- "SELECT cohort_definition_id,
     cohort_definition_name,
     phenotype_id,
-    pa_source_type,
+    cd_source_type,
     valid,
     circe_cohort_expression
   FROM @database_schema.cohort_definition
@@ -445,7 +445,7 @@ getCohortDefinition <- function(connection, databaseSchema, cohortDefinitionId) 
     p.phenotype_name,
     p.clinical_definition,
     cd.circe_cohort_expression,
-    cd.pa_source_type,
+    cd.cd_source_type,
     cd.valid,
     cd.atlas_cohort_definition_id
   FROM @database_schema.cohort_definition cd
@@ -491,7 +491,7 @@ getConceptSet <- function(connection, databaseSchema, conceptSetId) {
 getConceptSetCohorts <- function(connection, databaseSchema, conceptSetId) {
   sql <- "SELECT cd.cohort_definition_id,
     cd.cohort_definition_name,
-    cd.pa_source_type,
+    cd.cd_source_type,
     cd.valid,
     p.phenotype_id,
     p.phenotype_name

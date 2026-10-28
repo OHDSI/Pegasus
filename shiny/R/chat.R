@@ -14,7 +14,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-finalDefinitionHeading <- "### Final Condition Definition"
+# The heading the model writes before the final definition. Models vary the markup (a different heading level,
+# bold text, a trailing colon), so the match is lenient.
+finalDefinitionHeading <- "(?im)^[ \\t]*(#{1,6}[ \\t]*)?\\**[ \\t]*Final[ \\t]+(Condition[ \\t]+)?Definition[ \\t]*:?[ \\t]*\\**[ \\t]*:?[ \\t]*$"
 
 loadSystemPrompt <- function(skillFile) {
   lines <- readLines(skillFile, encoding = "UTF-8")
@@ -75,11 +77,13 @@ extractFinalDefinition <- function(text) {
   if (is.null(text) || length(text) != 1 || is.na(text)) {
     return(NULL)
   }
-  parts <- strsplit(text, finalDefinitionHeading, fixed = TRUE)[[1]]
-  if (length(parts) < 2) {
+  headings <- gregexpr(finalDefinitionHeading, text, perl = TRUE)[[1]]
+  if (headings[1] == -1) {
     return(NULL)
   }
-  paragraphs <- strsplit(trimws(parts[length(parts)]), "\n\\s*\n")[[1]]
+  last <- length(headings)
+  afterHeading <- substring(text, headings[last] + attr(headings, "match.length")[last])
+  paragraphs <- strsplit(trimws(afterHeading), "\n\\s*\n")[[1]]
   definition <- trimws(paragraphs[1])
   if (is.na(definition) || !nzchar(definition)) NULL else definition
 }

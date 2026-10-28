@@ -17,3 +17,11 @@ test_that("extractFinalDefinition parses the final heading", {
   expect_null(extractFinalDefinition("Which option do you prefer?"))
   expect_null(extractFinalDefinition(NULL))
 })
+
+test_that("extractFinalDefinition tolerates variations of the final heading", {
+  expect_equal(extractFinalDefinition("Done.\n\n## Final Condition Definition\n\nAsthma is chronic."), "Asthma is chronic.")
+  expect_equal(extractFinalDefinition("Done.\n\n**Final Condition Definition**\n\nAsthma is chronic."), "Asthma is chronic.")
+  expect_equal(extractFinalDefinition("Done.\n\n### Final Definition:\n\nAsthma is chronic.\n\nBye"), "Asthma is chronic.")
+  expect_equal(extractFinalDefinition("### Final Condition Definition\n\nOld.\n\n### Final Condition Definition\n\nNew."), "New.")
+  expect_null(extractFinalDefinition("The final definition is still open."))
+})

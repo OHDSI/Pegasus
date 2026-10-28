@@ -34,10 +34,10 @@ INSERT INTO @database_schema.concept_set (concept_set_id, concept_set_name, circ
   (2, 'Asthma (exact)', '{"items": [{"concept": {"CONCEPT_ID": 317009, "CONCEPT_NAME": "Asthma"}, "isExcluded": false, "includeDescendants": false, "includeMapped": false}]}', 'cs(317009, name = "Asthma (exact)")', 0, NULL, 317009, 1, NULL, 'concept'),
   (3, 'Type 2 diabetes mellitus', '{"items": [{"concept": {"CONCEPT_ID": 201826, "CONCEPT_NAME": "Type 2 diabetes mellitus"}, "isExcluded": false, "includeDescendants": true, "includeMapped": false}]}', 'cs(descendants(201826), name = "Type 2 diabetes mellitus")', 1, NULL, 201826, 1, NULL, 'concept + descendants'),
   (4, 'COPD', '{"items": [{"concept": {"CONCEPT_ID": 255573, "CONCEPT_NAME": "Chronic obstructive lung disease"}, "isExcluded": false, "includeDescendants": true, "includeMapped": false}]}', 'cs(descendants(255573), name = "COPD")', 1, NULL, 255573, 1, NULL, 'concept + descendants'),
-  (5, 'Atrial fibrillation', '{"items": [{"concept": {"CONCEPT_ID": 313217, "CONCEPT_NAME": "Atrial fibrillation"}, "isExcluded": false, "includeDescendants": true, "includeMapped": false}]}', 'cs(descendants(313217), name = "Atrial fibrillation")', 1, NULL, 313217, 1, NULL, 'from AI definition'),
-  (6, 'Acute liver injury', '{"items": [{"concept": {"CONCEPT_ID": 4345213, "CONCEPT_NAME": "Acute liver injury"}, "isExcluded": false, "includeDescendants": true, "includeMapped": false}]}', 'cs(descendants(4345213), name = "Acute liver injury")', 1, NULL, 4345213, 1, NULL, 'from human definition'),
+  (5, 'Atrial fibrillation', '{"items": [{"concept": {"CONCEPT_ID": 313217, "CONCEPT_NAME": "Atrial fibrillation"}, "isExcluded": false, "includeDescendants": true, "includeMapped": false}]}', 'cs(descendants(313217), name = "Atrial fibrillation")', 1, NULL, 313217, 1, NULL, 'From AI definition'),
+  (6, 'Acute liver injury', '{"items": [{"concept": {"CONCEPT_ID": 4345213, "CONCEPT_NAME": "Acute liver injury"}, "isExcluded": false, "includeDescendants": true, "includeMapped": false}]}', 'cs(descendants(4345213), name = "Acute liver injury")', 1, NULL, 4345213, 1, NULL, 'From human definition'),
   (7, 'Psoriasis', '{"items": [{"concept": {"CONCEPT_ID": 140168, "CONCEPT_NAME": "Psoriasis"}, "isExcluded": false, "includeDescendants": true, "includeMapped": false}]}', 'cs(descendants(140168), name = "Psoriasis")', 1, NULL, 140168, 1, NULL, 'concept + descendants'),
-  (8, 'Asthma with exclusion of COPD', '{"items": [{"concept": {"CONCEPT_ID": 317009, "CONCEPT_NAME": "Asthma"}, "isExcluded": false, "includeDescendants": true, "includeMapped": false}, {"concept": {"CONCEPT_ID": 255573, "CONCEPT_NAME": "Chronic obstructive lung disease"}, "isExcluded": true, "includeDescendants": true, "includeMapped": false}]}', 'cs(descendants(317009), exclude(descendants(255573)), name = "Asthma with exclusion of COPD")', 1, NULL, 317009, 1, NULL, 'user');
+  (8, 'Asthma with exclusion of COPD', '{"items": [{"concept": {"CONCEPT_ID": 317009, "CONCEPT_NAME": "Asthma"}, "isExcluded": false, "includeDescendants": true, "includeMapped": false}, {"concept": {"CONCEPT_ID": 255573, "CONCEPT_NAME": "Chronic obstructive lung disease"}, "isExcluded": true, "includeDescendants": true, "includeMapped": false}]}', 'cs(descendants(317009), exclude(descendants(255573)), name = "Asthma with exclusion of COPD")', 1, NULL, 317009, 1, NULL, 'User');
 
 INSERT INTO @database_schema.concept_set_item (concept_set_id, concept_id, is_excluded, include_descendants, include_mapped) VALUES
   (1, 317009, 0, 1, 0),
@@ -51,19 +51,19 @@ INSERT INTO @database_schema.concept_set_item (concept_set_id, concept_id, is_ex
   (8, 255573, 1, 1, 0);
 
 INSERT INTO @database_schema.phenotype_to_concept_set (phenotype_id, pertains, category, concept_set_id) VALUES
-  (1, 'doi', 'doi', 1),
-  (1, 'doi', 'doi', 2),
-  (2, 'doi', 'doi', 3),
-  (3, 'doi', 'doi', 4),
-  (4, 'doi', 'doi', 5),
-  (5, 'doi', 'doi', 6),
-  (6, 'doi', 'doi', 7),
-  (8, 'doi', 'doi', 8);
+  (1, 'Disease of interest', 'Disease of interest', 1),
+  (1, 'Disease of interest', 'Disease of interest', 2),
+  (2, 'Disease of interest', 'Disease of interest', 3),
+  (3, 'Disease of interest', 'Disease of interest', 4),
+  (4, 'Disease of interest', 'Disease of interest', 5),
+  (5, 'Disease of interest', 'Disease of interest', 6),
+  (6, 'Disease of interest', 'Disease of interest', 7),
+  (8, 'Disease of interest', 'Disease of interest', 8);
 
 INSERT INTO @database_schema.draft_concept_set_target (phenotype_id, pertains, category, term, concept_id, concept_name, domain_id, concept_class_id, vocabulary_id, match_type) VALUES
-  (7, 'doi', 'doi', 'chronic kidney disease', 46271022, 'Chronic kidney disease', 'Condition', 'Clinical Finding', 'SNOMED', 'verbatim'),
-  (7, 'alternative diagnoses', 'symptom', 'proteinuria', 435515, 'Proteinuria', 'Condition', 'Clinical Finding', 'SNOMED', 'vector'),
-  (8, 'doi', 'doi', 'asthma', 317009, 'Asthma', 'Condition', 'Clinical Finding', 'SNOMED', 'verbatim');
+  (7, 'Disease of interest', 'Disease of interest', 'chronic kidney disease', 46271022, 'Chronic kidney disease', 'Condition', 'Clinical Finding', 'SNOMED', 'verbatim'),
+  (7, 'Alternative diagnoses', 'Clinical presentation', 'proteinuria', 435515, 'Proteinuria', 'Condition', 'Clinical Finding', 'SNOMED', 'vector'),
+  (8, 'Disease of interest', 'Disease of interest', 'asthma', 317009, 'Asthma', 'Condition', 'Clinical Finding', 'SNOMED', 'verbatim');
 
 INSERT INTO @database_schema.database_meta_data (database_id, cdm_source_name, cdm_source_abbreviation, cdm_release_date, cdm_release_identifier, vocabulary_version) VALUES
   (1, 'Dev Claims Database', 'DEVCLM', '2025-06-30', 'v5.4', 'v5.0 24-JUN-2025'),
@@ -98,17 +98,17 @@ INSERT INTO @database_schema.concept_set_person_count (concept_set_id, database_
   (8, 2, 111136, 49394, 86439, 2469, 61742, 37045, 98788, 123485),
   (8, 3, 22254, 9890, 17308, 494, 12363, 7418, 19781, 24727);
 
-INSERT INTO @database_schema.cohort_definition (cohort_definition_id, cohort_definition_name, phenotype_id, circe_cohort_expression, capr_cohort_expression, pa_source_type, valid, atlas_cohort_definition_id) VALUES
-  (1, 'Asthma - template', 1, '{"ConceptSets": [], "cohortName": "Asthma - template", "note": "dev placeholder"}', NULL, 'template', 1, NULL),
-  (2, 'Asthma - AI', 1, '{"ConceptSets": [], "cohortName": "Asthma - AI", "note": "dev placeholder"}', NULL, 'ai', 1, NULL),
-  (3, 'Asthma - user', 1, '{"ConceptSets": [], "cohortName": "Asthma - user", "note": "dev placeholder"}', NULL, 'user', 1, NULL),
-  (4, 'T2DM - template', 2, '{"ConceptSets": [], "cohortName": "T2DM - template", "note": "dev placeholder"}', NULL, 'template', 1, NULL),
-  (5, 'T2DM - AI', 2, '{"ConceptSets": [], "cohortName": "T2DM - AI", "note": "dev placeholder"}', NULL, 'ai', 1, NULL),
-  (6, 'COPD - template', 3, '{"ConceptSets": [], "cohortName": "COPD - template", "note": "dev placeholder"}', NULL, 'template', 1, NULL),
-  (7, 'COPD - AI', 3, '{"ConceptSets": [], "cohortName": "COPD - AI", "note": "dev placeholder"}', NULL, 'ai', 1, NULL),
-  (8, 'AFib - template', 4, '{"ConceptSets": [], "cohortName": "AFib - template", "note": "dev placeholder"}', NULL, 'template', 1, NULL),
-  (9, 'Acute liver injury - AI', 5, '{"ConceptSets": [], "cohortName": "Acute liver injury - AI", "note": "dev placeholder"}', NULL, 'ai', 1, NULL),
-  (10, 'Gout - template', 9, '{"ConceptSets": [], "cohortName": "Gout - template", "note": "dev placeholder"}', NULL, 'template', 1, NULL);
+INSERT INTO @database_schema.cohort_definition (cohort_definition_id, cohort_definition_name, phenotype_id, circe_cohort_expression, capr_cohort_expression, cd_source_type, valid, atlas_cohort_definition_id) VALUES
+  (1, 'Asthma - template', 1, '{"ConceptSets": [], "cohortName": "Asthma - template", "note": "dev placeholder"}', NULL, 'Templates', 1, NULL),
+  (2, 'Asthma - AI', 1, '{"ConceptSets": [], "cohortName": "Asthma - AI", "note": "dev placeholder"}', NULL, 'MonoFlow', 1, NULL),
+  (3, 'Asthma - user', 1, '{"ConceptSets": [], "cohortName": "Asthma - user", "note": "dev placeholder"}', NULL, 'User', 1, NULL),
+  (4, 'T2DM - template', 2, '{"ConceptSets": [], "cohortName": "T2DM - template", "note": "dev placeholder"}', NULL, 'Templates', 1, NULL),
+  (5, 'T2DM - AI', 2, '{"ConceptSets": [], "cohortName": "T2DM - AI", "note": "dev placeholder"}', NULL, 'MonoFlow', 1, NULL),
+  (6, 'COPD - template', 3, '{"ConceptSets": [], "cohortName": "COPD - template", "note": "dev placeholder"}', NULL, 'Templates', 1, NULL),
+  (7, 'COPD - AI', 3, '{"ConceptSets": [], "cohortName": "COPD - AI", "note": "dev placeholder"}', NULL, 'MonoFlow', 1, NULL),
+  (8, 'AFib - template', 4, '{"ConceptSets": [], "cohortName": "AFib - template", "note": "dev placeholder"}', NULL, 'Templates', 1, NULL),
+  (9, 'Acute liver injury - AI', 5, '{"ConceptSets": [], "cohortName": "Acute liver injury - AI", "note": "dev placeholder"}', NULL, 'MonoFlow', 1, NULL),
+  (10, 'Gout - template', 9, '{"ConceptSets": [], "cohortName": "Gout - template", "note": "dev placeholder"}', NULL, 'Templates', 1, NULL);
 
 INSERT INTO @database_schema.cohort_definition_to_concept_set (cohort_definition_id, concept_set_id) VALUES
   (1, 1),
@@ -122,20 +122,20 @@ INSERT INTO @database_schema.cohort_definition_to_concept_set (cohort_definition
   (9, 6);
 
 INSERT INTO @database_schema.cohort_definition_evaluation (cohort_definition_id, database_id, cohort_entries, cohort_subjects, generation_seconds, true_positives, false_positives, true_negatives, false_negatives, ppv, ppv_lb, ppv_ub, sensitivity, sensitivity_lb, sensitivity_ub, evaluation_type) VALUES
-  (1, 1, 200, 190, 167, 180, 20, 770, 30, 0.9, 0.851, 0.934, 0.857, 0.803, 0.898, 'keeper + llm'),
-  (1, 2, 185, 175, 573, 160, 25, 780, 35, 0.865, 0.808, 0.907, 0.821, 0.761, 0.868, 'keeper + llm'),
-  (1, 3, 95, 90, 140, 85, 10, 885, 20, 0.895, 0.817, 0.942, 0.81, 0.724, 0.873, 'phevaluator'),
-  (2, 1, 200, 190, 604, 150, 50, 785, 15, 0.75, 0.686, 0.805, 0.909, 0.855, 0.944, 'keeper + llm'),
-  (2, 2, 185, 175, 335, 140, 45, 795, 20, 0.757, 0.69, 0.813, 0.875, 0.815, 0.918, 'keeper + llm'),
-  (2, 1, 200, 190, 593, 155, 45, 780, 20, 0.775, 0.712, 0.827, 0.886, 0.83, 0.925, 'phevaluator'),
-  (3, 1, 132, 125, 855, 120, 12, 808, 60, 0.909, 0.848, 0.947, 0.667, 0.595, 0.731, 'keeper + llm'),
-  (4, 1, 330, 313, 718, 300, 30, 625, 45, 0.909, 0.873, 0.936, 0.87, 0.83, 0.901, 'keeper + llm'),
-  (4, 2, 305, 289, 205, 270, 35, 645, 50, 0.885, 0.845, 0.916, 0.844, 0.8, 0.879, 'keeper + llm'),
-  (4, 3, 98, 93, 125, 90, 8, 880, 22, 0.918, 0.847, 0.958, 0.804, 0.72, 0.867, 'keeper + human'),
-  (5, 1, 380, 361, 615, 310, 70, 590, 30, 0.816, 0.774, 0.852, 0.912, 0.877, 0.937, 'keeper + llm'),
-  (5, 2, 355, 337, 604, 280, 75, 613, 32, 0.789, 0.743, 0.828, 0.897, 0.859, 0.926, 'keeper + llm'),
-  (6, 1, 150, 142, 674, 90, 60, 780, 70, 0.6, 0.52, 0.675, 0.562, 0.485, 0.637, 'keeper + llm'),
-  (6, 2, 135, 128, 212, 80, 55, 800, 65, 0.593, 0.508, 0.672, 0.552, 0.47, 0.63, 'keeper + llm'),
-  (7, 1, 150, 142, 401, 110, 40, 800, 50, 0.733, 0.657, 0.798, 0.688, 0.612, 0.754, 'keeper + llm'),
-  (8, 1, 80, 76, 119, 75, 5, 880, 40, 0.938, 0.862, 0.973, 0.652, 0.561, 0.733, 'keeper + llm'),
-  (8, 2, 76, 72, 580, 70, 6, 886, 38, 0.921, 0.838, 0.963, 0.648, 0.554, 0.732, 'keeper + llm');
+  (1, 1, 200, 190, 167, 180, 20, 770, 30, 0.9, 0.851, 0.934, 0.857, 0.803, 0.898, 'KEEPER + llm'),
+  (1, 2, 185, 175, 573, 160, 25, 780, 35, 0.865, 0.808, 0.907, 0.821, 0.761, 0.868, 'KEEPER + llm'),
+  (1, 3, 95, 90, 140, 85, 10, 885, 20, 0.895, 0.817, 0.942, 0.81, 0.724, 0.873, 'PheValuator'),
+  (2, 1, 200, 190, 604, 150, 50, 785, 15, 0.75, 0.686, 0.805, 0.909, 0.855, 0.944, 'KEEPER + llm'),
+  (2, 2, 185, 175, 335, 140, 45, 795, 20, 0.757, 0.69, 0.813, 0.875, 0.815, 0.918, 'KEEPER + llm'),
+  (2, 1, 200, 190, 593, 155, 45, 780, 20, 0.775, 0.712, 0.827, 0.886, 0.83, 0.925, 'PheValuator'),
+  (3, 1, 132, 125, 855, 120, 12, 808, 60, 0.909, 0.848, 0.947, 0.667, 0.595, 0.731, 'KEEPER + llm'),
+  (4, 1, 330, 313, 718, 300, 30, 625, 45, 0.909, 0.873, 0.936, 0.87, 0.83, 0.901, 'KEEPER + llm'),
+  (4, 2, 305, 289, 205, 270, 35, 645, 50, 0.885, 0.845, 0.916, 0.844, 0.8, 0.879, 'KEEPER + llm'),
+  (4, 3, 98, 93, 125, 90, 8, 880, 22, 0.918, 0.847, 0.958, 0.804, 0.72, 0.867, 'KEEPER + human'),
+  (5, 1, 380, 361, 615, 310, 70, 590, 30, 0.816, 0.774, 0.852, 0.912, 0.877, 0.937, 'KEEPER + llm'),
+  (5, 2, 355, 337, 604, 280, 75, 613, 32, 0.789, 0.743, 0.828, 0.897, 0.859, 0.926, 'KEEPER + llm'),
+  (6, 1, 150, 142, 674, 90, 60, 780, 70, 0.6, 0.52, 0.675, 0.562, 0.485, 0.637, 'KEEPER + llm'),
+  (6, 2, 135, 128, 212, 80, 55, 800, 65, 0.593, 0.508, 0.672, 0.552, 0.47, 0.63, 'KEEPER + llm'),
+  (7, 1, 150, 142, 401, 110, 40, 800, 50, 0.733, 0.657, 0.798, 0.688, 0.612, 0.754, 'KEEPER + llm'),
+  (8, 1, 80, 76, 119, 75, 5, 880, 40, 0.938, 0.862, 0.973, 0.652, 0.561, 0.733, 'KEEPER + llm'),
+  (8, 2, 76, 72, 580, 70, 6, 886, 38, 0.921, 0.838, 0.963, 0.648, 0.554, 0.732, 'KEEPER + llm');

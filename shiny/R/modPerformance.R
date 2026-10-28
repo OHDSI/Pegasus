@@ -16,7 +16,7 @@
 # Empty databases / phenotypeIds mean "no restriction".
 filterEvaluations <- function(data, evalTypes, sources, databases, phenotypeIds, minPpv, minSensitivity) {
   keep <- data$evaluationType %in% evalTypes &
-    data$paSourceType %in% sources &
+    data$cdSourceType %in% sources &
     data$ppv >= minPpv / 100 &
     data$sensitivity >= minSensitivity / 100
   if (length(databases) > 0) {
@@ -112,13 +112,13 @@ performanceServer <- function(id, evaluations, shortlist, onOpenPhenotype) {
     })
 
     # Color slots come from all evaluations, so filtering does not repaint the remaining series.
-    sourceLevels <- reactive(orderedLevels(evaluations()$paSourceType, sourceTypeOrder))
+    sourceLevels <- reactive(orderedLevels(evaluations()$cdSourceType, sourceTypeOrder))
     evaluationTypeLevels <- reactive(orderedLevels(evaluations()$evaluationType, evaluationTypeOrder))
 
     observeEvent(evaluations(), {
       data <- evaluations()
       evalTypes <- orderedLevels(data$evaluationType, evaluationTypeOrder)
-      sources <- orderedLevels(data$paSourceType, sourceTypeOrder)
+      sources <- orderedLevels(data$cdSourceType, sourceTypeOrder)
       shinyWidgets::updatePickerInput(session, "evalTypes", choices = evalTypes, selected = evalTypes)
       shinyWidgets::updatePickerInput(session, "sources", choices = sources, selected = sources)
       shinyWidgets::updatePickerInput(session, "databases", choices = databaseOrder(), selected = character(0))
@@ -213,7 +213,7 @@ performanceServer <- function(id, evaluations, shortlist, onOpenPhenotype) {
         data.frame(
           Phenotype = data$phenotypeName,
           Cohort = data$cohortDefinitionName,
-          Source = data$paSourceType,
+          Source = data$cdSourceType,
           Database = data$cdmSourceAbbreviation,
           "Evaluation type" = data$evaluationType,
           Subjects = data$cohortSubjects,

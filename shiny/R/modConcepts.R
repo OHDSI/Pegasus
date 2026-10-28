@@ -72,6 +72,10 @@ conceptsUi <- function(id) {
         "text (for example the ICD-10 code J45); a source code is resolved to the standard concepts it maps to."
       ),
       helpText(
+        "Phenotype concept sets show every concept set in a phenotype's full spectrum. Executable cohort",
+        "definitions show only the cohort definitions that use a matching concept set, so they can run."
+      ),
+      helpText(
         "A concept set contains a concept when it lists the concept itself (Direct), lists an ancestor with",
         "'include descendants' (Descendant), or lists a concept it maps to (Mapped). Concept sets that exclude",
         "the concept are left out."
@@ -84,6 +88,13 @@ conceptsUi <- function(id) {
         bslib::card_header(
           class = "d-flex justify-content-between align-items-center",
           textOutput(ns("title"), inline = TRUE),
+          shinyWidgets::radioGroupButtons(
+            ns("scope"),
+            label = NULL,
+            choices = c("Phenotype concept sets" = "spectrum", "Executable cohort definitions" = "cohorts"),
+            selected = "spectrum",
+            size = "sm"
+          ),
           actionButton(ns("addAll"), "Add all to shortlist", icon = icon("plus"), class = "btn-outline-primary btn-sm")
         ),
         DT::DTOutput(ns("results"))
@@ -101,6 +112,7 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyRunner,
     candidates <- reactiveVal(emptyConcepts())
     selectedConcept <- reactiveVal(NULL)
     matches <- reactiveVal(NULL)
+    cohortMatches <- reactiveVal(NULL)
     matchState <- reactiveVal("idle") # idle, loading, ready or failed
     vocabStatus <- reactiveVal(list(state = if (hasVocabulary) "unchecked" else "none", version = NA_character_))
     activeJob <- reactiveVal(NULL)
@@ -368,9 +380,12 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyRunner,
     # Pegasus database (fast) is searched for concept sets that contain it.
     computeMatches <- function(concept, context, concepts) {
       started <- Sys.time()
+      cohorts <- NULL
       found <- tryCatch(
         withConnection(connectionPool, function(connection) {
-          findPhenotypesForContext(connection, databaseSchema, concept$id, context)
+          result <- findPhenotypesForContext(connection, databaseSchema, concept$id, context)
+          cohorts <<- getCohortsForConceptSets(connection, databaseSchema, unique(result$conceptSetId))
+          result
         }),
         error = function(e) {
           appendLog(sprintf("Phenotype lookup FAILED: %s", conditionMessage(e)))
@@ -400,12 +415,14 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyRunner,
         as.numeric(Sys.time() - started, units = "secs")
       ))
       matches(found)
+      cohortMatches(cohorts)
       matchState("ready")
     }
 
     observeEvent(selectedConcept(), {
       concept <- selectedConcept()
       matches(NULL)
+      cohortMatches(NULL)
       if (is.null(concept)) {
         matchState("idle")
         return()
@@ -439,35 +456,38 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyRunner,
         loading = sprintf("Finding phenotypes that use %s...", label),
         failed = sprintf("Could not find phenotypes for %s", label),
         {
-          count <- length(unique(matches()$phenotypeId))
-          sprintf("%d phenotype%s use %s", count, if (count == 1) "" else "s", label)
+          if (identical(input$scope, "cohorts")) {
+            cohorts <- cohortMatches()
+            sprintf(
+              "%d executable cohort definition%s (in %d phenotype%s) use %s",
+              length(unique(cohorts$cohortDefinitionId)), if (length(unique(cohorts$cohortDefinitionId)) == 1) "" else "s",
+              length(unique(cohorts$phenotypeId)), if (length(unique(cohorts$phenotypeId)) == 1) "" else "s", label
+            )
+          } else {
+            count <- length(unique(matches()$phenotypeId))
+            sprintf("%d phenotype%s use %s", count, if (count == 1) "" else "s", label)
+          }
         }
       )
     })
 
-    output$results <- DT::renderDT({
-      found <- matches()
-      req(found)
-      status <- phenotypes()$status[match(found$phenotypeId, phenotypes()$phenotypeId)]
-      status[is.na(status)] <- "Definition only"
+    # How each matching concept set contains the concept: the listed concept and, for a source concept, the
+    # standard concept it was reached through.
+    matchColumns <- function(found) {
       itemLabel <- ifelse(
         is.na(found$itemConceptName),
         as.character(found$itemConceptId),
         sprintf("%s (%s)", found$itemConceptName, found$itemConceptId)
       )
-      table <- data.frame(
-        Phenotype = entityLink("phenotype", found$phenotypeId, found$phenotypeName),
-        Status = statusBadge(status),
+      columns <- data.frame(
         "Concept set" = entityLink("concept_set", found$conceptSetId, found$conceptSetName),
-        Pertains = htmltools::htmlEscape(found$pertains),
-        Category = htmltools::htmlEscape(found$category),
         Match = found$matchType,
         "Listed concept" = htmltools::htmlEscape(itemLabel),
         check.names = FALSE
       )
       # Only a source concept (such as an ICD code) is matched through a standard concept it maps to.
       if (any(!is.na(found$viaConceptId))) {
-        table[["Via standard concept"]] <- htmltools::htmlEscape(ifelse(
+        columns[["Via standard concept"]] <- htmltools::htmlEscape(ifelse(
           is.na(found$viaConceptId),
           "listed directly",
           ifelse(
@@ -477,22 +497,65 @@ conceptsServer <- function(id, connectionPool, databaseSchema, vocabularyRunner,
           )
         ))
       }
+      columns
+    }
+
+    resultsTable <- function(table, emptyMessage) {
       filterableTable(
         table,
         escape = FALSE,
         rownames = FALSE,
         selection = "none",
-        options = list(
-          pageLength = 25,
-          language = list(emptyTable = "No phenotype concept sets contain this concept.")
-        )
+        options = list(pageLength = 25, language = list(emptyTable = emptyMessage))
+      )
+    }
+
+    output$results <- DT::renderDT({
+      found <- matches()
+      req(found)
+      cohorts <- cohortMatches()
+      if (identical(input$scope, "cohorts")) {
+        # One row per cohort definition and matching concept set.
+        rows <- merge(cohorts, found[, setdiff(names(found), c("phenotypeId", "phenotypeName", "pertains", "category")), drop = FALSE],
+                      by = "conceptSetId")
+        rows <- unique(rows[order(rows$phenotypeName, rows$cohortDefinitionName), , drop = FALSE])
+        return(resultsTable(
+          data.frame(
+            Cohort = entityLink("cohort_definition", rows$cohortDefinitionId, rows$cohortDefinitionName),
+            Phenotype = entityLink("phenotype", rows$phenotypeId, rows$phenotypeName),
+            Source = htmltools::htmlEscape(rows$cdSourceType),
+            Status = draftOrValid(rows$valid),
+            matchColumns(rows),
+            check.names = FALSE
+          ),
+          "No executable cohort definition uses a concept set that contains this concept."
+        ))
+      }
+      status <- phenotypes()$status[match(found$phenotypeId, phenotypes()$phenotypeId)]
+      status[is.na(status)] <- "Definition only"
+      # How many cohort definitions of the phenotype use the concept set; 0 means it is only in the full spectrum.
+      used <- vapply(seq_len(nrow(found)), function(i) {
+        sum(cohorts$conceptSetId == found$conceptSetId[i] & cohorts$phenotypeId == found$phenotypeId[i])
+      }, 1)
+      resultsTable(
+        data.frame(
+          Phenotype = entityLink("phenotype", found$phenotypeId, found$phenotypeName),
+          Status = statusBadge(status),
+          Pertains = htmltools::htmlEscape(found$pertains),
+          Category = htmltools::htmlEscape(found$category),
+          "In cohort definitions" = ifelse(used > 0, sprintf("Yes (%d)", used), "No"),
+          matchColumns(found),
+          check.names = FALSE
+        ),
+        "No phenotype concept sets contain this concept."
       )
     })
 
     observeEvent(input$addAll, {
       found <- matches()
       req(found)
-      notifyAdded(addToShortlist(shortlist, found$phenotypeId))
+      ids <- if (identical(input$scope, "cohorts")) cohortMatches()$phenotypeId else found$phenotypeId
+      notifyAdded(addToShortlist(shortlist, ids))
     })
   })
 }

@@ -102,7 +102,7 @@ writeCohortZip <- function(cohorts, file) {
   for (i in seq_len(nrow(cohorts))) {
     writeLines(cohorts$circeCohortExpression[i], file.path(folder, fileNames[i]), useBytes = TRUE)
   }
-  manifest <- cohorts[, c("cohortDefinitionId", "cohortDefinitionName", "phenotypeId", "paSourceType", "valid")]
+  manifest <- cohorts[, c("cohortDefinitionId", "cohortDefinitionName", "phenotypeId", "cdSourceType", "valid")]
   manifest$file <- fileNames
   names(manifest) <- SqlRender::camelCaseToSnakeCase(names(manifest))
   utils::write.csv(csvSafe(manifest), file.path(folder, "manifest.csv"), row.names = FALSE)

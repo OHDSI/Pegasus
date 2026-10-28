@@ -148,7 +148,8 @@ browseUi <- function(id) {
   )
 }
 
-browseServer <- function(id, connectionPool, databaseSchema, phenotypes, refreshPhenotypes, route, navigate, shortlist, onRefine) {
+browseServer <- function(id, connectionPool, databaseSchema, phenotypes, refreshPhenotypes, route, navigate, shortlist, onRefine,
+                         vocabularyRunner = NULL) {
   # Evaluate eagerly so a missing argument fails at startup instead of on the first click.
   force(onRefine)
   moduleServer(id, function(input, output, session) {
@@ -305,7 +306,8 @@ browseServer <- function(id, connectionPool, databaseSchema, phenotypes, refresh
       connectionPool = connectionPool,
       databaseSchema = databaseSchema,
       conceptSetId = idFor("concept_set"),
-      navigate = navigate
+      navigate = navigate,
+      vocabularyRunner = vocabularyRunner
     )
   })
 }

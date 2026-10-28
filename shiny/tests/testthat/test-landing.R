@@ -254,7 +254,7 @@ test_that("the concept set page points to identical concept sets", {
 
 test_that("cohortConceptSetTable names the matching JSON concept set and marks identical stored sets", {
   conceptSets <- data.frame(
-    conceptSetId = c(1L, 20L, 7L), conceptSetName = c("Asthma", "Asthma copy", "Psoriasis"), csSourceType = "user",
+    conceptSetId = c(1L, 20L, 7L), conceptSetName = c("Asthma", "Asthma copy", "Psoriasis"), csSourceType = "User",
     valid = 1L, hasDescendants = 1L, atlasConceptSetId = NA_integer_
   )
   matches <- data.frame(
