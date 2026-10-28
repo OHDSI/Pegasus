@@ -33,6 +33,20 @@ loadSystemPrompt <- function(skillFile) {
   paste(skill, override, sep = "\n\n")
 }
 
+# Which model backs the conversation, for display: "provider / model". The provider defaults to Azure OpenAI, which
+# is what createChatClient() uses unless another provider is configured.
+llmModelLabel <- function(llmConfig) {
+  model <- llmConfig$model
+  if (is.null(model) || !nzchar(model)) {
+    return("Unknown model")
+  }
+  provider <- llmConfig$provider
+  if (is.null(provider) || !nzchar(provider)) {
+    provider <- "Azure OpenAI"
+  }
+  paste(provider, "/", model)
+}
+
 createChatClient <- function(llmConfig, systemPrompt, onSubmit) {
   if (!is.null(llmConfig$provider) && llmConfig$provider == "JNJ BEDROCK") {
     client <- chat_jnj_bedrock(

@@ -24,7 +24,11 @@ createUi <- function(id) {
       bslib::nav_panel_hidden(
         "start",
         bslib::card(
-          bslib::card_header("Start a new phenotype"),
+          bslib::card_header(
+          class = "d-flex justify-content-between align-items-center",
+          "Start a new phenotype",
+          uiOutput(ns("modelBadgeStart"), inline = TRUE)
+        ),
           uiOutput(ns("cloneHintStart")),
           textInput(ns("name"), "Phenotype name", width = "100%"),
           textAreaInput(ns("initialDefinition"), "Initial definition (optional)", rows = 5, width = "100%"),
@@ -38,7 +42,7 @@ createUi <- function(id) {
           bslib::card(
             bslib::card_header(
               class = "d-flex justify-content-between align-items-center",
-              "Refine the clinical definition",
+              tags$span("Refine the clinical definition ", uiOutput(ns("modelBadgeRefine"), inline = TRUE)),
               actionButton(ns("startOver"), "Start over", icon = icon("arrow-rotate-left"), class = "btn-sm")
             ),
             uiOutput(ns("cloneHintRefine")),
@@ -75,6 +79,17 @@ createServer <- function(id, connectionPool, databaseSchema, llmConfig, systemPr
     submittedDefinition <- reactiveVal(NULL)
     submit <- function(text) submittedDefinition(list(text = text, nonce = as.numeric(Sys.time())))
     similarNames <- reactiveVal(character(0))
+
+    # The model that writes the definition; shown read-only so users know what they are talking to.
+    modelBadge <- function() {
+      tags$span(
+        class = "badge text-bg-light border fw-normal",
+        title = "The language model used for this conversation",
+        icon("microchip"), " ", llmModelLabel(llmConfig)
+      )
+    }
+    output$modelBadgeStart <- renderUI(modelBadge())
+    output$modelBadgeRefine <- renderUI(modelBadge())
 
     output$creator <- renderUI({
       if (is.null(userName)) {

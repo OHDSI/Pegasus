@@ -25,3 +25,11 @@ test_that("extractFinalDefinition tolerates variations of the final heading", {
   expect_equal(extractFinalDefinition("### Final Condition Definition\n\nOld.\n\n### Final Condition Definition\n\nNew."), "New.")
   expect_null(extractFinalDefinition("The final definition is still open."))
 })
+
+test_that("llmModelLabel names the provider and model", {
+  expect_equal(llmModelLabel(list(provider = "JNJ BEDROCK", model = "claude-sonnet")), "JNJ BEDROCK / claude-sonnet")
+  expect_equal(llmModelLabel(list(provider = NULL, model = "o3")), "Azure OpenAI / o3")
+  expect_equal(llmModelLabel(list(provider = "", model = "o3")), "Azure OpenAI / o3")
+  expect_equal(llmModelLabel(list(model = "")), "Unknown model")
+  expect_equal(llmModelLabel(NULL), "Unknown model")
+})
