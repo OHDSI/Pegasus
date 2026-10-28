@@ -119,6 +119,7 @@ shortlistUi <- function(id) {
         textOutput(ns("title"), inline = TRUE),
         tags$div(
           class = "d-flex gap-2",
+          actionButton(ns("compare"), "Compare", icon = icon("code-compare"), class = "btn-outline-primary btn-sm"),
           actionButton(ns("remove"), "Remove selected", icon = icon("minus"), class = "btn-outline-secondary btn-sm"),
           actionButton(ns("clear"), "Clear all", icon = icon("trash"), class = "btn-outline-danger btn-sm")
         )
@@ -143,7 +144,8 @@ shortlistUi <- function(id) {
   )
 }
 
-shortlistServer <- function(id, connectionPool, databaseSchema, phenotypes, evaluations, shortlist, onOpenPhenotype) {
+shortlistServer <- function(id, connectionPool, databaseSchema, phenotypes, evaluations, shortlist, onOpenPhenotype,
+                            onCompare = function(phenotypeIds) NULL) {
   moduleServer(id, function(input, output, session) {
     scatterSource <- "shortlistScatter"
 
@@ -203,6 +205,20 @@ shortlistServer <- function(id, connectionPool, databaseSchema, phenotypes, eval
     })
 
     observeEvent(input$clear, shortlist(integer(0)))
+
+    # Compares the selected rows, or the whole shortlist when no row is selected.
+    observeEvent(input$compare, {
+      selected <- input$table_rows_selected
+      ids <- if (length(selected) > 0) rows()$phenotypeId[selected] else rows()$phenotypeId
+      if (length(ids) < 2 || length(ids) > maxComparedPhenotypes) {
+        showNotification(
+          sprintf("Select 2 to %d phenotypes to compare (or have that many on the shortlist).", maxComparedPhenotypes),
+          type = "warning"
+        )
+        return()
+      }
+      onCompare(ids)
+    })
 
     output$scatter <- plotly::renderPlotly({
       buildScatter(

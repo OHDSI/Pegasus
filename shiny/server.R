@@ -23,6 +23,13 @@ function(input, output, session) {
   cloneSource <- reactiveVal(NULL)
   returnToEvaluation <- reactiveVal(FALSE)
   evaluationPreselect <- reactiveVal(NULL)
+  comparePreselect <- reactiveVal(NULL)
+
+  # Opens the Compare tab with these phenotypes chosen.
+  comparePhenotypes <- function(phenotypeIds) {
+    comparePreselect(list(ids = phenotypeIds, nonce = as.numeric(Sys.time())))
+    bslib::nav_select("mainNav", "Compare", session = session)
+  }
 
   output$shortlistCount <- renderUI({
     if (length(shortlist()) > 0) tags$span(class = "badge text-bg-primary", length(shortlist()))
@@ -132,7 +139,17 @@ function(input, output, session) {
     onRefine = refinePhenotype,
     vocabularyRunner = vocabularyRunner
   )
-  performanceServer("performance", evaluations, shortlist = shortlist, onOpenPhenotype = openPhenotype)
+  performanceServer("performance", evaluations, shortlist = shortlist, onOpenPhenotype = openPhenotype,
+                    onCompare = comparePhenotypes)
+  compareServer(
+    "compare",
+    connectionPool = connectionPool,
+    databaseSchema = config$databaseSchema,
+    phenotypes = phenotypes,
+    evaluations = evaluations,
+    preselect = comparePreselect,
+    onOpenPhenotype = openPhenotype
+  )
   evaluationServer(
     "evaluation",
     connectionPool = connectionPool,
@@ -158,7 +175,8 @@ function(input, output, session) {
     phenotypes = phenotypes,
     evaluations = evaluations,
     shortlist = shortlist,
-    onOpenPhenotype = openPhenotype
+    onOpenPhenotype = openPhenotype,
+    onCompare = comparePhenotypes
   )
   createServer(
     "create",

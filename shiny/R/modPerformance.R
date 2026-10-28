@@ -102,7 +102,7 @@ performanceUi <- function(id) {
   )
 }
 
-performanceServer <- function(id, evaluations, shortlist, onOpenPhenotype) {
+performanceServer <- function(id, evaluations, shortlist, onOpenPhenotype, onCompare = function(phenotypeIds) NULL) {
   moduleServer(id, function(input, output, session) {
     scatterSource <- "performanceScatter"
 
@@ -191,12 +191,24 @@ performanceServer <- function(id, evaluations, shortlist, onOpenPhenotype) {
           actionButton(session$ns("addSelected"), sprintf("Add %d selected to shortlist", selected),
                        icon = icon("plus"), class = "btn-primary btn-sm")
         },
+        if (selected >= 2) {
+          actionButton(session$ns("compareSelected"), sprintf("Compare %d selected", selected),
+                       icon = icon("code-compare"), class = "btn-outline-primary btn-sm")
+        },
         actionButton(session$ns("addInView"), sprintf("Add all %d in view to shortlist", inView),
                      icon = icon("plus"), class = "btn-outline-primary btn-sm")
       )
     })
 
     observeEvent(input$addSelected, notifyAdded(addToShortlist(shortlist, selectedPhenotypeIds())))
+    observeEvent(input$compareSelected, {
+      ids <- selectedPhenotypeIds()
+      if (length(ids) > maxComparedPhenotypes) {
+        showNotification(sprintf("Select at most %d phenotypes to compare.", maxComparedPhenotypes), type = "warning")
+        return()
+      }
+      onCompare(ids)
+    })
     observeEvent(input$addInView, notifyAdded(addToShortlist(shortlist, filtered()$phenotypeId)))
 
     observeEvent(plotly::event_data("plotly_click", source = scatterSource), {

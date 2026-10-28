@@ -27,6 +27,7 @@ bslib::page_navbar(
     value = "Shortlist",
     shortlistUi("shortlist")
   ),
+  bslib::nav_panel("Compare", compareUi("compare")),
   bslib::nav_panel("New Phenotype", createUi("create")),
   bslib::nav_panel("New Evaluation", evaluationUi("evaluation")),
   bslib::nav_spacer(),
