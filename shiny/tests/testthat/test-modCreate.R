@@ -120,3 +120,30 @@ test_that("Refine this hands the selected phenotype to the wizard callback", {
   )
   expect_equal(refined, 1L)
 })
+
+test_that("an uploaded file is read, then deleted, and a bad file only gives a message", {
+  pool <- createTestPool()
+  on.exit(pool::poolClose(pool))
+  module <- createTestModule(pool)
+
+  good <- tempfile(fileext = ".csv")
+  writeLines(c("code,name", "J45,Asthma"), good)
+  bad <- tempfile(fileext = ".exe")
+  writeLines("not supported", bad)
+
+  testServer(createServer, args = module$args, {
+    session$setInputs(upload0 = list(name = "codes.csv", datapath = good, size = file.size(good), type = "text/csv"))
+    expect_equal(pendingAttachment()$name, "codes.csv")
+    expect_equal(pendingAttachment()$text, "code,name\nJ45,Asthma")
+    expect_false(file.exists(good))
+    expect_equal(uploadCounter(), 1)
+
+    session$setInputs(upload1 = list(name = "tool.exe", datapath = bad, size = file.size(bad), type = ""))
+    expect_null(pendingAttachment())
+    expect_false(file.exists(bad))
+
+    session$setInputs(upload2 = list(name = "again.csv", datapath = good, size = 0, type = ""))
+    session$setInputs(removeAttachment = 1)
+    expect_null(pendingAttachment())
+  })
+})

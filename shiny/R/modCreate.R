@@ -54,7 +54,9 @@ createUi <- function(id) {
               enable_cancel = FALSE,
               height = "600px",
               fill = FALSE
-            )
+            ),
+            uiOutput(ns("attachment")),
+            uiOutput(ns("uploadControl"))
           ),
           bslib::card(
             bslib::card_header("Review and save"),
@@ -90,6 +92,66 @@ createServer <- function(id, connectionPool, databaseSchema, llmConfig, systemPr
     }
     output$modelBadgeStart <- renderUI(modelBadge())
     output$modelBadgeRefine <- renderUI(modelBadge())
+
+    # A file the user attaches to the conversation. Its text is read once, kept in memory only until the next message
+    # carries it to the model, and never saved; the uploaded copy is deleted as soon as it has been read.
+    pendingAttachment <- reactiveVal(NULL)
+    uploadCounter <- reactiveVal(0)
+    uploadId <- function() paste0("upload", uploadCounter())
+
+    output$uploadControl <- renderUI({
+      tagList(
+        fileInput(
+          session$ns(uploadId()), NULL,
+          buttonLabel = tagList(icon("paperclip"), " Attach a file"),
+          placeholder = paste0("Optional: ", paste0(".", uploadExtensions, collapse = " ")),
+          accept = paste0(".", uploadExtensions),
+          width = "100%"
+        ),
+        tags$p(
+          class = "small text-muted",
+          "The file's contents are sent to the language model with your next message and are not saved.",
+          "Do not attach patient-level data."
+        )
+      )
+    })
+
+    output$attachment <- renderUI({
+      attachment <- pendingAttachment()
+      if (is.null(attachment)) {
+        return(NULL)
+      }
+      tags$div(
+        class = "alert alert-info d-flex justify-content-between align-items-center py-2",
+        tags$span(
+          icon("paperclip"), " ", tags$strong(attachment$name),
+          " will be sent with your next message.",
+          if (attachment$truncated) " The file is long, so only the first part is used."
+        ),
+        actionButton(session$ns("removeAttachment"), "Remove", class = "btn-sm btn-outline-secondary")
+      )
+    })
+
+    observeEvent(input[[uploadId()]], {
+      upload <- input[[uploadId()]]
+      attachment <- tryCatch(
+        {
+          result <- extractFileText(upload$datapath, upload$name, maxBytes = 5 * 1024^2)
+          list(name = basename(upload$name), text = result$text, truncated = result$truncated)
+        },
+        error = function(e) {
+          showNotification(conditionMessage(e), type = "error")
+          NULL
+        }
+      )
+      # The uploaded copy is not needed any more, whatever the outcome.
+      unlink(upload$datapath)
+      pendingAttachment(attachment)
+      # A new file input clears the previous selection and lets the same file be chosen again.
+      uploadCounter(uploadCounter() + 1)
+    })
+
+    observeEvent(input$removeAttachment, pendingAttachment(NULL))
 
     output$creator <- renderUI({
       if (is.null(userName)) {
@@ -163,6 +225,7 @@ createServer <- function(id, connectionPool, databaseSchema, llmConfig, systemPr
       }
       client <<- NULL
       submittedDefinition(NULL)
+      pendingAttachment(NULL)
       similarNames(character(0))
       updateTextInput(session, "name", value = "")
       updateTextAreaInput(session, "initialDefinition", value = initialDefinition)
@@ -211,7 +274,13 @@ createServer <- function(id, connectionPool, databaseSchema, llmConfig, systemPr
 
     observeEvent(input$chat_user_input, {
       req(client)
-      streamResponse(input$chat_user_input)
+      attachment <- pendingAttachment()
+      pendingAttachment(NULL)
+      if (!is.null(attachment)) {
+        # The file's text goes to the model only; the conversation shows just that a file was attached.
+        shinychat::chat_append("chat", sprintf("Attached file: `%s`", gsub("`", "", attachment$name)), role = "user")
+      }
+      streamResponse(withAttachment(input$chat_user_input, attachment))
     })
 
     observeEvent(submittedDefinition(), {
