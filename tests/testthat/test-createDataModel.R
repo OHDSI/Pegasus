@@ -56,3 +56,16 @@ test_that("createDataModel can be run repeatedly", {
   result <- DatabaseConnector::querySql(connection, "SELECT COUNT(*) AS n FROM main.phenotype")
   expect_equal(result$n, 0)
 })
+test_that("the migration script creates the same tables as the data model", {
+  tables <- function(file, schema) {
+    sql <- paste(readLines(file, encoding = "UTF-8"), collapse = "\n")
+    statements <- regmatches(sql, gregexpr("CREATE TABLE @[a-z_]+\\.[a-z_]+ \\(.*?\\n\\);", sql))[[1]]
+    statements <- gsub(schema, "@schema", statements, fixed = TRUE)
+    statements <- gsub("DATETIME", "TIMESTAMP", statements, fixed = TRUE)
+    gsub("\\s+", " ", statements)
+  }
+  model <- tables(test_path("..", "..", "inst", "sql", "CreateDataModel.sql"), "@database_schema")
+  migration <- tables(test_path("..", "..", "inst", "sql", "MigrateDataModel.sql"), "@new_schema")
+  expect_gt(length(model), 10)
+  expect_equal(migration, model)
+})
