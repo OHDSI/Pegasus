@@ -11,7 +11,7 @@ generateConceptSetTargets(
   connectionDetails = NULL,
   vocabDatabaseSchema,
   llmClient,
-  costTracker = NULL
+  costTracker = createCostTracker()
 )
 }
 \arguments{

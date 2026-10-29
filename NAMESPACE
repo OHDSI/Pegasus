@@ -2,6 +2,7 @@
 
 export(createCostTracker)
 export(createDataModel)
+export(createOrReuseConceptSetTargetDefinitions)
 export(generateConceptSetTargets)
 export(refineDefinition)
 import(DatabaseConnector)

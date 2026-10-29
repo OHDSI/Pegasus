@@ -313,14 +313,25 @@ mapToConcepts <- function(termsPerCategory,
 #' A tibble with concept set targets.
 #'
 #' @export
-generateConceptSetTargets <- function(
-    phenotype,
-    clinicalDefinition,
-    connection = NULL,
-    connectionDetails = NULL,
-    vocabDatabaseSchema,
-    llmClient,
-    costTracker = NULL) {
+generateConceptSetTargets <- function(phenotype,
+                                      clinicalDefinition,
+                                      connection = NULL,
+                                      connectionDetails = NULL,
+                                      vocabDatabaseSchema,
+                                      llmClient,
+                                      costTracker = createCostTracker()) {
+  errorMessages <- checkmate::makeAssertCollection()
+  checkmate::assertCharacter(phenotype, len = 1, add = errorMessages)
+  checkmate::assertCharacter(clinicalDefinition, len = 1, null.ok = TRUE, add = errorMessages)
+  checkmate::assertClass(connection, "DatabaseConnectorConnection", null.ok = TRUE, add = errorMessages)
+  checkmate::assertClass(connectionDetails, "ConnectionDetails", null.ok = TRUE, add = errorMessages)
+  checkmate::assertCharacter(vocabDatabaseSchema, len = 1, add = errorMessages)
+  checkmate::assertR6(llmClient, "Chat", add = errorMessages)
+  checkmate::assertClass(costTracker, "CostTracker", add = errorMessages)
+  checkmate::reportAssertions(collection = errorMessages)
+  if (is.null(connectionDetails) && is.null(connection)) {
+    stop("Must provide either connectionDetails or a connection.")
+  }
   message("Creating targets for ", phenotype)
 
   if (is.null(connection)) {

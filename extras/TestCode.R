@@ -53,9 +53,17 @@ targets <- generateConceptSetTargets(
   clinicalDefinition = phenotypes$clinicalDefinition[1],
   connectionDetails = connectionDetails,
   vocabDatabaseSchema = cdmDatabaseSchema,
-  llmClient = llmClient,
-  costTracker = costTracker)
+  llmClient = llmClient)
 saveRDS(targets, "e:/temp/PegasusTargets.rds")
 
 # Create concept set target definitions --------------------------------
 conceptSetTargets <- readRDS("e:/temp/PegasusTargets.rds")
+
+targetDefinitions <- createOrReuseConceptSetTargetDefinitions(
+    conceptSetTargets = conceptSetTargets,
+    phenotypes = phenotypes,
+    llmClient = llmClient,
+    pegasusConnectionDetails = pegasusConnectionDetails,
+    pegasusDatabaseSchema = pegasusDatabaseSchema,
+    cacheFolder = "e:/temp/pegasusConceptSetTargetCache")
+saveRDS(targetDefinitions, "e:/temp/PegasusTargetDefinitions.rds")

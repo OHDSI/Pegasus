@@ -127,6 +127,24 @@ conceptSets <- conceptSets |>
   arrange(conceptId) |>
   filter(!duplicated(paste(hasDescendants, conceptSetName)))
 
+sql <- "
+  SELECT *
+  FROM @database_schema.concept_set;
+"
+existingConceptSets <- DatabaseConnector::renderTranslateQuerySql(
+  connection = connection,
+  sql = sql,
+  database_schema = databaseSchema,
+  snakeCaseToCamelCase = TRUE
+)
+conceptSets <- conceptSets |>
+  anti_join(existingConceptSets |>
+            select("conceptSetName", "hasDescendants"),
+            by = join_by("conceptSetName", "hasDescendants"))
+conceptSets <- conceptSets |>
+  mutate(conceptSetId = row_number() + max(existingConceptSets$conceptSetId))
+sum(conceptSets$conceptSetId %in% existingConceptSets$conceptSetId)
+
 conceptSets$caprConceptSetExpression <- mapply(convertCirceConceptSetToCapr,
                                                conceptSets$circeConceptSetExpression,
                                                conceptSets$conceptSetName)
@@ -140,10 +158,10 @@ DatabaseConnector::insertTable(
   createTable = FALSE,
   camelCaseToSnakeCase = TRUE
 )
+conceptSets <- bind_rows(existingConceptSets, conceptSets)
 
 # Upload phenotype_to_concept_set ------------------------------------------------------
 phenotypeToConceptSet <- readRDS("../largescalephentest/phenotypeToConceptSetNameTable.rds")
-
 phenotypeToConceptSet <- phenotypeToConceptSet |>
   inner_join(definitions |>
                select(phenotype = "phenotypeName", "phenotypeId"), by = join_by(phenotype)) |>
@@ -155,6 +173,23 @@ phenotypeToConceptSet <- phenotypeToConceptSet |>
             pertains = about,
             category = stringr::str_to_sentence(gsub("_", " ", category)),
             conceptSetId)
+sql <- "
+  SELECT *
+  FROM @database_schema.phenotype_to_concept_set;
+"
+existingPhenotypeToConceptSet <- DatabaseConnector::renderTranslateQuerySql(
+  connection = connection,
+  sql = sql,
+  database_schema = databaseSchema,
+  snakeCaseToCamelCase = TRUE
+)
+phenotypeToConceptSet <- phenotypeToConceptSet |>
+  anti_join(existingPhenotypeToConceptSet |>
+              select("phenotypeId", "conceptSetId"),
+            by = join_by("phenotypeId", "conceptSetId"))
+# newPhenotypes <- phenotypeToConceptSet |>
+#   distinct(phenotypeId) |>
+#   inner_join(definitions)
 
 DatabaseConnector::insertTable(
   connection = connection,

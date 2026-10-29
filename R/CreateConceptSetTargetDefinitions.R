@@ -17,207 +17,309 @@
 # source("R/HelperFunctions.R")
 # library(dplyr)
 
-createConceptSetTargetDefinitions <- function(
+#' Create or re-use concept set target definitions
+#'
+#' @description
+#' For one or more phenotypes and the generated concept set targets, create concept set target definitions to be used to
+#' create the concept sets. If a concept set with the correct definition already exists its ID will be included in the
+#' output.
+#'
+#'
+#' @param conceptSetTargets A tibble of concept set targets as created by `generateConceptSetTargets()`.
+#' @param phenotypes        A tibble with two columns: `phenotype`, and `clinicalDefinition`.
+#' @param minPhenotypeFraction If a concept set target appears for less than this fraction of the provided phenotypes,
+#'                             it will not get a definition but will later be instantiated as a placeholder (concept +
+#'                             descendants).
+#' @template LlmClient
+#' @template CostTracker
+#' @template PegasusConnectionDetails
+#' @template TempEmulationSchema
+#' @param cacheFolder A folder where data objects can be cached so a restart can continue where it left off.
+#'
+#' @returns
+#' A tibble with concept set IDs, definitions, and source types.
+#'
+#' @export
+createOrReuseConceptSetTargetDefinitions <- function(
     conceptSetTargets,
     phenotypes,
     minPhenotypeFraction = 0.02,
     llmClient,
-    costTracker = NULL,
+    costTracker = createCostTracker(),
     pegasusConnectionDetails = NULL,
     pegasusDatabaseSchema = NULL,
     tempEmulationSchema = getOption("sqlRenderTempEmulationSchema"),
     cacheFolder = NULL) {
+  errorMessages <- checkmate::makeAssertCollection()
+  checkmate::assertDataFrame(conceptSetTargets, min.rows = 1, add = errorMessages)
+  checkmate::assertNames(colnames(conceptSetTargets), must.include = c(
+    "phenotype",
+    "pertains",
+    "category",
+    "term",
+    "conceptId",
+    "conceptName",
+    "domainId",
+    "conceptClassId",
+    "vocabularyId",
+    "match"
+  ), add = errorMessages)
+  checkmate::assertDataFrame(phenotypes, min.rows = 1, add = errorMessages)
+  checkmate::assertNames(colnames(phenotypes), must.include = c(
+    "phenotype",
+    "clinicalDefinition"
+  ), add = errorMessages)
+  checkmate::assertNumber(minPhenotypeFraction, lower = 0, upper = 1, add = errorMessages)
+  checkmate::assertR6(llmClient, "Chat", add = errorMessages)
+  checkmate::assertClass(costTracker, "CostTracker", null.ok = TRUE, add = errorMessages)
+  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", null.ok = TRUE, add = errorMessages)
+  checkmate::assertCharacter(pegasusDatabaseSchema, len = 1, null.ok = TRUE, add = errorMessages)
+  checkmate::assertCharacter(tempEmulationSchema, len = 1, null.ok = TRUE, add = errorMessages)
+  checkmate::assertCharacter(cacheFolder, len = 1, null.ok = TRUE, add = errorMessages)
+  checkmate::reportAssertions(collection = errorMessages)
+  if (!is.null(pegasusConnectionDetails) && is.null(pegasusDatabaseSchema)) {
+    stop("Must provide pegasusDatabaseSchema when providing pegasusConnectionDetails.")
+  }
+  if (is.null(pegasusConnectionDetails)) {
+    connection <- NULL
+  } else {
+    connection <- DatabaseConnector::connect(pegasusConnectionDetails)
+    on.exit(DatabaseConnector::disconnect(connection))
+  }
+  dedupedTargets <- conceptSetTargets |>
+    filter(match != "None") |>
+    slice_head(n = 1, by = c("phenotype",
+                             "pertains",
+                             "category",
+                             "conceptId",
+                             "conceptName"))
 
-  startTime <- Sys.time()
+  # Hypernyms
+  hypernymTargets <- dedupedTargets |>
+    filter(.data$category == "Hypernym")
+  existingHypernymConceptSets <- downloadExistingConceptSetData(
+    connection = connection,
+    pegasusDatabaseSchema = pegasusDatabaseSchema,
+    tempEmulationSchema = tempEmulationSchema,
+    newTargets = hypernymTargets |>
+      distinct(.data$conceptId, .data$conceptName),
+    sourceType = "Concept"
+  )
+  hypernymTargets <- hypernymTargets |>
+    left_join(existingHypernymConceptSets, by = join_by("conceptId")) |>
+    mutate(sourceType = "Concept")
 
-  targets <- conceptSetTargets |>
+  # Drugs
+  drugTargets <- dedupedTargets |>
+    filter(.data$domainId =="Drug")
+  existingDrugConceptSets <- downloadExistingConceptSetData(
+    connection = connection,
+    pegasusDatabaseSchema = pegasusDatabaseSchema,
+    tempEmulationSchema = tempEmulationSchema,
+    newTargets = drugTargets |>
+      distinct(.data$conceptId, .data$conceptName),
+    sourceType = "Concept + descendants"
+  )
+  drugTargets <- drugTargets |>
+    left_join(existingDrugConceptSets, by = join_by("conceptId")) |>
+    mutate(sourceType = "Concept + descendants")
+
+  # Remaining targets
+  targets <- dedupedTargets |>
     filter(.data$category != "Hypernym", .data$domainId !="Drug")
   uniqueTargets <- targets |>
     group_by(.data$conceptId, .data$conceptName) |>
     summarise(nPhenotypes = length(unique(.data$phenotype)), .groups = "drop")
-  nTotalPhenotypes <- targets |>
-    distinct(.data$phenotype) |>
-    count() |>
-    pull()
-  lowFrequencyTargets <- uniqueTargets |>
-    filter(.data$nPhenotypes < minPhenotypeFraction * nTotalPhenotypes) |>
-    mutate(sourceType = "Concept + descendants")
+  existingDefinitionData <- downloadExistingDefinitionData(
+    connection = connection,
+    pegasusDatabaseSchema = pegasusDatabaseSchema,
+    tempEmulationSchema = tempEmulationSchema,
+    uniqueTargets = uniqueTargets
+  )
 
-  if (!is.null(pegasusConnectionDetails)) {
-    existingDefinitionData <- downloadExistingDefinitionData(
-      pegasusConnectionDetails = pegasusConnectionDetails,
-      pegasusDatabaseSchema = pegasusDatabaseSchema,
-      tempEmulationSchema = tempEmulationSchema,
-      uniqueTargets = uniqueTargets
-    )
-  }
+  # Definitions created by humans? For phenotypes overlapping with concept set targets
   definitionsFromPhenotypes <- uniqueTargets |>
+    filter(!.data$conceptId %in% existingDefinitionData$definitionsFromPhenotypes$conceptId) |>
     mutate(nornName = normalizeNames(.data$conceptName)) |>
     inner_join(phenotypes |>
                  rename(phenotypeName = "phenotype") |>
                  mutate(nornName = normalizeNames(.data$phenotypeName)),
                by = join_by("nornName")) |>
-    slice_head(n = 1, by = "conceptId")
+    slice_head(n = 1, by = "conceptId") |>
+    mutate(conceptSetId = NA_real_,
+           conceptSetName = NA_character_) |>
+    select(-"nornName")
   definitionsFromPhenotypes <- definitionsFromPhenotypes |>
     bind_rows(existingDefinitionData$definitionsFromPhenotypes) |>
-    slice_head(n = 1, by = "conceptId") |>
-    mutate(type = "From human definition")
+    slice_head(n = 1, by = "conceptId")
+  humanDefinitionTargets <- targets |>
+    inner_join(definitionsFromPhenotypes |>
+                 select(-"conceptName"),
+               by = join_by("conceptId")) |>
+    mutate(sourceType = "From human definition")
+
+  # Low frequency targets
+  nTotalPhenotypes <- targets |>
+    distinct(.data$phenotype) |>
+    count() |>
+    pull()
+  lowFrequencyTargets <- uniqueTargets |>
+    filter(.data$nPhenotypes < minPhenotypeFraction * nTotalPhenotypes)
   lowFrequencyTargets <- lowFrequencyTargets |>
-    filter(!.data$conceptId %in% definitionsFromPhenotypes$conceptId)
+    filter(!.data$conceptId %in% definitionsFromPhenotypes$conceptId,
+           !.data$conceptId %in% existingDefinitionData$conceptSets$conceptId)
+  lowFrequencyTargets <- lowFrequencyTargets |>
+    left_join(targets, by = join_by("conceptId")) |>
+    mutate(sourceType = "Concept + descendants")
+
+  # Use AI to generate definitions (or use existing one if exists)
   uniqueTargets <- uniqueTargets |>
     filter(!.data$conceptId %in% definitionsFromPhenotypes$conceptId,
-           !.data$conceptId %in% lowFrequencyTargets$conceptId) |>
-    mutate(type = "From AI definition")
+           !.data$conceptId %in% lowFrequencyTargets$conceptId)
   targets <- targets |>
     filter(.data$conceptId %in% uniqueTargets$conceptId)
 
+  aiDefinitionTargets <- fetchOrGenerateDefinitions(targets = targets,
+                                                    uniqueTargets = uniqueTargets,
+                                                    existingDefinitionData = existingDefinitionData,
+                                                    llmClient = llmClient,
+                                                    costTracker = costTracker,
+                                                    cacheFolder = cacheFolder)
+  aiDefinitionTargets <- aiDefinitionTargets |>
+    mutate(sourceType = "From AI definition")
+
+  result <- bind_rows(
+    hypernymTargets,
+    drugTargets,
+    humanDefinitionTargets,
+    lowFrequencyTargets,
+    aiDefinitionTargets
+  ) |>
+    select("phenotype",
+           "pertains",
+           "category",
+           "conceptId",
+           "conceptName",
+           "conceptSetId",
+           "conceptSetName",
+           "clinicalDefinition",
+           "sourceType",
+           "targetPhenotypeId",
+           "targetPhenotypeName",)
+  return(result)
 }
 
-generateDefinitions <- function(targets,
-                                uniqueTargets,
-                                existingDefinitionData,
-                                llmClient,
-                                costTracker,
-                                cacheFolder) {
+fetchOrGenerateDefinitions <- function(targets,
+                                       uniqueTargets,
+                                       existingDefinitionData,
+                                       llmClient,
+                                       costTracker,
+                                       cacheFolder) {
+  startTime <- Sys.time()
   dir.create(cacheFolder, recursive = TRUE, showWarnings = FALSE)
 
-
-  # templateFile <- file.path("inst", "prompts", "CreateConceptSetTargetDefinitionsPrompt.txt")
-  templateFile <- system.file("prompts", "CreateConceptSetTargetDefinitionsPrompt.txt", package = "Pegasus")
-  generatePromptTemplate <- paste(readLines(templateFile), collapse = "\n")
-
-  message(sprintf("Generating %d definitions", nrow(uniqueTargets)))
+  message(sprintf("Retrieving or generating %d definitions", nrow(uniqueTargets)))
   definitions <- list()
-  phenotypeToConceptSetName <- list()
+  nContextTarget <- 0
+  nMatched <- 0
 
   # i = 1
   for (i in seq_len(nrow(uniqueTargets))) {
     row <- uniqueTargets[i, ]
-    fileName <- file.path(cacheFolder, sprintf("%s.json", gsub("[^[:alnum:]]+", "_", row$conceptName)))
-
-    existingDefinitions <- existingDefinitionData$draftTargetToConceptSet |>
-      filter(.data$conceptId == row$conceptId) |>
-      distinct(.data$conceptSetId) |>
-      inner_join(existingDefinitionData$conceptSets, by = join_by("conceptSetId"))
     phenotypeTargetCategories <- targets |>
       filter(.data$conceptId == row$conceptId) |>
-      distinct(.data$phenotype, .data$pertains, .data$category) |>
+      distinct(.data$phenotype, .data$conceptId, .data$conceptName, .data$pertains, .data$category) |>
       mutate(context = sprintf("%s of %s%s",
                                .data$category,
                                if_else(.data$pertains == "Alternative diagnoses",
                                        "alternative diagnoses of ",
                                        ""),
                                .data$phenotype))
-    if (file.exists(fileName)) {
-      definition <- jsonlite::read_json(fileName)
-    } else {
-      if (nrow(existingDefinitions) > 0) {
-        selectExistingDefinitions(
-          existingDefinitions = existingDefinitions,
-          phenotypeTargetCategories = phenotypeTargetCategories,
-          llmClient = llmClient,
-          costTracker = costTracker
-        )
+    nContextTarget <- nContextTarget + nrow(phenotypeTargetCategories)
 
-      }
+    cacheFileName <- paste0(digest::digest(phenotypeTargetCategories), ".rds")
+    definitionsForTarget <- withCache({
+      fetchOrGenerateDefinitionsSingleTarget(phenotypeTargetCategories = phenotypeTargetCategories,
+                                             existingDefinitionData = existingDefinitionData,
+                                             llmClient = llmClient,
+                                             costTracker = costTracker)
+    },
+    cacheFolder = cacheFolder,
+    fileName = cacheFileName
+    )
 
-
-      prompt <- gsub("%term%", row$conceptName, promptTemplate)
-      prompt <- gsub("%contexts%", paste(sprintf("- %s", phenotypeTargetCategories$context), collapse = "\n"), prompt)
-      # writeLines(prompt)
-      maxRetries <- 5
-      for (attempt in seq_len(maxRetries)) {
-        llmClient$set_turns(list())
-        llmClient$set_system_prompt("")
-        definition <- llmClient$chat_structured(
-          prompt,
-          echo = "none",
-          type = ellmer::type_array(
-            ellmer::type_object(
-              label = ellmer::type_string(),
-              definition = ellmer::type_string(),
-              coveredContexts = ellmer::type_array(
-                ellmer::type_enum(values = c("all", phenotypeTargetCategories$context))
-              )
-            )
-          ),
-          convert = FALSE
-        )
-        cost <- cost + llmClient$get_cost()
-        if (length(definition) == 1) {
-          break
-        } else {
-          returnContexts <- lapply(definition, function(x) x$coveredContexts)
-          returnContexts <- unlist(do.call(c, returnContexts))
-          if (length(returnContexts) == nrow(phenotypeTargetCategories) &&
-              all(sort(returnContexts) == sort(phenotypeTargetCategories$context))) {
-            break
-          }
-          if (attempt == maxRetries) {
-            stop("LLM unable to return all provided contexts after ", maxRetries, " attempts. Giving up")
-          } else {
-            message("LLM did not return all provided contexts. Retrying")
-          }
-        }
-      }
-      jsonlite::write_json(definition, fileName, pretty = TRUE, auto_unbox = TRUE)
+    nMatched <- nMatched + sum(!is.na(definitionsForTarget$conceptSetId))
+    uniqueConceptSetNames <- definitionsForTarget |>
+      distinct(.data$conceptSetName) |>
+      pull()
+    if (length(uniqueConceptSetNames) > 1) {
+      message(sprintf("- Concept set target '%s' was splint into '%s'",
+                      row$conceptName,
+                      paste(uniqueConceptSetNames, collapse = "', '")))
     }
-
-    if (length(definition) == 1) {
-      definitionRows <- tibble(conceptSetName = row$conceptName,
-                               conceptSetConceptId = row$conceptId,
-                               seedConceptId = row$conceptId,
-                               definition = definition[[1]]$definition)
-      phenotypeToConceptSetNameRows <- phenotypeTargetCategories |>
-        select(-"context") |>
-        mutate(conceptSetName = row$conceptName)
-    } else {
-      definitionRows <- lapply(definition, function(x) tibble(conceptSetName = x$label,
-                                                              conceptSetConceptId = NA_real_,
-                                                              seedConceptId = row$conceptId,
-                                                              definition = x$definition))
-      definitionRows <- bind_rows(definitionRows)
-      phenotypeToConceptSetNameRows <- lapply(definition, function(x) tibble(context = unlist(x$coveredContexts),
-                                                                             conceptSetName = x$label))
-      phenotypeToConceptSetNameRows <- bind_rows(phenotypeToConceptSetNameRows)
-      phenotypeToConceptSetNameRows <- phenotypeTargetCategories |>
-        inner_join(phenotypeToConceptSetNameRows, by = join_by("context")) |>
-        select(-"context")
-      message("- Splitting '", row$conceptName, "' into '", paste(definitionRows$conceptSetName, collapse = "', '"), "'.")
-    }
-    definitions[[i]] <- definitionRows
-    phenotypeToConceptSetName[[i]] <- phenotypeToConceptSetNameRows
+    definitions[[i]] <- definitionsForTarget
     if (i %% 25 == 0) {
-      message(sprintf("- Processed %d of %d concept sets. Costs so far: $%0.2f",
+      message(sprintf(paste("- Processed %d of %d concept set targets, representing %d context-target combinations.",
+                            "Re-used %d existing definitions and generated %d new ones. Costs so far: $%0.2f"),
                       i,
                       nrow(uniqueTargets),
-                      cost))
+                      nContextTarget,
+                      nMatched,
+                      nContextTarget - nMatched,
+                      costTracker$amount))
     }
   }
-
-  definitions <- bind_rows(definitions)
-  phenotypeToConceptSetName <- bind_rows(phenotypeToConceptSetName)
+  definitions <- bind_rows(definitions) |>
+    select(-"context")
 
   delta <- Sys.time() - startTime
-  message(paste0(
-    "Reviewing cases took ",
-    round(delta, 1),
-    " ",
-    attr(delta, "units"),
-    " and cost $",
-    round(cost, 2)
-  ))
-  readr::write_csv(definitions, "ConceptSetTargetDefinitions.csv")
-  readr::write_csv(phenotypeToConceptSetName, "PhenotypeToConceptSetTargetNames.csv")
+  message(sprintf("Processing %d context-target combinations took %0.2f %s and cost $%0.2f. Re-used %d existing definitions and generated %d new ones.",
+                  nContextTarget,
+                  delta,
+                  attr(delta, "units"),
+                  costTracker$amount,
+                  nMatched,
+                  nContextTarget - nMatched))
+  return(definitions)
 }
 
-selectExistingDefinitions <- function(
-    conceptName,
-    existingDefinitions,
-    phenotypeTargetCategories,
-    llmClient,
-    costTracker
-) {
+fetchOrGenerateDefinitionsSingleTarget <- function(phenotypeTargetCategories,
+                                                   existingDefinitionData,
+                                                   llmClient,
+                                                   costTracker) {
+  existingDefinitions <- existingDefinitionData$draftTargetToConceptSet |>
+    filter(.data$conceptId == phenotypeTargetCategories$conceptId[1]) |>
+    distinct(.data$conceptSetId) |>
+    inner_join(existingDefinitionData$conceptSets, by = join_by("conceptSetId"))
+  if (nrow(existingDefinitions) > 0) {
+    matchedDefinitions <- selectExistingDefinitions(
+      existingDefinitions = existingDefinitions,
+      phenotypeTargetCategories = phenotypeTargetCategories,
+      llmClient = llmClient,
+      costTracker = costTracker
+    )
+    phenotypeTargetCategories <- phenotypeTargetCategories |>
+      anti_join(matchedDefinitions, by = join_by("phenotype", "pertains", "category", "context"))
+  } else {
+    matchedDefinitions <- NULL
+  }
+  if (nrow(phenotypeTargetCategories) > 0) {
+    generatedDefinitions <- generateNewDefinitions(
+      phenotypeTargetCategories = phenotypeTargetCategories,
+      llmClient = llmClient,
+      costTracker = costTracker
+    )
+  } else {
+    generatedDefinitions <- NULL
+  }
+  definitions <- bind_rows(matchedDefinitions, generatedDefinitions)
+  return(definitions)
+}
+
+selectExistingDefinitions <- function(existingDefinitions,
+                                      phenotypeTargetCategories,
+                                      llmClient,
+                                      costTracker) {
   # templateFile <- file.path("inst", "prompts", "SelectExistingConceptSetTargetDefinitionsPrompt.txt")
   templateFile <- system.file("prompts", "SelectExistingConceptSetTargetDefinitionsPrompt.txt", package = "Pegasus")
   promptTemplate <- paste(readLines(templateFile), collapse = "\n")
@@ -250,22 +352,70 @@ selectExistingDefinitions <- function(
     inner_join(existingDefinitions,
                by = join_by("conceptSetName"))
   if (nrow(selectedDefinitions) == 1 && selectedDefinitions$context == "all") {
-    phenotypeTargetCategories <- phenotypeTargetCategories |>
+    matchedDefinitions <- phenotypeTargetCategories |>
       mutate(conceptSetId = selectedDefinitions$conceptSetId,
+             conceptSetName  = selectedDefinitions$conceptSetName,
              clinicalDefinition = selectedDefinitions$clinicalDefinition)
+  } else {
+    matchedDefinitions <- phenotypeTargetCategories |>
+      inner_join(selectedDefinitions, by = join_by("context"))
   }
-  phenotypeTargetCategories |>
-    inner_join(selectedDefinitions, by = join_by(context))
+  return(matchedDefinitions)
 }
 
-downloadExistingDefinitionData <- function(
-    pegasusConnectionDetails,
-    pegasusDatabaseSchema,
-    uniqueTargets,
-    tempEmulationSchema
-) {
-  connection <- DatabaseConnector::connect(pegasusConnectionDetails)
-  on.exit(DatabaseConnector::disconnect(connection))
+generateNewDefinitions <- function(phenotypeTargetCategories,
+                                   llmClient,
+                                   costTracker) {
+  # templateFile <- file.path("inst", "prompts", "CreateConceptSetTargetDefinitionsPrompt.txt")
+  templateFile <- system.file("prompts", "CreateConceptSetTargetDefinitionsPrompt.txt", package = "Pegasus")
+  promptTemplate <- paste(readLines(templateFile), collapse = "\n")
+  prompt <- gsub("%term%", row$conceptName, promptTemplate)
+  prompt <- gsub("%contexts%", paste(sprintf("- %s", phenotypeTargetCategories$context), collapse = "\n"), prompt)
+  # writeLines(prompt)
+  outputType <- ellmer::type_array(
+    ellmer::type_object(
+      label = ellmer::type_string(),
+      definition = ellmer::type_string(),
+      coveredContexts = ellmer::type_array(
+        ellmer::type_enum(values = c("all", phenotypeTargetCategories$context))
+      )
+    )
+  )
+  response <- queryLlm(
+    prompt = prompt,
+    llmClient = llmClient,
+    costTracker = costTracker,
+    outputType = outputType
+  )
+  generatedDefinitions <- lapply(seq_len(nrow(response)),
+                                 function(i) tibble(conceptSetName = as.character(response$label[i]),
+                                                    clinicalDefinition = response$definition[i],
+                                                    context = as.character(response$coveredContexts[i][[1]])))
+  generatedDefinitions <- bind_rows(generatedDefinitions)
+  if (nrow(generatedDefinitions) == 1 && generatedDefinitions$context == "all") {
+    generatedDefinitions <- phenotypeTargetCategories |>
+      mutate(conceptSetName  = generatedDefinitions$conceptSetName,
+             clinicalDefinition = generatedDefinitions$clinicalDefinition,
+             conceptSetId = NA_real_)
+  } else {
+    generatedDefinitions <- phenotypeTargetCategories |>
+      inner_join(generatedDefinitions, by = join_by("context")) |>
+      mutate(conceptSetId = NA_real_)
+  }
+  return(generatedDefinitions)
+}
+
+downloadExistingDefinitionData <- function(connection,
+                                           pegasusDatabaseSchema,
+                                           tempEmulationSchema,
+                                           uniqueTargets) {
+  if (is.null(connection)) {
+    return(list(draftTargetToConceptSet = tibble(conceptId = 1, conceptSetId = 1) |>
+                  filter(.data$conceptId != 1),
+                conceptSets = tibble(conceptSetId = 1) |>
+                  filter(.data$conceptSetId != 1),
+                definitionsFromPhenotypes = tibble()))
+  }
 
   DatabaseConnector::insertTable(
     connection = connection,
@@ -278,7 +428,6 @@ downloadExistingDefinitionData <- function(
     camelCaseToSnakeCase = TRUE,
     tempEmulationSchema = tempEmulationSchema
   )
-
   sql <- "
     SELECT *
     FROM @database_schema.draft_target_to_concept_set
@@ -318,6 +467,7 @@ downloadExistingDefinitionData <- function(
     snakeCaseToCamelCase = TRUE,
     tempEmulationSchema = tempEmulationSchema
   )
+
   DatabaseConnector::renderTranslateExecuteSql(
     connection = connection,
     sql = "DROP TABLE #target_concept_id;",
@@ -327,10 +477,14 @@ downloadExistingDefinitionData <- function(
   )
   # Also get definitions of phenotypes with names similar to concept set targets
   sql <- "
-    SELECT phenotype_id,
-      phenotype_name,
-      clinical_definition
-    FROM @database_schema.phenotype;
+    SELECT phenotype_id AS target_phenotype_id,
+      phenotype_name AS target_phenotype_name,
+      phenotype.clinical_definition,
+      concept_set_id,
+      concept_set_name
+    FROM @database_schema.phenotype
+    LEFT JOIN @database_schema.concept_set
+      ON phenotype.clinical_definition = concept_set.clinical_definition;
   "
   allPhenotypes <- DatabaseConnector::renderTranslateQuerySql(
     connection = connection,
@@ -339,7 +493,7 @@ downloadExistingDefinitionData <- function(
     snakeCaseToCamelCase = TRUE,
     tempEmulationSchema = tempEmulationSchema
   ) |>
-    mutate(nornName = normalizeNames(.data$phenotypeName))
+    mutate(nornName = normalizeNames(.data$targetPhenotypeName))
   definitionsFromPhenotypes <- uniqueTargets |>
     mutate(nornName = normalizeNames(.data$conceptName)) |>
     inner_join(allPhenotypes, by = join_by("nornName")) |>
@@ -350,3 +504,52 @@ downloadExistingDefinitionData <- function(
               definitionsFromPhenotypes = definitionsFromPhenotypes))
 }
 
+downloadExistingConceptSetData <- function(connection,
+                                           pegasusDatabaseSchema,
+                                           tempEmulationSchema,
+                                           newTargets,
+                                           sourceType) {
+  if (is.null(connection)) {
+    return(tibble(conceptId = 1, conceptSetId = 1) |>
+             filter(.data$conceptId != 1))
+  }
+  DatabaseConnector::insertTable(
+    connection = connection,
+    data = newTargets |>
+      select("conceptId"),
+    tableName = "#target_concept_id",
+    createTable = TRUE,
+    dropTableIfExists = TRUE,
+    tempTable = TRUE,
+    camelCaseToSnakeCase = TRUE,
+    tempEmulationSchema = tempEmulationSchema
+  )
+  sql <- "
+    SELECT concept_id,
+      concept_set_id,
+      concept_set_name
+    FROM @database_schema.concept_set
+    WHERE concept_id IN (
+      SELECT concept_id
+      FROM #target_concept_id
+    )
+      AND valid = 1
+      AND cs_source_type = '@source_type';
+  "
+  conceptSets <- DatabaseConnector::renderTranslateQuerySql(
+    connection = connection,
+    sql = sql,
+    database_schema = pegasusDatabaseSchema,
+    source_type = sourceType,
+    snakeCaseToCamelCase = TRUE,
+    tempEmulationSchema = tempEmulationSchema
+  )
+  DatabaseConnector::renderTranslateExecuteSql(
+    connection = connection,
+    sql = "DROP TABLE #target_concept_id;",
+    tempEmulationSchema = tempEmulationSchema,
+    progressBar = FALSE,
+    reportOverallTime = FALSE
+  )
+  return(conceptSets)
+}
