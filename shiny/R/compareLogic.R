@@ -470,7 +470,8 @@ assembleComparison <- function(phenotypes, evaluations, conceptSetExpressions, p
     cohortDiff <- cohortDiffs[[as.character(id)]]
     if (isTRUE(cohortDiff$available) && !is.null(cohortDiff$diff)) {
       parts <- c(parts, sprintf(
-        "cohort definition: %d lines added, %d removed", sum(cohortDiff$diff$op == "add"), sum(cohortDiff$diff$op == "del")
+        "cohort definition: %d line%s added, %d removed", sum(cohortDiff$diff$op == "add"),
+        if (sum(cohortDiff$diff$op == "add") == 1) "" else "s", sum(cohortDiff$diff$op == "del")
       ))
     }
     sprintf("%s: %s", name, paste(parts, collapse = "; "))

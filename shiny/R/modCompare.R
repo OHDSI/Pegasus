@@ -31,6 +31,18 @@ compareUi <- function(id) {
   ns <- NS(id)
   tagList(
     tags$style(HTML(compareStyle)),
+    # The tab is a fixed-height area. This wrapper takes the height that is left and scrolls inside it, so the boxes
+    # keep the height of their content instead of being squeezed into the window.
+    tags$div(
+      class = "html-fill-item overflow-auto pb-3",
+      style = "min-height: 0;",
+      compareContent(ns)
+    )
+  )
+}
+
+compareContent <- function(ns) {
+  tagList(
     bslib::card(
       fill = FALSE,
       bslib::card_header(
