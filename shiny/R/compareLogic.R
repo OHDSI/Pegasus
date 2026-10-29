@@ -268,7 +268,8 @@ describeItemChanges <- function(baseItems, otherItems) {
 emptyConceptSetChanges <- function() {
   data.frame(
     change = character(0), pertains = character(0), category = character(0), baselineName = character(0),
-    otherName = character(0), details = character(0), stringsAsFactors = FALSE
+    otherName = character(0), details = character(0), baselineId = integer(0), otherId = integer(0),
+    stringsAsFactors = FALSE
   )
 }
 
@@ -284,10 +285,12 @@ compareConceptSets <- function(base, other) {
   baseUsed <- rep(FALSE, nrow(base))
   otherUsed <- rep(FALSE, nrow(other))
   rows <- list()
-  addRow <- function(change, pertains, category, baselineName, otherName, details = "") {
+  addRow <- function(change, pertains, category, baselineName, otherName, details = "", baselineId = NA_integer_,
+                     otherId = NA_integer_) {
     rows[[length(rows) + 1]] <<- data.frame(
       change = change, pertains = pertains, category = category, baselineName = baselineName,
-      otherName = otherName, details = details, stringsAsFactors = FALSE
+      otherName = otherName, details = details, baselineId = as.integer(baselineId), otherId = as.integer(otherId),
+      stringsAsFactors = FALSE
     )
   }
   valueOrNa <- function(x) if (is.na(x)) "" else x
@@ -302,7 +305,8 @@ compareConceptSets <- function(base, other) {
     otherUsed[j] <- TRUE
     renamed <- tolower(base$conceptSetName[i]) != tolower(other$conceptSetName[j])
     addRow("Same", valueOrNa(other$pertains[j]), valueOrNa(other$category[j]), base$conceptSetName[i],
-           other$conceptSetName[j], if (renamed) "Same concepts under a different name" else "")
+           other$conceptSetName[j], if (renamed) "Same concepts under a different name" else "",
+           base$conceptSetId[i], other$conceptSetId[j])
   }
   for (j in which(!otherUsed)) {
     candidates <- which(!baseUsed & tolower(base$conceptSetName) == tolower(other$conceptSetName[j]))
@@ -313,13 +317,16 @@ compareConceptSets <- function(base, other) {
     baseUsed[i] <- TRUE
     otherUsed[j] <- TRUE
     addRow("Changed", valueOrNa(other$pertains[j]), valueOrNa(other$category[j]), base$conceptSetName[i],
-           other$conceptSetName[j], describeItemChanges(baseItems[[i]], otherItems[[j]]))
+           other$conceptSetName[j], describeItemChanges(baseItems[[i]], otherItems[[j]]),
+           base$conceptSetId[i], other$conceptSetId[j])
   }
   for (i in which(!baseUsed)) {
-    addRow("Only in baseline", valueOrNa(base$pertains[i]), valueOrNa(base$category[i]), base$conceptSetName[i], "")
+    addRow("Only in baseline", valueOrNa(base$pertains[i]), valueOrNa(base$category[i]), base$conceptSetName[i], "",
+           baselineId = base$conceptSetId[i])
   }
   for (j in which(!otherUsed)) {
-    addRow("Only here", valueOrNa(other$pertains[j]), valueOrNa(other$category[j]), "", other$conceptSetName[j])
+    addRow("Only here", valueOrNa(other$pertains[j]), valueOrNa(other$category[j]), "", other$conceptSetName[j],
+           otherId = other$conceptSetId[j])
   }
   if (length(rows) == 0) emptyConceptSetChanges() else do.call(rbind, rows)
 }
@@ -352,7 +359,8 @@ comparisonMetrics <- function(evaluations, phenotypes, phenotypeIds, baselineId,
   measures <- c("ppv", "sensitivity", "specificity", "npv")
   naRow <- function(id, name) {
     data.frame(
-      phenotypeId = id, phenotypeName = name, cohortDefinitionName = NA_character_, isSummary = TRUE, ppv = NA_real_,
+      phenotypeId = id, phenotypeName = name, cohortDefinitionId = NA_integer_, cohortDefinitionName = NA_character_,
+      isSummary = TRUE, ppv = NA_real_,
       sensitivity = NA_real_, specificity = NA_real_, npv = NA_real_, stringsAsFactors = FALSE
     )
   }
@@ -368,8 +376,8 @@ comparisonMetrics <- function(evaluations, phenotypes, phenotypeIds, baselineId,
       return(naRow(id, name))
     }
     cohorts <- data.frame(
-      phenotypeId = id, phenotypeName = name, cohortDefinitionName = found$cohortDefinitionName,
-      isSummary = nrow(found) == 1, ppv = found$ppv, sensitivity = found$sensitivity,
+      phenotypeId = id, phenotypeName = name, cohortDefinitionId = as.integer(found$cohortDefinitionId),
+      cohortDefinitionName = found$cohortDefinitionName, isSummary = nrow(found) == 1, ppv = found$ppv, sensitivity = found$sensitivity,
       specificity = specificity(found$trueNegatives, found$falsePositives),
       npv = negativePredictiveValue(found$trueNegatives, found$falseNegatives),
       stringsAsFactors = FALSE
@@ -439,6 +447,7 @@ assembleComparison <- function(phenotypes, evaluations, conceptSetExpressions, p
     }
     list(
       available = TRUE, baselineName = baseCohort$name, otherName = other$name,
+      baselineId = baseCohort$cohortDefinitionId, otherId = other$cohortDefinitionId,
       readable = baseCohort$readable && other$readable, diff = cohortLineDiff(baseCohort$text, other$text)
     )
   }), others)

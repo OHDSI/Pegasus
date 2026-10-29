@@ -320,8 +320,8 @@ phenotypeDetailServer <- function(id, connectionPool, databaseSchema, phenotypes
       names <- detail$conceptSets$conceptSetName[match(counts$conceptSetId, detail$conceptSets$conceptSetId)]
       result <- showTable(
         data.frame(
-          "Concept set" = names,
-          Database = counts$cdmSourceAbbreviation,
+          "Concept set" = entityLink("concept_set", counts$conceptSetId, names),
+          Database = htmltools::htmlEscape(counts$cdmSourceAbbreviation),
           Overall = counts$overallPersons,
           Condition = counts$conditionPersons,
           Procedure = counts$procedurePersons,
@@ -332,7 +332,8 @@ phenotypeDetailServer <- function(id, connectionPool, databaseSchema, phenotypes
           Visit = counts$visitPersons,
           check.names = FALSE
         ),
-        "No person counts are stored for this phenotype's concept sets (the concept_set_person_count table has no rows for them)."
+        "No person counts are stored for this phenotype's concept sets (the concept_set_person_count table has no rows for them).",
+        escape = FALSE
       )
       DT::formatRound(result, c("Overall", "Condition", "Procedure", "Drug", "Device", "Measurement", "Observation", "Visit"), digits = 0)
     })

@@ -571,8 +571,8 @@ evaluationServer <- function(id, connectionPool, databaseSchema, userName, pheno
         data.frame(
           Requested = formatTimestamp(data$timeRequested),
           By = htmltools::htmlEscape(data$requestedBy),
-          Phenotype = htmltools::htmlEscape(data$phenotypeName),
-          Cohort = htmltools::htmlEscape(data$cohortDefinitionName),
+          Phenotype = entityLink("phenotype", data$phenotypeId, data$phenotypeName),
+          Cohort = entityLink("cohort_definition", data$cohortDefinitionId, data$cohortDefinitionName),
           Database = htmltools::htmlEscape(data$cdmSourceAbbreviation),
           "Evaluation type" = htmltools::htmlEscape(data$evaluationType),
           Status = sprintf(

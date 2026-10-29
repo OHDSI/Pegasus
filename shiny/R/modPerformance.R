@@ -223,16 +223,17 @@ performanceServer <- function(id, evaluations, shortlist, onOpenPhenotype, onCom
       data <- filtered()
       filterableTable(
         data.frame(
-          Phenotype = data$phenotypeName,
-          Cohort = data$cohortDefinitionName,
-          Source = data$cdSourceType,
-          Database = data$cdmSourceAbbreviation,
-          "Evaluation type" = data$evaluationType,
+          Phenotype = entityLink("phenotype", data$phenotypeId, data$phenotypeName),
+          Cohort = entityLink("cohort_definition", data$cohortDefinitionId, data$cohortDefinitionName),
+          Source = htmltools::htmlEscape(data$cdSourceType),
+          Database = htmltools::htmlEscape(data$cdmSourceAbbreviation),
+          "Evaluation type" = htmltools::htmlEscape(data$evaluationType),
           Subjects = data$cohortSubjects,
           "PPV (%)" = toPercent(data$ppv),
           "Sensitivity (%)" = toPercent(data$sensitivity),
           check.names = FALSE
         ),
+        escape = FALSE,
         rownames = FALSE,
         selection = "none",
         options = list(pageLength = 25)

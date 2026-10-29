@@ -21,11 +21,20 @@ compareStyle <- "
 ins.diff-add { background: rgba(40, 167, 69, 0.25); text-decoration: none; }
 del.diff-del { background: rgba(220, 53, 69, 0.25); }
 .compare-definition { white-space: pre-wrap; line-height: 1.5; }
+body > .selectize-dropdown .selectize-dropdown-content { max-height: 320px; }
 .cohort-diff { font-family: var(--bs-font-monospace); font-size: 0.8rem; border: 1px solid var(--bs-border-color); max-height: 70vh; overflow: auto; }
 .cohort-diff div { padding: 0 0.4rem; white-space: pre-wrap; }
 .cohort-diff .line-add { background: rgba(40, 167, 69, 0.25); }
 .cohort-diff .line-del { background: rgba(220, 53, 69, 0.25); }
 .cohort-diff .line-skip { color: var(--bs-secondary-color); background: var(--bs-tertiary-bg); font-style: italic; }"
+
+# A drop-down whose list opens on the page itself instead of inside its box, where the box would cut it off.
+compareSelect <- function(inputId, label, choices = NULL, selected = NULL, multiple = FALSE, options = list()) {
+  selectizeInput(
+    inputId, label, choices = choices, selected = selected, multiple = multiple, width = "100%",
+    options = c(list(dropdownParent = "body"), options)
+  )
+}
 
 compareUi <- function(id) {
   ns <- NS(id)
@@ -53,13 +62,13 @@ compareContent <- function(ns) {
       bslib::layout_columns(
         col_widths = c(5, 3, 2, 2),
         fill = FALSE,
-        selectizeInput(
-          ns("phenotypes"), sprintf("Phenotypes (2 to %d)", maxComparedPhenotypes), choices = NULL, multiple = TRUE,
-          width = "100%", options = list(maxItems = maxComparedPhenotypes, placeholder = "Choose phenotypes to compare")
+        compareSelect(
+          ns("phenotypes"), sprintf("Phenotypes (2 to %d)", maxComparedPhenotypes), multiple = TRUE,
+          options = list(maxItems = maxComparedPhenotypes, placeholder = "Choose phenotypes to compare")
         ),
-        selectInput(ns("baseline"), "Baseline (others are compared with it)", choices = NULL, width = "100%"),
-        selectInput(ns("database"), "Database", choices = NULL, width = "100%"),
-        selectInput(ns("evaluationType"), "Evaluation type", choices = NULL, width = "100%")
+        compareSelect(ns("baseline"), "Baseline (others are compared with it)"),
+        compareSelect(ns("database"), "Database"),
+        compareSelect(ns("evaluationType"), "Evaluation type")
       )
     ),
     uiOutput(ns("body"))
@@ -143,11 +152,10 @@ compareServer <- function(id, connectionPool, databaseSchema, phenotypes, evalua
           return(tags$div(class = "text-muted small", paste0(label, ": no cohort definition")))
         }
         current <- suppressWarnings(as.integer(isolate(input[[cohortInputId(phenotypeId)]])))
-        selectInput(
+        compareSelect(
           session$ns(cohortInputId(phenotypeId)), paste("Cohort definition:", label),
           choices = setNames(rows$cohortDefinitionId, rows$cohortDefinitionName),
-          selected = if (length(current) == 1 && current %in% rows$cohortDefinitionId) current else rows$cohortDefinitionId[1],
-          width = "100%"
+          selected = if (length(current) == 1 && current %in% rows$cohortDefinitionId) current else rows$cohortDefinitionId[1]
         )
       })
       do.call(bslib::layout_columns, c(list(col_widths = rep(floor(12 / max(1, length(selectors))), length(selectors)), fill = FALSE), selectors))
@@ -272,7 +280,10 @@ compareServer <- function(id, connectionPool, databaseSchema, phenotypes, evalua
           return(tags$div(class = "alert alert-warning", paste0(name, ": a cohort definition is missing, so nothing can be compared.")))
         }
         tagList(
-          tags$h6(class = "mt-3", sprintf("%s: %s compared with %s", name, entry$otherName, entry$baselineName)),
+          tags$h6(
+            class = "mt-3", paste0(name, ": "), HTML(entityLink("cohort_definition", entry$otherId, entry$otherName)),
+            " compared with ", HTML(entityLink("cohort_definition", entry$baselineId, entry$baselineName))
+          ),
           if (!isTRUE(entry$readable)) {
             tags$p(class = "small text-warning", "The readable description is not available, so the Circe JSON is compared.")
           },
@@ -288,7 +299,9 @@ compareServer <- function(id, connectionPool, databaseSchema, phenotypes, evalua
           Phenotype = entityLink("phenotype", metrics$phenotypeId, metrics$phenotypeName),
           "Cohort definition" = {
             label <- htmltools::htmlEscape(ifelse(is.na(metrics$cohortDefinitionName), "No evaluation", metrics$cohortDefinitionName))
-            ifelse(grepl("^Median of", label), paste0("<strong>", label, "</strong>"), label)
+            linked <- ifelse(is.na(metrics$cohortDefinitionId), label,
+                             entityLink("cohort_definition", metrics$cohortDefinitionId, metrics$cohortDefinitionName))
+            ifelse(grepl("^Median of", label), paste0("<strong>", label, "</strong>"), linked)
           },
           "PPV (%)" = percentText(metrics$ppv),
           "PPV vs baseline" = deltaText(metrics$ppvDelta),
@@ -313,8 +326,10 @@ compareServer <- function(id, connectionPool, databaseSchema, phenotypes, evalua
           Change = changes$change,
           Pertains = htmltools::htmlEscape(changes$pertains),
           Category = htmltools::htmlEscape(changes$category),
-          "Baseline concept set" = htmltools::htmlEscape(changes$baselineName),
-          "Concept set here" = htmltools::htmlEscape(changes$otherName),
+          "Baseline concept set" = ifelse(is.na(changes$baselineId), htmltools::htmlEscape(changes$baselineName),
+                                          entityLink("concept_set", changes$baselineId, changes$baselineName)),
+          "Concept set here" = ifelse(is.na(changes$otherId), htmltools::htmlEscape(changes$otherName),
+                                      entityLink("concept_set", changes$otherId, changes$otherName)),
           Details = htmltools::htmlEscape(changes$details),
           check.names = FALSE
         ),

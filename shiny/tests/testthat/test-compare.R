@@ -51,6 +51,13 @@ test_that("compareConceptSets tells same, changed, renamed, and one-sided sets a
   expect_match(flags$details, "Asthma (317009): descendants off", fixed = TRUE)
 
   expect_equal(nrow(compareConceptSets(sets(1, list(A = asthma))[0, ], sets(2, list(A = asthma))[0, ])), 0)
+
+  # Every row points at the concept sets it names, so tables can link to them.
+  expect_equal(result$baselineId[result$otherName == "Wheezing"], 2L)
+  expect_equal(result$otherId[result$otherName == "Wheezing"], 2L)
+  expect_true(is.na(result$baselineId[result$change == "Only here"]))
+  expect_true(is.na(result$otherId[result$change == "Only in baseline"]))
+  expect_equal(result$baselineId[result$change == "Only in baseline"], 3L)
 })
 
 test_that("a comparison covers definitions, concept sets and performance for one database and type", {
@@ -72,6 +79,8 @@ test_that("a comparison covers definitions, concept sets and performance for one
   baselineRow <- metrics[metrics$phenotypeId == 1 & metrics$isSummary, ]
   otherRow <- metrics[metrics$phenotypeId == 2 & metrics$isSummary, ]
   expect_match(baselineRow$cohortDefinitionName, "Median of 3 cohort definitions")
+  expect_true(is.na(baselineRow$cohortDefinitionId))
+  expect_false(anyNA(metrics$cohortDefinitionId[!grepl("^Median", metrics$cohortDefinitionName)]))
   expect_equal(baselineRow$ppv, median(evaluations$ppv[evaluations$phenotypeId == 1 & evaluations$cdmSourceAbbreviation == "DEVCLM" & evaluations$evaluationType == "KEEPER + llm"]))
   expect_equal(otherRow$ppv, median(evaluations$ppv[evaluations$phenotypeId == 2 & evaluations$cdmSourceAbbreviation == "DEVCLM" & evaluations$evaluationType == "KEEPER + llm"]))
   expect_true(all(is.na(metrics$ppvDelta[metrics$phenotypeId == 1])))
@@ -189,7 +198,8 @@ test_that("Shortlist and Performance hand their phenotypes to the compare callba
 
 test_that("the summary row of a phenotype is the median of its cohort definitions", {
   evaluations <- data.frame(
-    phenotypeId = c(1, 1, 1, 2), phenotypeName = c("A", "A", "A", "B"), cohortDefinitionName = c("c1", "c2", "c3", "d1"),
+    phenotypeId = c(1, 1, 1, 2), phenotypeName = c("A", "A", "A", "B"), cohortDefinitionId = c(11, 12, 13, 21),
+    cohortDefinitionName = c("c1", "c2", "c3", "d1"),
     cdmSourceAbbreviation = "DB", evaluationType = "T", ppv = c(0.5, 0.9, 0.7, 0.6), sensitivity = c(0.2, 0.4, 0.3, 0.9),
     trueNegatives = 90, falsePositives = 10, falseNegatives = 10, stringsAsFactors = FALSE
   )
@@ -259,6 +269,8 @@ test_that("the comparison includes the cohort definition differences and the rep
   comparison <- assembleComparison(phenotypes, evaluations, expressions, c(1L, 2L), 1L, "DEVCLM", "KEEPER + llm", cohortTexts = texts)
   expect_true(comparison$cohortDiffs[["2"]]$available)
   expect_equal(comparison$cohortDiffs[["2"]]$baselineName, "Asthma - template")
+  expect_equal(comparison$cohortDiffs[["2"]]$baselineId, 1L)
+  expect_equal(comparison$cohortDiffs[["2"]]$otherId, 4L)
   expect_match(comparison$notes, "cohort definition: 2 lines added, 1 removed", fixed = TRUE)
 
   html <- comparisonReport(comparison)
