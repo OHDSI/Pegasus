@@ -1,3 +1,7 @@
+-- ---------------------------------------------------------------------------------------------------------------
+-- Part 1: the new schema. These tables are the ones in CreateDataModel.sql (a test keeps the two in step).
+-- ---------------------------------------------------------------------------------------------------------------
+
 CREATE SCHEMA @new_schema;
 
 CREATE TABLE @new_schema.phenotype (
@@ -275,14 +279,49 @@ INSERT INTO @new_schema.atlas_instance
 SELECT base_url
 FROM @old_schema.atlas_instance;
 
+-- ---------------------------------------------------------------------------------------------------------------
+-- Part 3: copy the tables that were added after the original model. phenotype_ancestor has no earlier equivalent
+-- that this script can read, so it is copied as it is.
+-- ---------------------------------------------------------------------------------------------------------------
+
+INSERT INTO @new_schema.phenotype_ancestor
+SELECT phenotype_id, parent_phenotype_id
+FROM @old_schema.phenotype_ancestor;
+
+INSERT INTO @new_schema.phenotype_meta_data
+SELECT phenotype_id, is_pharmacovigilance_outcome, clinical_course, expected_care_setting, sex_constraint,
+  min_age_years, max_age_years, minimum_interepisode_gap_days, has_discrete_recorded_symptoms,
+  requires_diagnostic_test_or_procedure, requires_active_treatment_within_30d,
+  expects_condition_specific_followup_or_sequelae_1yr
+FROM @old_schema.phenotype_meta_data;
+
+INSERT INTO @new_schema.concept_set_item
+SELECT concept_set_id, concept_id, is_excluded, include_descendants, include_mapped
+FROM @old_schema.concept_set_item;
+
+INSERT INTO @new_schema.evaluation_request
+SELECT evaluation_request_id, cohort_definition_id, database_id,
+  CASE LOWER(evaluation_type)
+    WHEN 'keeper + llm' THEN 'KEEPER + llm'
+    WHEN 'phevaluator' THEN 'PheValuator'
+    WHEN 'keeper + human' THEN 'KEEPER + human'
+    ELSE evaluation_type
+  END,
+  requested_by, time_requested, notes
+FROM @old_schema.evaluation_request;
+
 SELECT 'phenotype' AS table_name, (SELECT COUNT(*) FROM @old_schema.phenotype) AS old_rows, (SELECT COUNT(*) FROM @new_schema.phenotype) AS new_rows
-UNION ALL SELECT 'concept_set', (SELECT COUNT(*) FROM @old_schema.concept_set), (SELECT COUNT(*) FROM @new_schema.concept_set)
-UNION ALL SELECT 'phenotype_to_concept_set', (SELECT COUNT(*) FROM @old_schema.phenotype_to_concept_set), (SELECT COUNT(*) FROM @new_schema.phenotype_to_concept_set)
+UNION ALL SELECT 'phenotype_ancestor', (SELECT COUNT(*) FROM @old_schema.phenotype_ancestor), (SELECT COUNT(*) FROM @new_schema.phenotype_ancestor)
+UNION ALL SELECT 'phenotype_meta_data', (SELECT COUNT(*) FROM @old_schema.phenotype_meta_data), (SELECT COUNT(*) FROM @new_schema.phenotype_meta_data)
 UNION ALL SELECT 'draft_concept_set_target', (SELECT COUNT(*) FROM @old_schema.draft_concept_set_target), (SELECT COUNT(*) FROM @new_schema.draft_concept_set_target)
 UNION ALL SELECT 'draft_target_to_concept_set', (SELECT COUNT(*) FROM @old_schema.draft_target_to_concept_set), (SELECT COUNT(*) FROM @new_schema.draft_target_to_concept_set)
+UNION ALL SELECT 'concept_set', (SELECT COUNT(*) FROM @old_schema.concept_set), (SELECT COUNT(*) FROM @new_schema.concept_set)
+UNION ALL SELECT 'concept_set_item', (SELECT COUNT(*) FROM @old_schema.concept_set_item), (SELECT COUNT(*) FROM @new_schema.concept_set_item)
+UNION ALL SELECT 'phenotype_to_concept_set', (SELECT COUNT(*) FROM @old_schema.phenotype_to_concept_set), (SELECT COUNT(*) FROM @new_schema.phenotype_to_concept_set)
 UNION ALL SELECT 'concept_set_person_count', (SELECT COUNT(*) FROM @old_schema.concept_set_person_count), (SELECT COUNT(*) FROM @new_schema.concept_set_person_count)
 UNION ALL SELECT 'cohort_definition', (SELECT COUNT(*) FROM @old_schema.cohort_definition), (SELECT COUNT(*) FROM @new_schema.cohort_definition)
 UNION ALL SELECT 'cohort_definition_to_concept_set', (SELECT COUNT(*) FROM @old_schema.cohort_definition_to_concept_set), (SELECT COUNT(*) FROM @new_schema.cohort_definition_to_concept_set)
 UNION ALL SELECT 'cohort_definition_evaluation', (SELECT COUNT(*) FROM @old_schema.cohort_definition_evaluation), (SELECT COUNT(*) FROM @new_schema.cohort_definition_evaluation)
+UNION ALL SELECT 'evaluation_request', (SELECT COUNT(*) FROM @old_schema.evaluation_request), (SELECT COUNT(*) FROM @new_schema.evaluation_request)
 UNION ALL SELECT 'database_meta_data', (SELECT COUNT(*) FROM @old_schema.database_meta_data), (SELECT COUNT(*) FROM @new_schema.database_meta_data)
 UNION ALL SELECT 'atlas_instance', (SELECT COUNT(*) FROM @old_schema.atlas_instance), (SELECT COUNT(*) FROM @new_schema.atlas_instance);
