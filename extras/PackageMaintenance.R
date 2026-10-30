@@ -19,10 +19,6 @@ styler::style_pkg()
 OhdsiRTools::updateCopyrightYearFolder()
 devtools::spell_check()
 
-# Sync shared assets to the Shiny app:
-file.copy(list.files("inst/skills", pattern = "\\.md$", full.names = TRUE), "shiny/skills", overwrite = TRUE)
-file.copy("extras/LogoSmall.png", "shiny/www/LogoSmall.png", overwrite = TRUE)
-
 # Create manual and vignettes:
 unlink("extras/Pegasus.pdf")
 system("R CMD Rd2pdf ./ --output=extras/Pegasus.pdf")
