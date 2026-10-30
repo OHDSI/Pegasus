@@ -12,4 +12,11 @@ export(uploadConceptSets)
 export(uploadPhenotypes)
 import(DatabaseConnector)
 import(dplyr)
+importFrom(ellmer,
+  type_array,
+  type_enum,
+  type_integer,
+  type_object,
+  type_string
+)
 importFrom(rlang,.data)

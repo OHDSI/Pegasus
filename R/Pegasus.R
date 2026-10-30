@@ -18,6 +18,7 @@
 "_PACKAGE"
 
 #' @importFrom rlang .data
+#' @importFrom ellmer type_string type_array type_enum type_integer type_object
 #' @import DatabaseConnector
 #' @import dplyr
 NULL

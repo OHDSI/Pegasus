@@ -31,19 +31,27 @@ Imports:
 	Phenelope (>= 0.2.0),
 	Capr,
 	CirceR,
+	CohortGenerator,
+	Keeper,
 	ParallelLogger, 
 	SqlRender, 
 	ellmer, 
 	httr, 
 	jsonlite,
-  purrr
+  purrr,
+	R6,
+	pool,
+	callr
 Suggests:
 	testthat,
 	duckdb,
+	keyring,
+	withr,
 	knitr,
 	rmarkdown
 Remotes:
-  ohdsi/Phenelope
+  ohdsi/Phenelope,
+  ohdsi/Keeper
 NeedsCompilation: no
 Roxygen: list(markdown = TRUE)
 Encoding: UTF-8
