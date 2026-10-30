@@ -17,7 +17,7 @@
 # source("R/HelperFunctions.R")
 # library(dplyr)
 
-#' Create or re-use concept set target definitions
+#' Generate or re-use concept set target definitions
 #'
 #' @description
 #' For one or more phenotypes and the generated concept set targets, create concept set target definitions to be used to
@@ -40,7 +40,7 @@
 #' A tibble with concept set IDs, definitions, and source types.
 #'
 #' @export
-createOrReuseConceptSetTargetDefinitions <- function(
+generateOrReuseConceptSetTargetDefinitions <- function(
     conceptSetTargets,
     phenotypes,
     minPhenotypeFraction = 0.02,
@@ -103,11 +103,11 @@ createOrReuseConceptSetTargetDefinitions <- function(
     tempEmulationSchema = tempEmulationSchema,
     newTargets = hypernymTargets |>
       distinct(.data$conceptId, .data$conceptName),
-    sourceType = "Concept"
+    sourceType = CONCEPT
   )
   hypernymTargets <- hypernymTargets |>
     left_join(existingHypernymConceptSets, by = join_by("conceptId")) |>
-    mutate(sourceType = "Concept")
+    mutate(sourceType = CONCEPT)
 
   # Drugs
   drugTargets <- dedupedTargets |>
@@ -118,11 +118,11 @@ createOrReuseConceptSetTargetDefinitions <- function(
     tempEmulationSchema = tempEmulationSchema,
     newTargets = drugTargets |>
       distinct(.data$conceptId, .data$conceptName),
-    sourceType = "Concept + descendants"
+    sourceType = CONCEPT_PLUS_DESCENDANTS
   )
   drugTargets <- drugTargets |>
     left_join(existingDrugConceptSets, by = join_by("conceptId")) |>
-    mutate(sourceType = "Concept + descendants")
+    mutate(sourceType = CONCEPT_PLUS_DESCENDANTS)
 
   # Remaining targets
   targets <- dedupedTargets |>
@@ -156,7 +156,7 @@ createOrReuseConceptSetTargetDefinitions <- function(
     inner_join(definitionsFromPhenotypes |>
                  select(-"conceptName"),
                by = join_by("conceptId")) |>
-    mutate(sourceType = "From human definition")
+    mutate(sourceType = FROM_HUMAN_DEFINITION)
 
   # Low frequency targets
   nTotalPhenotypes <- targets |>
@@ -170,7 +170,7 @@ createOrReuseConceptSetTargetDefinitions <- function(
            !.data$conceptId %in% existingDefinitionData$conceptSets$conceptId)
   lowFrequencyTargets <- lowFrequencyTargets |>
     left_join(targets, by = join_by("conceptId")) |>
-    mutate(sourceType = "Concept + descendants")
+    mutate(sourceType = CONCEPT_PLUS_DESCENDANTS)
 
   # Use AI to generate definitions (or use existing one if exists)
   uniqueTargets <- uniqueTargets |>
@@ -186,7 +186,7 @@ createOrReuseConceptSetTargetDefinitions <- function(
                                                     costTracker = costTracker,
                                                     cacheFolder = cacheFolder)
   aiDefinitionTargets <- aiDefinitionTargets |>
-    mutate(sourceType = "From AI definition")
+    mutate(sourceType = FROM_AI_DEFINITION)
 
   result <- bind_rows(
     hypernymTargets,
@@ -205,7 +205,7 @@ createOrReuseConceptSetTargetDefinitions <- function(
            "clinicalDefinition",
            "sourceType",
            "targetPhenotypeId",
-           "targetPhenotypeName",)
+           "targetPhenotypeName")
   return(result)
 }
 
@@ -216,7 +216,9 @@ fetchOrGenerateDefinitions <- function(targets,
                                        costTracker,
                                        cacheFolder) {
   startTime <- Sys.time()
-  dir.create(cacheFolder, recursive = TRUE, showWarnings = FALSE)
+  if (!is.null(cacheFolder)) {
+    dir.create(cacheFolder, recursive = TRUE, showWarnings = FALSE)
+  }
 
   message(sprintf("Retrieving or generating %d definitions", nrow(uniqueTargets)))
   definitions <- list()

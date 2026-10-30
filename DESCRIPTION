@@ -29,12 +29,17 @@ Imports:
 	dplyr,
 	rlang,
 	checkmate,
-	SnowballC
+	SnowballC,
+	digest,
+	Phenelope (>= 0.2.0),
+	Capr
 Suggests:
 	testthat,
 	duckdb,
 	knitr,
 	rmarkdown
+Remotes:
+  ohdsi/Phenelope
 NeedsCompilation: no
 Roxygen: list(markdown = TRUE)
 Encoding: UTF-8

@@ -59,11 +59,24 @@ saveRDS(targets, "e:/temp/PegasusTargets.rds")
 # Create concept set target definitions --------------------------------
 conceptSetTargets <- readRDS("e:/temp/PegasusTargets.rds")
 
-targetDefinitions <- createOrReuseConceptSetTargetDefinitions(
-    conceptSetTargets = conceptSetTargets,
-    phenotypes = phenotypes,
-    llmClient = llmClient,
-    pegasusConnectionDetails = pegasusConnectionDetails,
-    pegasusDatabaseSchema = pegasusDatabaseSchema,
-    cacheFolder = "e:/temp/pegasusConceptSetTargetCache")
-saveRDS(targetDefinitions, "e:/temp/PegasusTargetDefinitions.rds")
+conceptSetTargetDefinitions <- generateOrReuseConceptSetTargetDefinitions(
+  conceptSetTargets = conceptSetTargets,
+  phenotypes = phenotypes,
+  llmClient = llmClient,
+  pegasusConnectionDetails = pegasusConnectionDetails,
+  pegasusDatabaseSchema = pegasusDatabaseSchema,
+  cacheFolder = "e:/temp/pegasusConceptSetTargetCache")
+saveRDS(conceptSetTargetDefinitions, "e:/temp/PegasusTargetDefinitions.rds")
+
+# Create concept sets -------------------------------------------------
+conceptSetTargetDefinitions <- readRDS("e:/temp/PegasusTargetDefinitions.rds")
+
+conceptSets <- generateConceptSets(
+  conceptSetTargetDefinitions = conceptSetTargetDefinitions,
+  llmClient = llmClient,
+  connectionDetails = cdmConnectionDetails,
+  vocabDatabaseSchema = cdmDatabaseSchema,
+  cacheFolder = "e:/temp/pegasusConceptSetCache")
+
+saveRDS(conceptSets, "e:/temp/PegasusConceptSets.rds")
+

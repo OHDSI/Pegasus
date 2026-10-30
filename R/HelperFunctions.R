@@ -14,6 +14,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+CONCEPT <- "Concept"
+CONCEPT_PLUS_DESCENDANTS <- "Concept + descendants"
+FROM_HUMAN_DEFINITION <- "From human definition"
+FROM_AI_DEFINITION <- "From AI definition"
+
 
 withCache <- function(expression, cacheFolder, fileName) {
   if (!is.null(cacheFolder)) {

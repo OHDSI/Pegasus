@@ -2,8 +2,9 @@
 
 export(createCostTracker)
 export(createDataModel)
-export(createOrReuseConceptSetTargetDefinitions)
 export(generateConceptSetTargets)
+export(generateConceptSets)
+export(generateOrReuseConceptSetTargetDefinitions)
 export(refineDefinition)
 import(DatabaseConnector)
 import(dplyr)
