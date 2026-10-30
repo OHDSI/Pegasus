@@ -26,7 +26,7 @@
 #'
 #'
 #' @param conceptSetTargets A tibble of concept set targets as created by `generateConceptSetTargets()`.
-#' @param phenotypes        A tibble with two columns: `phenotype`, and `clinicalDefinition`.
+#' @param phenotypes        A tibble with two columns: `phenotypeName`, and `clinicalDefinition`.
 #' @param minPhenotypeFraction If a concept set target appears for less than this fraction of the provided phenotypes,
 #'                             it will not get a definition but will later be instantiated as a placeholder (concept +
 #'                             descendants).
@@ -53,7 +53,7 @@ generateOrReuseConceptSetTargetDefinitions <- function(
   errorMessages <- checkmate::makeAssertCollection()
   checkmate::assertDataFrame(conceptSetTargets, min.rows = 1, add = errorMessages)
   checkmate::assertNames(colnames(conceptSetTargets), must.include = c(
-    "phenotype",
+    "phenotypeName",
     "pertains",
     "category",
     "term",
@@ -66,7 +66,7 @@ generateOrReuseConceptSetTargetDefinitions <- function(
   ), add = errorMessages)
   checkmate::assertDataFrame(phenotypes, min.rows = 1, add = errorMessages)
   checkmate::assertNames(colnames(phenotypes), must.include = c(
-    "phenotype",
+    "phenotypeName",
     "clinicalDefinition"
   ), add = errorMessages)
   checkmate::assertNumber(minPhenotypeFraction, lower = 0, upper = 1, add = errorMessages)
@@ -88,7 +88,7 @@ generateOrReuseConceptSetTargetDefinitions <- function(
   }
   dedupedTargets <- conceptSetTargets |>
     filter(match != "None") |>
-    slice_head(n = 1, by = c("phenotype",
+    slice_head(n = 1, by = c("phenotypeName",
                              "pertains",
                              "category",
                              "conceptId",
@@ -129,7 +129,7 @@ generateOrReuseConceptSetTargetDefinitions <- function(
     filter(.data$category != "Hypernym", .data$domainId !="Drug")
   uniqueTargets <- targets |>
     group_by(.data$conceptId, .data$conceptName) |>
-    summarise(nPhenotypes = length(unique(.data$phenotype)), .groups = "drop")
+    summarise(nPhenotypes = length(unique(.data$phenotypeName)), .groups = "drop")
   existingDefinitionData <- downloadExistingDefinitionData(
     connection = connection,
     pegasusDatabaseSchema = pegasusDatabaseSchema,
@@ -140,15 +140,15 @@ generateOrReuseConceptSetTargetDefinitions <- function(
   # Definitions created by humans? For phenotypes overlapping with concept set targets
   definitionsFromPhenotypes <- uniqueTargets |>
     filter(!.data$conceptId %in% existingDefinitionData$definitionsFromPhenotypes$conceptId) |>
-    mutate(nornName = normalizeNames(.data$conceptName)) |>
+    mutate(normName = normalizeNames(.data$conceptName)) |>
     inner_join(phenotypes |>
-                 rename(phenotypeName = "phenotype") |>
-                 mutate(nornName = normalizeNames(.data$phenotypeName)),
-               by = join_by("nornName")) |>
+                 mutate(normName = normalizeNames(.data$phenotypeName)),
+               by = join_by("normName")) |>
     slice_head(n = 1, by = "conceptId") |>
     mutate(conceptSetId = NA_real_,
            conceptSetName = NA_character_) |>
-    select(-"nornName")
+    select(-"normName") |>
+    rename(targetPhenotypeName = "phenotypeName")
   definitionsFromPhenotypes <- definitionsFromPhenotypes |>
     bind_rows(existingDefinitionData$definitionsFromPhenotypes) |>
     slice_head(n = 1, by = "conceptId")
@@ -160,7 +160,7 @@ generateOrReuseConceptSetTargetDefinitions <- function(
 
   # Low frequency targets
   nTotalPhenotypes <- targets |>
-    distinct(.data$phenotype) |>
+    distinct(.data$phenotypeName) |>
     count() |>
     pull()
   lowFrequencyTargets <- uniqueTargets |>
@@ -195,7 +195,7 @@ generateOrReuseConceptSetTargetDefinitions <- function(
     lowFrequencyTargets,
     aiDefinitionTargets
   ) |>
-    select("phenotype",
+    select("phenotypeName",
            "pertains",
            "category",
            "conceptId",
@@ -230,13 +230,13 @@ fetchOrGenerateDefinitions <- function(targets,
     row <- uniqueTargets[i, ]
     phenotypeTargetCategories <- targets |>
       filter(.data$conceptId == row$conceptId) |>
-      distinct(.data$phenotype, .data$conceptId, .data$conceptName, .data$pertains, .data$category) |>
+      distinct(.data$phenotypeName, .data$conceptId, .data$conceptName, .data$pertains, .data$category) |>
       mutate(context = sprintf("%s of %s%s",
                                .data$category,
                                if_else(.data$pertains == "Alternative diagnoses",
                                        "alternative diagnoses of ",
                                        ""),
-                               .data$phenotype))
+                               .data$phenotypeName))
     nContextTarget <- nContextTarget + nrow(phenotypeTargetCategories)
 
     cacheFileName <- paste0(digest::digest(phenotypeTargetCategories), ".rds")
@@ -301,7 +301,7 @@ fetchOrGenerateDefinitionsSingleTarget <- function(phenotypeTargetCategories,
       costTracker = costTracker
     )
     phenotypeTargetCategories <- phenotypeTargetCategories |>
-      anti_join(matchedDefinitions, by = join_by("phenotype", "pertains", "category", "context"))
+      anti_join(matchedDefinitions, by = join_by("phenotypeName", "pertains", "category", "context"))
   } else {
     matchedDefinitions <- NULL
   }
@@ -495,10 +495,10 @@ downloadExistingDefinitionData <- function(connection,
     snakeCaseToCamelCase = TRUE,
     tempEmulationSchema = tempEmulationSchema
   ) |>
-    mutate(nornName = normalizeNames(.data$targetPhenotypeName))
+    mutate(normName = normalizeNames(.data$targetPhenotypeName))
   definitionsFromPhenotypes <- uniqueTargets |>
-    mutate(nornName = normalizeNames(.data$conceptName)) |>
-    inner_join(allPhenotypes, by = join_by("nornName")) |>
+    mutate(normName = normalizeNames(.data$conceptName)) |>
+    inner_join(allPhenotypes, by = join_by("normName")) |>
     slice_head(n = 1, by = "conceptId")
 
   return(list(draftTargetToConceptSet = draftTargetToConceptSet,

@@ -5,7 +5,7 @@
 \title{Generate concept set targets for a phenotype}
 \usage{
 generateConceptSetTargets(
-  phenotype,
+  phenotypeName,
   clinicalDefinition,
   connection = NULL,
   connectionDetails = NULL,
@@ -15,6 +15,8 @@ generateConceptSetTargets(
 )
 }
 \arguments{
+\item{phenotypeName}{Name of the phenotype.}
+
 \item{clinicalDefinition}{A clinical definition of the phenotype, describing \strong{what} the phenotype is. This ideally
 has been created using \code{refineDefinition()}.}
 
@@ -32,8 +34,6 @@ required of \code{connection} is provided.}
 \code{ellmer::chat_ollama()}.}
 
 \item{costTracker}{An object as created using \code{createCostTracker()} that keeps track of LLM costs.}
-
-\item{name}{Name of the phenotype.}
 }
 \value{
 A tibble with concept set targets.

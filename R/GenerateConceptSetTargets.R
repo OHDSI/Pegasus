@@ -198,7 +198,7 @@ mapToConcepts <- function(termsPerCategory,
       inner_join(
         tibble(term = terms,
                lowercaseName = tolower(terms)),
-        by = join_by(lowercaseName)
+        by = join_by("lowercaseName")
       ) |>
       select(-"lowercaseName") |>
 
@@ -238,9 +238,9 @@ mapToConcepts <- function(termsPerCategory,
           candidates = list(
             purrr::pmap(
               list(
-                conceptId = conceptId,
-                conceptName = conceptName,
-                recordCount = recordCount
+                conceptId = .data$conceptId,
+                conceptName = .data$conceptName,
+                recordCount = .data$recordCount
               ),
               list
             )
@@ -298,7 +298,7 @@ mapToConcepts <- function(termsPerCategory,
 
 #' Generate concept set targets for a phenotype
 #'
-#' @template Phenotype
+#' @template PhenotypeName
 #' @template ClinicalDefinition
 #' @template Connection
 #' @template VocabDatabaseSchema
@@ -313,7 +313,7 @@ mapToConcepts <- function(termsPerCategory,
 #' A tibble with concept set targets.
 #'
 #' @export
-generateConceptSetTargets <- function(phenotype,
+generateConceptSetTargets <- function(phenotypeName,
                                       clinicalDefinition,
                                       connection = NULL,
                                       connectionDetails = NULL,
@@ -321,7 +321,7 @@ generateConceptSetTargets <- function(phenotype,
                                       llmClient,
                                       costTracker = createCostTracker()) {
   errorMessages <- checkmate::makeAssertCollection()
-  checkmate::assertCharacter(phenotype, len = 1, add = errorMessages)
+  checkmate::assertCharacter(phenotypeName, len = 1, add = errorMessages)
   checkmate::assertCharacter(clinicalDefinition, len = 1, null.ok = TRUE, add = errorMessages)
   checkmate::assertClass(connection, "DatabaseConnectorConnection", null.ok = TRUE, add = errorMessages)
   checkmate::assertClass(connectionDetails, "ConnectionDetails", null.ok = TRUE, add = errorMessages)
@@ -332,7 +332,7 @@ generateConceptSetTargets <- function(phenotype,
   if (is.null(connectionDetails) && is.null(connection)) {
     stop("Must provide either connectionDetails or a connection.")
   }
-  message("Creating targets for ", phenotype)
+  message("Creating targets for ", phenotypeName)
 
   if (is.null(connection)) {
     connection <- DatabaseConnector::connect(connectionDetails)
@@ -343,7 +343,7 @@ generateConceptSetTargets <- function(phenotype,
   promptFile <- system.file("prompts", "CreateConceptSetTargetsPrompt.txt", package = "Pegasus")
   systemPrompt <- paste(readLines(promptFile), collapse = "\n")
   prompt <- sprintf("Phenotype: %s\nClinical definition: %s\n",
-                    phenotype,
+                    phenotypeName,
                     clinicalDefinition)
   termsPerCategory <- queryLlm(
     prompt = prompt,
@@ -361,7 +361,7 @@ generateConceptSetTargets <- function(phenotype,
 
   alternativeDiagnoses <- termsPerCategory$concepts |>
     filter(.data$category == "Alternative diagnosis") |>
-    pull(terms) |>
+    pull(.data$terms) |>
     unlist()
 
   # Generate targets for the alternative diagnoses
@@ -384,13 +384,13 @@ generateConceptSetTargets <- function(phenotype,
   # Combine and return
   result <- bind_rows(
     targets |>
-      mutate(phenotype = !!phenotype,
+      mutate(phenotypeName = !!phenotypeName,
              pertains = "Disease of interest"),
     targetsAd |>
-      mutate(phenotype = !!phenotype,
+      mutate(phenotypeName = !!phenotypeName,
              pertains = "Alternative diagnoses")
   ) |>
-    relocate("phenotype", "pertains")
+    relocate("phenotypeName", "pertains")
 
   return(result)
 }

@@ -45,7 +45,7 @@ generateConceptSets  <- function(
   errorMessages <- checkmate::makeAssertCollection()
   checkmate::assertDataFrame(conceptSetTargetDefinitions, min.rows = 1, add = errorMessages)
   checkmate::assertNames(colnames(conceptSetTargetDefinitions), must.include = c(
-    "phenotype",
+    "phenotypeName",
     "pertains",
     "category",
     "conceptId",
@@ -75,11 +75,13 @@ generateConceptSets  <- function(
     connection <- DatabaseConnector::connect(connectionDetails)
     on.exit(DatabaseConnector::disconnect(connection))
   }
+  hasConceptSet <- conceptSetTargetDefinitions |>
+    filter(!is.na(.data$conceptSetId))
   needConceptSet <- conceptSetTargetDefinitions |>
     filter(is.na(.data$conceptSetId))
   message(sprintf("Of the %d concept set targets, %d already have an existing concept set.",
                   nrow(conceptSetTargetDefinitions),
-                  nrow(conceptSetTargetDefinitions) - nrow(needConceptSet)))
+                  nrow(hasConceptSet)))
   needConceptOnly <- needConceptSet |>
     filter(.data$sourceType == CONCEPT)
   needConceptPlusDescendants <- needConceptSet |>
@@ -122,7 +124,7 @@ generateConceptSets  <- function(
     rows <- ParallelLogger::clusterApply(
       cluster = cluster,
       x = rows,
-      fun = Pegasus:::createFullConceptSet,
+      fun = createFullConceptSet,
       llmClient = llmClient,
       connectionDetails = connectionDetails,
       cdmDatabaseSchema = vocabDatabaseSchema,
@@ -135,7 +137,8 @@ generateConceptSets  <- function(
   conceptSets <- bind_rows(
     conceptOnlyConceptSets,
     conceptPlusDescendantsConceptSets,
-    fullConceptSets
+    fullConceptSets,
+    hasConceptSet
   )
   delta <- Sys.time() - startTime
   message(sprintf("Generating concept sets took %0.2f %s and cost $%0.2f.",
@@ -251,7 +254,7 @@ createFullConceptSet <- function(row, llmClient, connectionDetails, cdmDatabaseS
   row <- row |>
     mutate(circeConceptSetExpression = conceptSetExpression,
            caprConceptSetExpression = caprConceptSetExpression,
-           hasDescendants = TRUE,
+           hasDescendants = 1,
            cost = cost)
   return(row)
 }

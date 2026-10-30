@@ -26,12 +26,12 @@ CREATE TABLE @database_schema.draft_concept_set_target (
   pertains VARCHAR NOT NULL, -- 'doi' or 'alternative diagnoses'
   category VARCHAR NOT NULL, -- 'doi', 'symptom', 'diagnostic procedure', etc.
   term VARCHAR NOT NULL,
-  concept_id INT NOT NULL,
-  concept_name VARCHAR NOT NULL,
-  domain_id VARCHAR NOT NULL,
-  concept_class_id VARCHAR NOT NULL,
-  vocabulary_id VARCHAR NOT NULL,
-  match_type VARCHAR NOT NULL -- verbatim or vector
+  concept_id INT,
+  concept_name VARCHAR,
+  domain_id VARCHAR,
+  concept_class_id VARCHAR,
+  vocabulary_id VARCHAR,
+  match_type VARCHAR NOT NULL -- 'Verbatim', `Vector`, or `None`
 );
 
 -- May still change

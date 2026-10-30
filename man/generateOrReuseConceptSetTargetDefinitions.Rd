@@ -19,7 +19,7 @@ generateOrReuseConceptSetTargetDefinitions(
 \arguments{
 \item{conceptSetTargets}{A tibble of concept set targets as created by \code{generateConceptSetTargets()}.}
 
-\item{phenotypes}{A tibble with two columns: \code{phenotype}, and \code{clinicalDefinition}.}
+\item{phenotypes}{A tibble with two columns: \code{phenotypeName}, and \code{clinicalDefinition}.}
 
 \item{minPhenotypeFraction}{If a concept set target appears for less than this fraction of the provided phenotypes,
 it will not get a definition but will later be instantiated as a placeholder (concept +

@@ -22,9 +22,6 @@ Depends:
 	R (>= 4.1.0),
 	DatabaseConnector (>= 7.0.0)
 Imports:
-	methods,
-	utils,
-	ggplot2,
 	readr,
 	dplyr,
 	rlang,
@@ -32,7 +29,14 @@ Imports:
 	SnowballC,
 	digest,
 	Phenelope (>= 0.2.0),
-	Capr
+	Capr,
+	CirceR,
+	ParallelLogger, 
+	SqlRender, 
+	ellmer, 
+	httr, 
+	jsonlite,
+  purrr
 Suggests:
 	testthat,
 	duckdb,
