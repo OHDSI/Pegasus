@@ -102,7 +102,8 @@ performanceUi <- function(id) {
   )
 }
 
-performanceServer <- function(id, evaluations, shortlist, onOpenPhenotype, onCompare = function(phenotypeIds) NULL) {
+performanceServer <- function(id, evaluations, shortlist, onOpenPhenotype, onCompare = function(phenotypeIds) NULL,
+                              onOpenCohortDefinition = function(cohortDefinitionId) NULL) {
   moduleServer(id, function(input, output, session) {
     scatterSource <- "performanceScatter"
 
@@ -178,7 +179,7 @@ performanceServer <- function(id, evaluations, shortlist, onOpenPhenotype, onCom
 
     observeEvent(plotly::event_data("plotly_selected", source = scatterSource), {
       selected <- plotly::event_data("plotly_selected", source = scatterSource)
-      ids <- if (is.null(selected) || NROW(selected) == 0) integer(0) else suppressWarnings(as.integer(selected$customdata))
+      ids <- if (is.null(selected) || NROW(selected) == 0) integer(0) else parsePointKey(selected$customdata)$phenotypeId
       selectedPhenotypeIds(unique(ids[!is.na(ids)]))
     }, ignoreNULL = FALSE)
 
@@ -213,9 +214,11 @@ performanceServer <- function(id, evaluations, shortlist, onOpenPhenotype, onCom
 
     observeEvent(plotly::event_data("plotly_click", source = scatterSource), {
       clicked <- plotly::event_data("plotly_click", source = scatterSource)
-      phenotypeId <- suppressWarnings(as.integer(clicked$customdata[1]))
-      if (length(phenotypeId) == 1 && !is.na(phenotypeId)) {
-        onOpenPhenotype(phenotypeId)
+      key <- parsePointKey(clicked$customdata[1])
+      if (length(key$cohortDefinitionId) == 1 && !is.na(key$cohortDefinitionId)) {
+        onOpenCohortDefinition(key$cohortDefinitionId)
+      } else if (length(key$phenotypeId) == 1 && !is.na(key$phenotypeId)) {
+        onOpenPhenotype(key$phenotypeId)
       }
     })
 

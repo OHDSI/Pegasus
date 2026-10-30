@@ -152,3 +152,10 @@ test_that("data colors come from the OHDSI plot palette", {
   expect_true(all(c(seriesColors, otherColor) %in% palette))
   expect_equal(anyDuplicated(c(seriesColors, otherColor)), 0)
 })
+
+test_that("scatter points carry phenotype and cohort definition ids", {
+  keys <- parsePointKey(pointKey(c(3L, 4L), c(31L, NA)))
+  expect_equal(keys$phenotypeId, c(3L, 4L))
+  expect_equal(keys$cohortDefinitionId, c(31L, NA))
+  expect_equal(parsePointKey("7")$phenotypeId, 7L)
+})

@@ -145,7 +145,8 @@ shortlistUi <- function(id) {
 }
 
 shortlistServer <- function(id, connectionPool, databaseSchema, phenotypes, evaluations, shortlist, onOpenPhenotype,
-                            onCompare = function(phenotypeIds) NULL) {
+                            onCompare = function(phenotypeIds) NULL,
+                            onOpenCohortDefinition = function(cohortDefinitionId) NULL) {
   moduleServer(id, function(input, output, session) {
     scatterSource <- "shortlistScatter"
 
@@ -232,9 +233,11 @@ shortlistServer <- function(id, connectionPool, databaseSchema, phenotypes, eval
 
     observeEvent(plotly::event_data("plotly_click", source = scatterSource), {
       clicked <- plotly::event_data("plotly_click", source = scatterSource)
-      phenotypeId <- suppressWarnings(as.integer(clicked$customdata[1]))
-      if (length(phenotypeId) == 1 && !is.na(phenotypeId)) {
-        onOpenPhenotype(phenotypeId)
+      key <- parsePointKey(clicked$customdata[1])
+      if (length(key$cohortDefinitionId) == 1 && !is.na(key$cohortDefinitionId)) {
+        onOpenCohortDefinition(key$cohortDefinitionId)
+      } else if (length(key$phenotypeId) == 1 && !is.na(key$phenotypeId)) {
+        onOpenPhenotype(key$phenotypeId)
       }
     })
 

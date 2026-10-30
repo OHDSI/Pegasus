@@ -140,7 +140,8 @@ function(input, output, session) {
     vocabularyRunner = vocabularyRunner
   )
   performanceServer("performance", evaluations, shortlist = shortlist, onOpenPhenotype = openPhenotype,
-                    onCompare = comparePhenotypes)
+                    onCompare = comparePhenotypes,
+                    onOpenCohortDefinition = function(cohortDefinitionId) navigate("cohort_definition", cohortDefinitionId))
   compareServer(
     "compare",
     connectionPool = connectionPool,
@@ -176,7 +177,8 @@ function(input, output, session) {
     evaluations = evaluations,
     shortlist = shortlist,
     onOpenPhenotype = openPhenotype,
-    onCompare = comparePhenotypes
+    onCompare = comparePhenotypes,
+    onOpenCohortDefinition = function(cohortDefinitionId) navigate("cohort_definition", cohortDefinitionId)
   )
   createServer(
     "create",

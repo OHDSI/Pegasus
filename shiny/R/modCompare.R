@@ -204,7 +204,7 @@ compareServer <- function(id, connectionPool, databaseSchema, phenotypes, evalua
         bslib::card(
           fill = FALSE,
           bslib::card_header("Performance"),
-          DT::DTOutput(session$ns("metrics")),
+          DT::DTOutput(session$ns("metrics"), height = "auto", fill = FALSE),
           tags$p(
             class = "small text-muted mb-0",
             "A phenotype with several cohort definitions has a row with their median above the individual rows.",
@@ -240,7 +240,7 @@ compareServer <- function(id, connectionPool, databaseSchema, phenotypes, evalua
         bslib::card(
           fill = FALSE,
           bslib::card_header("Concept sets"),
-          DT::DTOutput(session$ns("conceptSets"))
+          DT::DTOutput(session$ns("conceptSets"), height = "auto", fill = FALSE)
         )
       )
     })
@@ -314,6 +314,7 @@ compareServer <- function(id, connectionPool, databaseSchema, phenotypes, evalua
         escape = FALSE,
         rownames = FALSE,
         selection = "none",
+        fillContainer = FALSE,
         options = list(dom = "t", paging = FALSE)
       )
     })
@@ -336,6 +337,7 @@ compareServer <- function(id, connectionPool, databaseSchema, phenotypes, evalua
         escape = FALSE,
         rownames = FALSE,
         selection = "none",
+        fillContainer = FALSE,
         options = list(pageLength = 25, language = list(emptyTable = "No concept set differences."))
       )
     })

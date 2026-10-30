@@ -113,6 +113,20 @@ axisStyle <- function(title) {
   )
 }
 
+# Each point carries its phenotype and cohort definition as "phenotypeId:cohortDefinitionId".
+pointKey <- function(phenotypeId, cohortDefinitionId) {
+  paste0(phenotypeId, ":", cohortDefinitionId)
+}
+
+# The ids behind plotly customdata made by pointKey, as integer vectors (NA where missing).
+parsePointKey <- function(keys) {
+  keys <- as.character(keys)
+  list(
+    phenotypeId = suppressWarnings(as.integer(sub(":.*$", "", keys))),
+    cohortDefinitionId = suppressWarnings(as.integer(sub("^[^:]*:?", "", keys)))
+  )
+}
+
 # PPV (y) against sensitivity (x), one point per cohort/database/evaluation.
 buildScatter <- function(data,
                          colorBy = "source",
@@ -154,7 +168,7 @@ buildScatter <- function(data,
       type = "scattergl",
       mode = "markers",
       name = label,
-      customdata = rows$phenotypeId,
+      customdata = pointKey(rows$phenotypeId, rows$cohortDefinitionId),
       text = rows$hover,
       hoverinfo = "text",
       marker = list(color = color, symbol = symbol, size = 9, opacity = 0.85, line = list(color = surfaceColor, width = 2))
