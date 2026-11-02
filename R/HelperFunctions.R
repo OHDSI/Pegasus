@@ -74,7 +74,6 @@ queryLlm <- function(prompt,
       }
       if (!is.null(costTracker)) {
         costTracker$amount <- costTracker$amount + llmClient$get_cost()
-        costTracker$llmCalls <- costTracker$llmCalls + 1
       }
       return(response)
     },
@@ -154,7 +153,6 @@ vectorSearch <- function(term, domains, conceptClasses = NULL, limit = 10, maxRe
 createCostTracker <- function() {
   costTracker <- new.env()
   costTracker$amount <- 0
-  costTracker$llmCalls <- 0
   class(costTracker) <- c("CostTracker", class(costTracker))
   return(costTracker)
 }
@@ -166,5 +164,55 @@ normalizeName <- function(name) {
 }
 
 normalizeNames <- function(names) {
-  return(sapply(names, normalizeName))
+  if (length(names) == 0) {
+    return(as.character(c()))
+  } else {
+    return(sapply(names, normalizeName))
+  }
 }
+
+#' Create a database reference
+#'
+#' @description
+#' A database reference points to a database holding patient-level data in the CDM, as well as various cohort tables
+#' for that database.
+#'
+#' @param databaseName                  A human-readable name for the database.
+#' @param connectionDetails             An R object of type `connectionDetails` created using the
+#'                                      [DatabaseConnector::createConnectionDetails()] function for connecting to the
+#'                                      database server.
+#' @template TempEmulationSchema
+#' @param cdmDatabaseSchema             The database schema containing the patient-level data in the CDM.
+#' @param sensitiveCohortDatabaseSchema A database schema where the sensitive cohort can be instantiated.
+#' @param sensitiveCohortTable          A table in the sensitive cohort database schema where hte sensitive cohort can
+#'                                      be instantiated.
+#' @param referenceCohortDatabaseSchema The name of the database schema where the reference cohorts will be stored.
+#' @param referenceCohortTable          The name of the table where the reference cohorts will be stored.
+#' @param candidateCohortDatabaseSchema The name of the database schema where the candidate cohorts will be
+#'                                      instantiated.
+#' @param candidateCohortTable          The name of the tabe where the candidate cohorts will be instantiated.
+#'
+#' @returns
+#' An object of type `DatabaseReference`, to be used in various functions.
+#'
+#' @export
+createDatabaseReference <- function(databaseName,
+                                    connectionDetails,
+                                    tempEmulationSchema = getOption("sqlRenderTempEmulationSchema"),
+                                    cdmDatabaseSchema,
+                                    sensitiveCohortDatabaseSchema,
+                                    sensitiveCohortTable,
+                                    referenceCohortDatabaseSchema,
+                                    referenceCohortTable,
+                                    candidateCohortDatabaseSchema,
+                                    candidateCohortTable) {
+
+  databaseReference <- list()
+  for (name in names(formals(createDatabaseReference))) {
+    databaseReference[[name]] <- get(name)
+  }
+  class(databaseReference) <- "DatabaseReference"
+  return(databaseReference)
+}
+
+

@@ -8,10 +8,7 @@ generateConceptSets(
   conceptSetTargetDefinitions,
   llmClient,
   costTracker = createCostTracker(),
-  connection = NULL,
-  connectionDetails = NULL,
-  vocabDatabaseSchema,
-  tempEmulationSchema = getOption("sqlRenderTempEmulationSchema"),
+  databaseReference = databaseReference,
   maxCores = 4,
   cacheFolder = NULL
 )
@@ -24,19 +21,8 @@ generateConceptSets(
 
 \item{costTracker}{An object as created using \code{createCostTracker()} that keeps track of LLM costs.}
 
-\item{connection}{The connection to the database server created using
-\code{\link[DatabaseConnector:connect]{DatabaseConnector::connect()}}. Not required if \code{connectionDetails}
-is provided.}
-
-\item{connectionDetails}{An R object of type \code{connectionDetails} created using the
-\code{\link[DatabaseConnector:createConnectionDetails]{DatabaseConnector::createConnectionDetails()}} function. Not
-required of \code{connection} is provided.}
-
-\item{vocabDatabaseSchema}{Name of the database schema containing the OHDSI Vocabulary tables.}
-
-\item{tempEmulationSchema}{Some database platforms like Oracle and Impala do not truly support temp tables. To
-emulate temp tables, provide a schema with write privileges where temp tables
-can be created.}
+\item{databaseReference}{An object of type \code{DatabaseReference} as created by the \code{createDatabaseReference()}
+function.}
 
 \item{maxCores}{Maximum number of parallel cores to use.}
 

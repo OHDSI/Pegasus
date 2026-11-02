@@ -14,16 +14,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-#' Title
+#' Create Keeper reference cohorts
 #'
 #' @template Phenotypes
 #' @template LlmClient
-#' @template CdmConnectionDetails
-#' @param sensitiveCohortDatabaseSchema A database schema where the sensitive cohort can be instantiated.
-#' @param sensitiveCohortTable A table in the sensitive cohort database schema where hte sensitive cohort can be
-#'                             instantiated.
-#' @param referenceCohortDatabaseSchema The name of the database schema where the reference cohort will be stored.
-#' @param referenceCohortTable The name of the table where the reference cohort will be stored.
+#' @template CostTracker
+#' @template DatabaseReference
 #' @param maxCores Maximum number of parallel cores to use.
 #' @param cacheFolder A folder where data objects can be cached so a restart can continue where it left off.
 #'
@@ -33,36 +29,42 @@
 #' @export
 createKeeperReferenceCohorts <- function(phenotypes,
                                          llmClient,
-                                         cdmConnectionDetails,
-                                         tempEmulationSchema = getOption("sqlRenderTempEmulationSchema"),
-                                         cdmDatabaseSchema,
-                                         sensitiveCohortDatabaseSchema,
-                                         sensitiveCohortTable,
-                                         referenceCohortDatabaseSchema,
-                                         referenceCohortTable,
+                                         costTracker = createCostTracker(),
+                                         databaseReference,
                                          maxCores = 4,
                                          cacheFolder) {
+  errorMessages <- checkmate::makeAssertCollection()
+  checkmate::assertNames(colnames(phenotypes), must.include = c(
+    "phenotypeName",
+    "clinicalDefinition"
+  ), add = errorMessages)
+  checkmate::assertR6(llmClient, "Chat", add = errorMessages)
+  checkmate::assertClass(costTracker, "CostTracker", add = errorMessages)
+  checkmate::assertClass(databaseReference, "DatabaseReference", add = errorMessages)
+  checkmate::assertInt(maxCores, lower = 1, add = errorMessages)
+  checkmate::assertCharacter(cacheFolder, len = 1, null.ok = TRUE, add = errorMessages)
+  checkmate::reportAssertions(collection = errorMessages)
 
-  connection <- DatabaseConnector::connect(cdmConnectionDetails)
+  connection <- DatabaseConnector::connect(databaseReference$connectionDetails)
   on.exit(DatabaseConnector::disconnect(connection))
 
-  referenceCohortTableNames <- Keeper::createReferenceCohortTableNamesUsingStratifiedSample(referenceCohortTable)
+  referenceCohortTableNames <- Keeper::createReferenceCohortTableNamesUsingStratifiedSample(databaseReference$referenceCohortTable)
   tableExists <- DatabaseConnector::existsTable(
     connection = connection,
-    databaseSchema = referenceCohortDatabaseSchema,
+    databaseSchema = databaseReference$referenceCohortDatabaseSchema,
     tableName = referenceCohortTableNames$referenceCohortMetadataTable
   )
   if (tableExists) {
     existingCohorts <- Keeper::listReferenceCohorts(
       connection = connection,
-      referenceCohortDatabaseSchema = referenceCohortDatabaseSchema,
+      referenceCohortDatabaseSchema = databaseReference$referenceCohortDatabaseSchema,
       referenceCohortMetadataTable = referenceCohortTableNames$referenceCohortMetadataTable
     )
     lastCohortId <- max(existingCohorts$cohortDefinitionId)
   } else {
     Keeper::createReferenceCohortTablesUsingStratifiedSample(
       connection = connection,
-      referenceCohortDatabaseSchema = referenceCohortDatabaseSchema,
+      referenceCohortDatabaseSchema = databaseReference$referenceCohortDatabaseSchema,
       referenceCohortTableNames = referenceCohortTableNames
     )
     existingCohorts <- tibble()
@@ -76,20 +78,18 @@ createKeeperReferenceCohorts <- function(phenotypes,
   cluster <- ParallelLogger::makeCluster(maxCores)
   ParallelLogger::clusterRequire(cluster, "dplyr")
   rows <- split(phenotypes, phenotypes$cohortId)
-  dummy <- ParallelLogger::clusterApply(
+  cost <- ParallelLogger::clusterApply(
     cluster = cluster,
     x = rows,
     fun = createKeeperReferenceCohort,
     llmClient = llmClient,
-    cdmConnectionDetails = cdmConnectionDetails,
-    cdmDatabaseSchema = cdmDatabaseSchema,
-    sensitiveCohortDatabaseSchema = sensitiveCohortDatabaseSchema,
-    sensitiveCohortTable = sensitiveCohortTable,
-    tempEmulationSchema = tempEmulationSchema,
+    databaseReference = databaseReference,
     cacheFolder = cacheFolder
   )
   ParallelLogger::stopCluster(cluster)
   ParallelLogger::unregisterLogger("KEEPER_LOGGER")
+
+  costTracker@amount <- costTracker@amount  + sum(unlist(cost))
 
   message("Uploading Keeper reference profiles")
   status <- phenotypes |>
@@ -100,7 +100,7 @@ createKeeperReferenceCohorts <- function(phenotypes,
     row <- phenotypes[i, ]
     message("- Uploading reference cohort for '", row$phenotypeName,"'.")
     referenceCohortId <-lastCohortId + 1
-    databaseForFileName <- gsub("[^[:alnum:]]+", "", SqlRender::snakeCaseToCamelCase(cdmDatabaseSchema))
+    databaseForFileName <- gsub("[^[:alnum:]]+", "", databaseReference$databaseName)
     phenotypeFolder <- file.path(cacheFolder, gsub("[^[:alnum:]]+", "_", row$phenotypeName))
 
     fileName <- file.path(phenotypeFolder, sprintf("llmReviews_%s.rds", databaseForFileName))
@@ -124,10 +124,10 @@ createKeeperReferenceCohorts <- function(phenotypes,
       } else {
         Keeper::uploadReferenceCohortUsingStratifiedSample(
           connection = connection,
-          sensitiveCohortDatabaseSchema = sensitiveCohortDatabaseSchema,
-          sensitiveCohortTable = sensitiveCohortTable,
+          sensitiveCohortDatabaseSchema = databaseReference$sensitiveCohortDatabaseSchema,
+          sensitiveCohortTable = databaseReference$sensitiveCohortTable,
           sensitiveCohortDefinitionId = row$cohortId,
-          referenceCohortDatabaseSchema = referenceCohortDatabaseSchema,
+          referenceCohortDatabaseSchema = databaseReference$referenceCohortDatabaseSchema,
           referenceCohortTableNames = referenceCohortTableNames,
           referenceCohortDefinitionId = row$cohortId,
           createReferenceCohortTables = FALSE,
@@ -143,19 +143,15 @@ createKeeperReferenceCohorts <- function(phenotypes,
 # row = rows[[1]]
 createKeeperReferenceCohort <- function(row,
                                         llmClient,
-                                        cdmConnectionDetails,
-                                        cdmDatabaseSchema,
-                                        sensitiveCohortDatabaseSchema,
-                                        sensitiveCohortTable,
-                                        tempEmulationSchema,
+                                        databaseReference,
                                         cacheFolder,
                                         stratifiedSampling = TRUE) {
 
   message(sprintf("*** Creating Keeper reference set for '%s' in %s ***",
                   row$phenotypeName,
-                  cdmDatabaseSchema))
+                  databaseReference$databaseName))
 
-  databaseForFileName <- gsub("[^[:alnum:]]+", "", SqlRender::snakeCaseToCamelCase(cdmDatabaseSchema))
+  databaseForFileName <- gsub("[^[:alnum:]]+", "", databaseReference$databaseName)
   phenotypeFolder <- file.path(cacheFolder, gsub("[^[:alnum:]]+", "_", row$phenotypeName))
   dir.create(phenotypeFolder)
 
@@ -165,8 +161,8 @@ createKeeperReferenceCohort <- function(row,
       phenotype = row$phenotypeName,
       clinicalDefinition = row$clinicalDefinition,
       client = llmClient,
-      vocabConnectionDetails = cdmConnectionDetails,
-      vocabDatabaseSchema = cdmDatabaseSchema
+      vocabConnectionDetails = databaseReference$connectionDetails,
+      vocabDatabaseSchema = databaseReference$cdmDatabaseSchema
     )
   },
   cacheFolder = phenotypeFolder,
@@ -177,11 +173,11 @@ createKeeperReferenceCohort <- function(row,
   specificConcepts <- withCache({
     tryCatch({
       Keeper::createSensitiveCohort(
-        connectionDetails = cdmConnectionDetails,
-        cdmDatabaseSchema = cdmDatabaseSchema,
-        tempEmulationSchema = tempEmulationSchema,
-        cohortDatabaseSchema = sensitiveCohortDatabaseSchema,
-        cohortTable = sensitiveCohortTable,
+        connectionDetails = databaseReference$connectionDetails,
+        cdmDatabaseSchema = databaseReference$cdmDatabaseSchema,
+        tempEmulationSchema = databaseReference$tempEmulationSchema,
+        cohortDatabaseSchema = databaseReference$sensitiveCohortDatabaseSchema,
+        cohortTable = databaseReference$sensitiveCohortTable,
         cohortDefinitionId = row$cohortId,
         createCohortTable = FALSE,
         keeperConceptSets = conceptSets
@@ -203,11 +199,11 @@ createKeeperReferenceCohort <- function(row,
   llmReviews <- withCache({
     tryCatch({
       Keeper::reviewCasesUsingStratifiedSampling(
-        connectionDetails = cdmConnectionDetails,
-        cdmDatabaseSchema = cdmDatabaseSchema,
-        tempEmulationSchema = tempEmulationSchema,
-        sensitiveCohortDatabaseSchema = sensitiveCohortDatabaseSchema,
-        sensitiveCohortTable = sensitiveCohortTable,
+        connectionDetails = databaseReference$connectionDetails,
+        cdmDatabaseSchema = databaseReference$cdmDatabaseSchema,
+        tempEmulationSchema = databaseReference$tempEmulationSchema,
+        sensitiveCohortDatabaseSchema = databaseReference$sensitiveCohortDatabaseSchema,
+        sensitiveCohortTable = databaseReference$sensitiveCohortTable,
         sensitiveCohortDefinitionId = row$cohortId,
         keeperConceptSets = conceptSets,
         client = llmClient,
@@ -224,5 +220,9 @@ createKeeperReferenceCohort <- function(row,
   cacheFolder = phenotypeFolder,
   fileName = sprintf("llmReviews_%s.rds", databaseForFileName)
   )
-  return(NULL)
+  if (!is.character(llmReviews)) {
+    return(llmReviews$cost)
+  } else {
+    return(0)
+  }
 }

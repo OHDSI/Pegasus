@@ -7,9 +7,7 @@
 generateConceptSetTargets(
   phenotypeName,
   clinicalDefinition,
-  connection = NULL,
-  connectionDetails = NULL,
-  vocabDatabaseSchema,
+  databaseReference = databaseReference,
   llmClient,
   costTracker = createCostTracker()
 )
@@ -20,15 +18,8 @@ generateConceptSetTargets(
 \item{clinicalDefinition}{A clinical definition of the phenotype, describing \strong{what} the phenotype is. This ideally
 has been created using \code{refineDefinition()}.}
 
-\item{connection}{The connection to the database server created using
-\code{\link[DatabaseConnector:connect]{DatabaseConnector::connect()}}. Not required if \code{connectionDetails}
-is provided.}
-
-\item{connectionDetails}{An R object of type \code{connectionDetails} created using the
-\code{\link[DatabaseConnector:createConnectionDetails]{DatabaseConnector::createConnectionDetails()}} function. Not
-required of \code{connection} is provided.}
-
-\item{vocabDatabaseSchema}{Name of the database schema containing the OHDSI Vocabulary tables.}
+\item{databaseReference}{An object of type \code{DatabaseReference} as created by the \code{createDatabaseReference()}
+function.}
 
 \item{llmClient}{An \code{ellmer} chat object to connect to a large language model, as created for example using
 \code{ellmer::chat_ollama()}.}

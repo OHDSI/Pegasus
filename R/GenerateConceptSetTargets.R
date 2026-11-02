@@ -300,8 +300,7 @@ mapToConcepts <- function(termsPerCategory,
 #'
 #' @template PhenotypeName
 #' @template ClinicalDefinition
-#' @template Connection
-#' @template VocabDatabaseSchema
+#' @template DatabaseReference
 #' @template LlmClient
 #' @template CostTracker
 #'
@@ -315,29 +314,21 @@ mapToConcepts <- function(termsPerCategory,
 #' @export
 generateConceptSetTargets <- function(phenotypeName,
                                       clinicalDefinition,
-                                      connection = NULL,
-                                      connectionDetails = NULL,
-                                      vocabDatabaseSchema,
+                                      databaseReference = databaseReference,
                                       llmClient,
                                       costTracker = createCostTracker()) {
   errorMessages <- checkmate::makeAssertCollection()
   checkmate::assertCharacter(phenotypeName, len = 1, add = errorMessages)
   checkmate::assertCharacter(clinicalDefinition, len = 1, null.ok = TRUE, add = errorMessages)
-  checkmate::assertClass(connection, "DatabaseConnectorConnection", null.ok = TRUE, add = errorMessages)
-  checkmate::assertClass(connectionDetails, "ConnectionDetails", null.ok = TRUE, add = errorMessages)
-  checkmate::assertCharacter(vocabDatabaseSchema, len = 1, add = errorMessages)
+  checkmate::assertClass(databaseReference, "DatabaseReference", null.ok = TRUE, add = errorMessages)
   checkmate::assertR6(llmClient, "Chat", add = errorMessages)
   checkmate::assertClass(costTracker, "CostTracker", add = errorMessages)
   checkmate::reportAssertions(collection = errorMessages)
-  if (is.null(connectionDetails) && is.null(connection)) {
-    stop("Must provide either connectionDetails or a connection.")
-  }
+
   message("Creating targets for ", phenotypeName)
 
-  if (is.null(connection)) {
-    connection <- DatabaseConnector::connect(connectionDetails)
-    on.exit(DatabaseConnector::disconnect(connection))
-  }
+  connection <- DatabaseConnector::connect(databaseReference$connectionDetails)
+  on.exit(DatabaseConnector::disconnect(connection))
 
   # Generate targets for the phenotype itself
   promptFile <- system.file("prompts", "CreateConceptSetTargetsPrompt.txt", package = "Pegasus")
@@ -355,7 +346,7 @@ generateConceptSetTargets <- function(phenotypeName,
   targets <- mapToConcepts(
     termsPerCategory = termsPerCategory,
     connection = connection,
-    vocabDatabaseSchema = vocabDatabaseSchema,
+    vocabDatabaseSchema = databaseReference$cdmDatabaseSchema,
     llmClient = llmClient,
     costTracker = costTracker)
 
@@ -377,7 +368,7 @@ generateConceptSetTargets <- function(phenotypeName,
   targetsAd <- mapToConcepts(
     termsPerCategory = termsPerCategoryAd,
     connection = connection,
-    vocabDatabaseSchema = vocabDatabaseSchema,
+    vocabDatabaseSchema = databaseReference$cdmDatabaseSchema,
     llmClient = llmClient,
     costTracker = costTracker)
 

@@ -2,17 +2,13 @@
 % Please edit documentation in R/CreateKeeperReferenceCohorts.R
 \name{createKeeperReferenceCohorts}
 \alias{createKeeperReferenceCohorts}
-\title{Title}
+\title{Create Keeper reference cohorts}
 \usage{
 createKeeperReferenceCohorts(
   phenotypes,
   llmClient,
-  cdmConnectionDetails,
-  cdmDatabaseSchema,
-  sensitiveCohortDatabaseSchema,
-  sensitiveCohortTable,
-  referenceCohortDatabaseSchema,
-  referenceCohortTable,
+  costTracker = createCostTracker(),
+  databaseReference,
   maxCores = 4,
   cacheFolder
 )
@@ -23,20 +19,10 @@ createKeeperReferenceCohorts(
 \item{llmClient}{An \code{ellmer} chat object to connect to a large language model, as created for example using
 \code{ellmer::chat_ollama()}.}
 
-\item{cdmConnectionDetails}{An R object of type \code{connectionDetails} created using the
-\code{\link[DatabaseConnector:createConnectionDetails]{DatabaseConnector::createConnectionDetails()}} function for connecting to the database
-holding the patient-level data in the CDM.}
+\item{costTracker}{An object as created using \code{createCostTracker()} that keeps track of LLM costs.}
 
-\item{cdmDatabaseSchema}{The database schema containing the patient-level data in the CDM.}
-
-\item{sensitiveCohortDatabaseSchema}{A database schema where the sensitive cohort can be instantiated.}
-
-\item{sensitiveCohortTable}{A table in the sensitive cohort database schema where hte sensitive cohort can be
-instantiated.}
-
-\item{referenceCohortDatabaseSchema}{The name of the database schema where the reference cohort will be stored.}
-
-\item{referenceCohortTable}{The name of the table where the reference cohort will be stored.}
+\item{databaseReference}{An object of type \code{DatabaseReference} as created by the \code{createDatabaseReference()}
+function.}
 
 \item{maxCores}{Maximum number of parallel cores to use.}
 
@@ -46,5 +32,5 @@ instantiated.}
 A tibble with a row per phenotype, indicating the reference cohort Id, size, and possibly error messages.
 }
 \description{
-Title
+Create Keeper reference cohorts
 }

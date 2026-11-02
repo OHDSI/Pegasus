@@ -371,7 +371,7 @@ generateNewDefinitions <- function(phenotypeTargetCategories,
   # templateFile <- file.path("inst", "prompts", "CreateConceptSetTargetDefinitionsPrompt.txt")
   templateFile <- system.file("prompts", "CreateConceptSetTargetDefinitionsPrompt.txt", package = "Pegasus")
   promptTemplate <- paste(readLines(templateFile), collapse = "\n")
-  prompt <- gsub("%term%", row$conceptName, promptTemplate)
+  prompt <- gsub("%term%", phenotypeTargetCategories$conceptName, promptTemplate)
   prompt <- gsub("%contexts%", paste(sprintf("- %s", phenotypeTargetCategories$context), collapse = "\n"), prompt)
   # writeLines(prompt)
   outputType <- ellmer::type_array(

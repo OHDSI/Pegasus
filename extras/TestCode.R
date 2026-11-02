@@ -14,18 +14,25 @@ pegasusConnectionDetails <- DatabaseConnector::createConnectionDetails(
 # pegasusDatabaseSchema <- Sys.getenv("PEGASUS_DATABASE_SCHEMA")
 pegasusDatabaseSchema <- "pegasus_backend_test"
 
-cdmConnectionDetails <- DatabaseConnector::createConnectionDetails(
-  dbms = "spark",
-  connectionString = keyring::key_get("databricksConnectionString"),
-  user = "token",
-  password = keyring::key_get("databricksToken")
-)
-cdmDatabaseSchema <- "optum_extended_dod.cdm_optum_extended_dod_v4020"
-
-referenceCohortDatabaseSchema <- "scratch.scratch_mschuemi"
-referenceCohortTable  <- "pegasus_reference_cohort"
-
 options(sqlRenderTempEmulationSchema = "scratch.scratch_mschuemi")
+
+databaseReference <- createDatabaseReference(
+  databaseName = "Optum Clinformatics",
+  connectionDetails = DatabaseConnector::createConnectionDetails(
+    dbms = "spark",
+    connectionString = keyring::key_get("databricksConnectionString"),
+    user = "token",
+    password = keyring::key_get("databricksToken")
+  ),
+  cdmDatabaseSchema = "optum_extended_dod.cdm_optum_extended_dod_v4020",
+  referenceCohortDatabaseSchema = "scratch.scratch_mschuemi",
+  referenceCohortTable  = "pegasus_reference_cohort",
+  sensitiveCohortDatabaseSchema = "scratch.scratch_mschuemi",
+  sensitiveCohortTable = "pegasus_sensitive_cohort",
+  candidateCohortDatabaseSchema = "scratch.scratch_all",
+  candidateCohortTable = "pegasus_cohort"
+)
+
 
 # llmClient <- ellmer::chat_lmstudio(
 #   model = "qwen3.8-27b-splash"
@@ -51,14 +58,13 @@ phenotypes <- tibble(
   clinicalDefinition = "Acute liver failure is a rare but life-threatening syndrome characterized by the rapid deterioration of hepatocellular function, manifesting as significant coagulopathy and hepatic encephalopathy of any grade, developing within 28 days of the onset of jaundice or initial hepatic symptoms in an individual without evidence of pre-existing chronic liver disease or cirrhosis. The syndrome arises from a direct, primary insult to hepatocytes â€” including viral, toxic, drug-induced, autoimmune, metabolic, or indeterminate causes â€” and is conceptually distinct from liver dysfunction occurring as a secondary consequence of hemodynamic compromise (e.g., ischemic hepatitis, shock liver), systemic sepsis, or passive hepatic congestion from right-sided heart failure, all of which are explicitly excluded."
 )
 
-targets <- generateConceptSetTargets(
+conceptSetTargets <- generateConceptSetTargets(
   phenotypeName = phenotypes$phenotypeName[1],
   clinicalDefinition = phenotypes$clinicalDefinition[1],
-  connectionDetails = connectionDetails,
-  vocabDatabaseSchema = cdmDatabaseSchema,
+  databaseReference = databaseReference,
   llmClient = llmClient
 )
-saveRDS(targets, "e:/temp/PegasusTargets.rds")
+saveRDS(conceptSetTargets, "e:/temp/PegasusTargets.rds")
 
 # Create concept set target definitions --------------------------------------------------------------------------------
 conceptSetTargets <- readRDS("e:/temp/PegasusTargets.rds")
@@ -79,8 +85,7 @@ conceptSetTargetDefinitions <- readRDS("e:/temp/PegasusTargetDefinitions.rds")
 conceptSets <- generateConceptSets(
   conceptSetTargetDefinitions = conceptSetTargetDefinitions,
   llmClient = llmClient,
-  connectionDetails = cdmConnectionDetails,
-  vocabDatabaseSchema = cdmDatabaseSchema,
+  databaseReference = databaseReference,
   cacheFolder = "e:/temp/pegasusConceptSetCache"
 )
 
@@ -100,14 +105,28 @@ uploadDraftConceptSetTargets(draftConceptSetTargets = conceptSetTargets,
                              pegasusConnectionDetails = pegasusConnectionDetails,
                              pegasusDatabaseSchema = pegasusDatabaseSchema)
 
+conceptSetsWithIds <- uploadConceptSets(conceptSets = conceptSets,
+                                        pegasusConnectionDetails = pegasusConnectionDetails,
+                                        pegasusDatabaseSchema = pegasusDatabaseSchema)
+
+# conceptSetsWithIds <- downloadConceptSets(pegasusConnectionDetails = pegasusConnectionDetails,
+#                                           pegasusDatabaseSchema = pegasusDatabaseSchema)
+saveRDS(conceptSetsWithIds, "e:/temp/PegasusConceptSetsWithIds.rds")
+
+# Count persons with concept sets --------------------------------------------------------------------------------------
+
+counts <- createConceptSetCounts(conceptSets = conceptSetsWithIds,
+                                 databaseReference = databaseReference,
+                                 maxCores = 4,
+                                 cacheFolder = "e:/temp/pegasusConceptSetCountCache")
+
 # Create Keeper reference cohorts --------------------------------------------------------------------------------------
 
 conceptSets <- createKeeperReferenceCohorts(
   phenotypes = phenotypes,
   llmClient = llmClient,
-  cdmConnectionDetails = cdmConnectionDetails,
-  cdmDatabaseSchema = cdmDatabaseSchema,
-  referenceCohortDatabaseSchema = referenceCohortDatabaseSchema,
-  referenceCohortTable = referenceCohortTable,
+  databaseReference = databaseReference,
   cacheFolder = "e:/temp/pegasusKeeperReferenceCache"
 )
+
+

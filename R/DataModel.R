@@ -42,37 +42,6 @@ createDataModel <- function(pegasusConnectionDetails,
   DatabaseConnector::executeSql(connection, sql)
 }
 
-#' Download phenotypes from the server
-#'
-#' @template PegasusConnectionDetails
-#'
-#' @returns
-#' A tibble with one row per phenotype, including its ID, name, and clinical definition.
-#'
-#' @export
-downloadPhenotypes <- function(pegasusConnectionDetails,
-                               pegasusDatabaseSchema) {
-  errorMessages <- checkmate::makeAssertCollection()
-  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", add = errorMessages)
-  checkmate::assertCharacter(pegasusDatabaseSchema, len = 1, add = errorMessages)
-  checkmate::reportAssertions(errorMessages)
-
-  connection <- DatabaseConnector::connect(pegasusConnectionDetails)
-  on.exit(DatabaseConnector::disconnect(connection))
-
-  sql <- "
-    SELECT *
-    FROM @database_schema.phenotype;
-  "
-  phenotypes <- DatabaseConnector::renderTranslateQuerySql(
-    connection = connection,
-    sql = sql,
-    database_schema = pegasusDatabaseSchema,
-    snakeCaseToCamelCase = TRUE
-  )
-  return(phenotypes)
-}
-
 #' Get the current user name
 #'
 #' @returns
@@ -300,7 +269,8 @@ uploadDraftConceptSetTargets <- function(draftConceptSetTargets,
 #' @template PegasusConnectionDetails
 #'
 #' @returns
-#' Returns nothing. Is executed for uploading the data to the server.
+#' Invisibly returns the concept sets which received new concept set IDs. Is mainly executed for uploading the data to
+#' the server.
 #'
 #' @export
 uploadConceptSets <- function(conceptSets,
@@ -450,4 +420,68 @@ uploadConceptSets <- function(conceptSets,
     camelCaseToSnakeCase = TRUE
   )
   message(sprintf("Uploaded %d records to the draft_target_to_concept_set table", nrow(dataToUpload)))
+
+  invisible(newConceptSets)
 }
+
+#' Download phenotypes from the server
+#'
+#' @template PegasusConnectionDetails
+#'
+#' @returns
+#' A tibble with one row per phenotype, including its ID, name, and clinical definition.
+#'
+#' @export
+downloadPhenotypes <- function(pegasusConnectionDetails,
+                               pegasusDatabaseSchema) {
+  data <- genericDownload(
+    tableName = "phenotype",
+    pegasusConnectionDetails,
+    pegasusDatabaseSchema
+  )
+  return(data)
+}
+
+#' Download concept sets from the server
+#'
+#' @template PegasusConnectionDetails
+#'
+#' @returns
+#' A tibble with one row per concept set, including its ID, name, and clinical definition.
+#'
+#' @export
+downloadConceptSets <- function(pegasusConnectionDetails,
+                                pegasusDatabaseSchema) {
+  data <- genericDownload(
+    tableName = "concept_set",
+    pegasusConnectionDetails,
+    pegasusDatabaseSchema
+  )
+  return(data)
+}
+
+genericDownload <- function(tableName,
+                            pegasusConnectionDetails,
+                            pegasusDatabaseSchema) {
+  errorMessages <- checkmate::makeAssertCollection()
+  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", add = errorMessages)
+  checkmate::assertCharacter(pegasusDatabaseSchema, len = 1, add = errorMessages)
+  checkmate::reportAssertions(errorMessages)
+
+  connection <- DatabaseConnector::connect(pegasusConnectionDetails)
+  on.exit(DatabaseConnector::disconnect(connection))
+
+  sql <- "
+    SELECT *
+    FROM @database_schema.@table;
+  "
+  data <- DatabaseConnector::renderTranslateQuerySql(
+    connection = connection,
+    sql = sql,
+    database_schema = pegasusDatabaseSchema,
+    table = tableName,
+    snakeCaseToCamelCase = TRUE
+  )
+  return(data)
+}
+
