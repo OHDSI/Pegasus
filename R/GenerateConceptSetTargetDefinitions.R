@@ -26,7 +26,7 @@
 #'
 #'
 #' @param conceptSetTargets A tibble of concept set targets as created by `generateConceptSetTargets()`.
-#' @param phenotypes        A tibble with two columns: `phenotypeName`, and `clinicalDefinition`.
+#' @template Phenotypes
 #' @param minPhenotypeFraction If a concept set target appears for less than this fraction of the provided phenotypes,
 #'                             it will not get a definition but will later be instantiated as a placeholder (concept +
 #'                             descendants).

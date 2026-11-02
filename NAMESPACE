@@ -2,6 +2,7 @@
 
 export(createCostTracker)
 export(createDataModel)
+export(createKeeperReferenceCohorts)
 export(downloadPhenotypes)
 export(generateConceptSetTargets)
 export(generateConceptSets)
