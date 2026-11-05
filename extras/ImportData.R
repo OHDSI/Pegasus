@@ -22,12 +22,12 @@ cdmDatabaseSchemas <- c("optum_extended_dod.cdm_optum_extended_dod_v4020",
 
 options(sqlRenderTempEmulationSchema = "scratch.scratch_mschuemi")
 
-# Create data model ----------------------------------------------------------------------------------------------------
 connection <- DatabaseConnector::connect(connectionDetails)
+# Create data model ----------------------------------------------------------------------------------------------------
 # DatabaseConnector::executeSql(connection, "CREATE SCHEMA pegasus;")
 
-createDataModel(connection = connection,
-                databaseSchema = databaseSchema)
+createDataModel(pegasusConnectionDetails = connectionDetails,
+                pegasusDatabaseSchema = databaseSchema)
 
 # Upload phenotype -----------------------------------------------------------------------------------------
 definitions <- openxlsx::readWorkbook("../largescalephentest/ClinicalDefinitionLibrary564.xlsx")
@@ -257,6 +257,41 @@ DatabaseConnector::insertTable(
   databaseSchema = databaseSchema,
   tableName = "cohort_definition",
   data = cohortDefinitions,
+  dropTableIfExists = FALSE,
+  createTable = FALSE,
+  camelCaseToSnakeCase = TRUE
+)
+
+# Bulk cohorts
+cohortDefinitions <- readr::read_csv("../largescalephentest/bulkTemplateCohorts.csv", show_col_types = FALSE)
+loadJson <- function(cohortId) {
+  fileName <- file.path("../phenotype_templating/inst/cohorts", sprintf("%d.json", cohortId))
+  json <- paste(readLines(fileName), collapse = "\n")
+}
+cohortDefinitions$circeCohortExpression <- sapply(cohortDefinitions$cohortId, loadJson)
+cohortDefinitions$caprCohortExpression <- sapply(cohortDefinitions$circeCohortExpression,
+                                                 circeToCaprCohortDefinition)
+
+phenotypes <- Pegasus::downloadPhenotypes(connectionDetails,
+                                          databaseSchema)
+cohortDefinitions <- cohortDefinitions |>
+  rename(phenotypeName = "phenotype") |>
+  inner_join(phenotypes, by = join_by("phenotypeName"))
+
+dataToUpload <- cohortDefinitions |>
+  transmute(cohortDefinitionId = 100000 + cohortId,
+            cohortDefinitionName = cohortName,
+            phenotypeId,
+            circeCohortExpression,
+            caprCohortExpression,
+            cdSourceType = "Templates",
+            valid = 1,
+            atlasCohortDefinitionId = NA_real_)
+DatabaseConnector::insertTable(
+  connection = connection,
+  databaseSchema = databaseSchema,
+  tableName = "cohort_definition",
+  data = dataToUpload,
   dropTableIfExists = FALSE,
   createTable = FALSE,
   camelCaseToSnakeCase = TRUE
@@ -674,4 +709,37 @@ DatabaseConnector::insertTable(
 )
 
 DatabaseConnector::disconnect(connection)
+
+# Some checks on what data is in the model -----------------------------------------------------------------------------
+existingConceptSets <- Pegasus::downloadConceptSets(pegasusConnectionDetails = connectionDetails,
+                                            pegasusDatabaseSchema = databaseSchema)
+existingConceptSets |>
+  filter(conceptSetName == "Motor vehicle accident")
+
+existingConceptSets2 <- Pegasus::downloadConceptSets(pegasusConnectionDetails = connectionDetails,
+                                                    pegasusDatabaseSchema = "pegasus_dev_2")
+
+
+
+sql <- "
+  SELECT *
+  FROM @database_schema.phenotype_to_concept_set;
+"
+existingPhenotypeToConceptSet <- DatabaseConnector::renderTranslateQuerySql(
+  connection = connection,
+  sql = sql,
+  database_schema = databaseSchema,
+  snakeCaseToCamelCase = TRUE
+)
+
+sql <- "
+  SELECT *
+  FROM @database_schema.phenotype_to_concept_set;
+"
+existingPhenotypeToConceptSet2 <- DatabaseConnector::renderTranslateQuerySql(
+  connection = connection,
+  sql = sql,
+  database_schema = "pegasus_dev_2",
+  snakeCaseToCamelCase = TRUE
+)
 

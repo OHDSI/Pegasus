@@ -14,7 +14,8 @@ createDatabaseReference(
   referenceCohortDatabaseSchema,
   referenceCohortTable,
   candidateCohortDatabaseSchema,
-  candidateCohortTable
+  candidateCohortTable,
+  databaseId = digest::digest2int(cdmDatabaseSchema)
 )
 }
 \arguments{
@@ -43,6 +44,9 @@ be instantiated.}
 instantiated.}
 
 \item{candidateCohortTable}{The name of the tabe where the candidate cohorts will be instantiated.}
+
+\item{databaseId}{A unique integer to denote a database. Defaults to a hash of
+\code{cdmDatabaseSchema}.}
 }
 \value{
 An object of type \code{DatabaseReference}, to be used in various functions.

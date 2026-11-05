@@ -34,7 +34,7 @@
 #' @template CostTracker
 #' @template PegasusConnectionDetails
 #' @template TempEmulationSchema
-#' @param cacheFolder A folder where data objects can be cached so a restart can continue where it left off.
+#' @template CacheFolder
 #'
 #' @returns
 #' A tibble with concept set IDs, definitions, and source types.
@@ -94,6 +94,20 @@ generateOrReuseConceptSetTargetDefinitions <- function(
                              "conceptId",
                              "conceptName"))
 
+  # Disease of interest
+  diseaseOfInterestTargets <- phenotypes |>
+    transmute(
+    phenotypeName = .data$phenotypeName,
+    pertains = "Disease of interest",
+    category = "Disease of interest",
+    concpetId = NA_real_,
+    conceptName = NA_character_,
+    conceptSetId = NA_real_,
+    conceptSetName = .data$phenotypeName,
+    clinicalDefinition = .data$clinicalDefinition,
+    sourceType = FROM_HUMAN_DEFINITION
+  )
+
   # Hypernyms
   hypernymTargets <- dedupedTargets |>
     filter(.data$category == "Hypernym")
@@ -107,7 +121,8 @@ generateOrReuseConceptSetTargetDefinitions <- function(
   )
   hypernymTargets <- hypernymTargets |>
     left_join(existingHypernymConceptSets, by = join_by("conceptId")) |>
-    mutate(sourceType = CONCEPT)
+    mutate(conceptSetName = if_else(is.na(.data$conceptSetName), .data$conceptName, .data$conceptSetName),
+           sourceType = CONCEPT)
 
   # Drugs
   drugTargets <- dedupedTargets |>
@@ -122,7 +137,8 @@ generateOrReuseConceptSetTargetDefinitions <- function(
   )
   drugTargets <- drugTargets |>
     left_join(existingDrugConceptSets, by = join_by("conceptId")) |>
-    mutate(sourceType = CONCEPT_PLUS_DESCENDANTS)
+    mutate(conceptSetName = if_else(is.na(.data$conceptSetName), .data$conceptName, .data$conceptSetName),
+           sourceType = CONCEPT_PLUS_DESCENDANTS)
 
   # Remaining targets
   targets <- dedupedTargets |>
@@ -156,7 +172,8 @@ generateOrReuseConceptSetTargetDefinitions <- function(
     inner_join(definitionsFromPhenotypes |>
                  select(-"conceptName"),
                by = join_by("conceptId")) |>
-    mutate(sourceType = FROM_HUMAN_DEFINITION)
+    mutate(conceptSetName = if_else(is.na(.data$conceptSetName), .data$targetPhenotypeName, .data$conceptSetName),
+           sourceType = FROM_HUMAN_DEFINITION)
 
   # Low frequency targets
   nTotalPhenotypes <- targets |>
@@ -169,8 +186,10 @@ generateOrReuseConceptSetTargetDefinitions <- function(
     filter(!.data$conceptId %in% definitionsFromPhenotypes$conceptId,
            !.data$conceptId %in% existingDefinitionData$conceptSets$conceptId)
   lowFrequencyTargets <- lowFrequencyTargets |>
+    select(-"conceptName") |>
     left_join(targets, by = join_by("conceptId")) |>
-    mutate(sourceType = CONCEPT_PLUS_DESCENDANTS)
+    mutate(conceptSetName = .data$conceptName,
+           sourceType = CONCEPT_PLUS_DESCENDANTS)
 
   # Use AI to generate definitions (or use existing one if exists)
   uniqueTargets <- uniqueTargets |>
@@ -189,6 +208,7 @@ generateOrReuseConceptSetTargetDefinitions <- function(
     mutate(sourceType = FROM_AI_DEFINITION)
 
   result <- bind_rows(
+    diseaseOfInterestTargets,
     hypernymTargets,
     drugTargets,
     humanDefinitionTargets,
@@ -216,6 +236,8 @@ fetchOrGenerateDefinitions <- function(targets,
                                        costTracker,
                                        cacheFolder) {
   startTime <- Sys.time()
+  startCost <- costTracker$amount
+
   if (!is.null(cacheFolder)) {
     dir.create(cacheFolder, recursive = TRUE, showWarnings = FALSE)
   }
@@ -279,7 +301,7 @@ fetchOrGenerateDefinitions <- function(targets,
                   nContextTarget,
                   delta,
                   attr(delta, "units"),
-                  costTracker$amount,
+                  costTracker$amount - startCost,
                   nMatched,
                   nContextTarget - nMatched))
   return(definitions)
@@ -371,7 +393,7 @@ generateNewDefinitions <- function(phenotypeTargetCategories,
   # templateFile <- file.path("inst", "prompts", "CreateConceptSetTargetDefinitionsPrompt.txt")
   templateFile <- system.file("prompts", "CreateConceptSetTargetDefinitionsPrompt.txt", package = "Pegasus")
   promptTemplate <- paste(readLines(templateFile), collapse = "\n")
-  prompt <- gsub("%term%", phenotypeTargetCategories$conceptName, promptTemplate)
+  prompt <- gsub("%term%", phenotypeTargetCategories$conceptName[1], promptTemplate)
   prompt <- gsub("%contexts%", paste(sprintf("- %s", phenotypeTargetCategories$context), collapse = "\n"), prompt)
   # writeLines(prompt)
   outputType <- ellmer::type_array(

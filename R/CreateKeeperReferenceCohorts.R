@@ -48,21 +48,25 @@ createKeeperReferenceCohorts <- function(phenotypes,
   connection <- DatabaseConnector::connect(databaseReference$connectionDetails)
   on.exit(DatabaseConnector::disconnect(connection))
 
-  referenceCohortTableNames <- Keeper::createReferenceCohortTableNamesUsingStratifiedSample(databaseReference$referenceCohortTable)
-  tableExists <- DatabaseConnector::existsTable(
+  referenceCohortTableNames <- Keeper::createReferenceCohortTableNames(databaseReference$referenceCohortTable)
+  referenceCohortTableExists <- DatabaseConnector::existsTable(
     connection = connection,
     databaseSchema = databaseReference$referenceCohortDatabaseSchema,
     tableName = referenceCohortTableNames$referenceCohortMetadataTable
   )
-  if (tableExists) {
+  if (referenceCohortTableExists) {
     existingCohorts <- Keeper::listReferenceCohorts(
       connection = connection,
       referenceCohortDatabaseSchema = databaseReference$referenceCohortDatabaseSchema,
       referenceCohortMetadataTable = referenceCohortTableNames$referenceCohortMetadataTable
     )
-    lastCohortId <- max(existingCohorts$cohortDefinitionId)
+    if (nrow(existingCohorts) == 0) {
+      lastCohortId <- 0
+    } else {
+      lastCohortId <- max(existingCohorts$cohortDefinitionId)
+    }
   } else {
-    Keeper::createReferenceCohortTablesUsingStratifiedSample(
+    Keeper::createReferenceCohortTables(
       connection = connection,
       referenceCohortDatabaseSchema = databaseReference$referenceCohortDatabaseSchema,
       referenceCohortTableNames = referenceCohortTableNames
@@ -70,12 +74,26 @@ createKeeperReferenceCohorts <- function(phenotypes,
     existingCohorts <- tibble()
     lastCohortId <- 0
   }
+
+  sensitiveCohortTableExists <- DatabaseConnector::existsTable(
+    connection = connection,
+    databaseSchema = databaseReference$sensitiveCohortDatabaseSchema,
+    tableName = databaseReference$sensitiveCohortTable
+  )
+  if (!sensitiveCohortTableExists) {
+    Keeper::createSensitiveCohortTable(
+      connection = connection,
+      sensitiveCohortDatabaseSchema = databaseReference$sensitiveCohortDatabaseSchema,
+      sensitiveCohortTable = databaseReference$sensitiveCohortTable
+    )
+  }
+
   phenotypes <- phenotypes |>
     mutate(cohortId = row_number() + lastCohortId)
 
   message("Generating Keeper reference profiles")
   ParallelLogger::addDefaultFileLogger(file.path(cacheFolder, "log.txt"), name = "KEEPER_LOGGER")
-  cluster <- ParallelLogger::makeCluster(maxCores)
+  cluster <- ParallelLogger::makeCluster(min(maxCores, nrow(phenotypes)))
   ParallelLogger::clusterRequire(cluster, "dplyr")
   rows <- split(phenotypes, phenotypes$cohortId)
   cost <- ParallelLogger::clusterApply(
@@ -89,7 +107,7 @@ createKeeperReferenceCohorts <- function(phenotypes,
   ParallelLogger::stopCluster(cluster)
   ParallelLogger::unregisterLogger("KEEPER_LOGGER")
 
-  costTracker@amount <- costTracker@amount  + sum(unlist(cost))
+  costTracker$amount <- costTracker$amount + sum(unlist(cost))
 
   message("Uploading Keeper reference profiles")
   status <- phenotypes |>
@@ -176,9 +194,9 @@ createKeeperReferenceCohort <- function(row,
         connectionDetails = databaseReference$connectionDetails,
         cdmDatabaseSchema = databaseReference$cdmDatabaseSchema,
         tempEmulationSchema = databaseReference$tempEmulationSchema,
-        cohortDatabaseSchema = databaseReference$sensitiveCohortDatabaseSchema,
-        cohortTable = databaseReference$sensitiveCohortTable,
-        cohortDefinitionId = row$cohortId,
+        sensitiveCohortDatabaseSchema = databaseReference$sensitiveCohortDatabaseSchema,
+        sensitiveCohortTable = databaseReference$sensitiveCohortTable,
+        sensitiveCohortDefinitionId = row$cohortId,
         createCohortTable = FALSE,
         keeperConceptSets = conceptSets
       )

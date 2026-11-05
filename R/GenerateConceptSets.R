@@ -58,6 +58,8 @@ generateConceptSets  <- function(
   checkmate::reportAssertions(collection = errorMessages)
 
   startTime <- Sys.time()
+  startCost <- costTracker$amount
+
   if (!is.null(cacheFolder)) {
     dir.create(cacheFolder, recursive = TRUE, showWarnings = FALSE)
   }
@@ -86,7 +88,7 @@ generateConceptSets  <- function(
     generateSimpleConceptSets(targetDefinitions = needConceptOnly,
                               descendants = FALSE,
                               connection = connection,
-                              vocabDatabaseSchema = databaseReference$vocabDatabaseSchema)
+                              vocabDatabaseSchema = databaseReference$cdmDatabaseSchema)
   },
   cacheFolder = cacheFolder,
   fileName = sprintf("conceptOnly_%s.rds", digest::digest(needConceptOnly))
@@ -96,7 +98,7 @@ generateConceptSets  <- function(
     generateSimpleConceptSets(targetDefinitions = needConceptPlusDescendants,
                               descendants = TRUE,
                               connection = connection,
-                              vocabDatabaseSchema = databaseReference$vocabDatabaseSchema)
+                              vocabDatabaseSchema = databaseReference$cdmDatabaseSchema)
   },
   cacheFolder = cacheFolder,
   fileName = sprintf("conceptWithDescendants_%s.rds", digest::digest(needConceptPlusDescendants))
@@ -129,7 +131,7 @@ generateConceptSets  <- function(
   message(sprintf("Generating concept sets took %0.2f %s and cost $%0.2f.",
                   delta,
                   attr(delta, "units"),
-                  costTracker$amount))
+                  costTracker$amount - startCost))
   return(conceptSets)
 }
 
@@ -140,12 +142,12 @@ generateSimpleConceptSets <- function(targetDefinitions,
   createExpression <- function(row) {
     if (descendants) {
       conceptSet <- Capr::cs(Capr::descendants(row$conceptId), name = row$conceptName)
-      caprConceptsetExpression <- sprintf("cs(descendants(%s), name = \"%s\")",
+      caprConceptSetExpression <- sprintf("cs(descendants(%s), name = \"%s\")",
                                           row$conceptId,
                                           row$conceptName)
     } else {
       conceptSet <- Capr::cs(row$conceptId, name = row$conceptName)
-      caprConceptsetExpression <- sprintf("cs(%s, name = \"%s\")",
+      caprConceptSetExpression <- sprintf("cs(%s, name = \"%s\")",
                                           row$conceptId,
                                           row$conceptName)
     }
@@ -153,7 +155,7 @@ generateSimpleConceptSets <- function(targetDefinitions,
     json <- Capr::toConceptSetJson(conceptSet)
     row <-  row |>
       mutate(circeConceptSetExpression = json,
-             caprConceptsetExpression = caprConceptsetExpression,
+             caprConceptSetExpression = caprConceptSetExpression,
              hasDescendants = if_else(descendants, 1, 0))
     return(row)
   }
@@ -366,6 +368,8 @@ createConceptSetCounts <- function(conceptSets,
       counts[[countColumn]] <- 0
     }
   }
+  counts <- counts |>
+    mutate(databaseId = databaseReference$databaseId)
   delta <- Sys.time() - startTime
   message(sprintf("Generating concept sets took %0.2f %s.",
                   delta,
@@ -384,7 +388,8 @@ getCountsBatch <- function(batch, databaseReference, databaseCacheFolder) {
     counts[[i]] <- withCache({
       getCounts(circeConceptSetExpression = circeConceptSetExpression,
                 connection = connection,
-                cdmDatabaseSchema = databaseReference$cdmDatabaseSchema)
+                cdmDatabaseSchema = databaseReference$cdmDatabaseSchema,
+                tempEmulationSchema = databaseReference$tempEmulationSchema)
     },
     cacheFolder = databaseCacheFolder,
     fileName = sprintf("%s.rds", digest::digest(circeConceptSetExpression))
@@ -397,7 +402,7 @@ getCountsBatch <- function(batch, databaseReference, databaseCacheFolder) {
   return(counts)
 }
 
-getCounts <- function(circeConceptSetExpression, connection, cdmDatabaseSchema) {
+getCounts <- function(circeConceptSetExpression, connection, cdmDatabaseSchema, tempEmulationSchema) {
   conceptSetSql <- CirceR::buildConceptSetQuery(circeConceptSetExpression)
   sql <- "
     DROP TABLE IF EXISTS #concept_set;
@@ -416,6 +421,7 @@ getCounts <- function(circeConceptSetExpression, connection, cdmDatabaseSchema) 
     sql = sql,
     concept_set_sql = SqlRender::render(conceptSetSql, vocabulary_database_schema = cdmDatabaseSchema),
     cdm_database_schema = cdmDatabaseSchema,
+    tempEmulationSchema = tempEmulationSchema,
     progressBar = FALSE,
     reportOverallTime = FALSE
   )
@@ -426,6 +432,7 @@ getCounts <- function(circeConceptSetExpression, connection, cdmDatabaseSchema) 
   domains <- DatabaseConnector::renderTranslateQuerySql(
     connection = connection,
     sql = sql,
+    tempEmulationSchema = tempEmulationSchema,
     snakeCaseToCamelCase = TRUE
   )[, 1]
   sql <- "
@@ -562,6 +569,7 @@ getCounts <- function(circeConceptSetExpression, connection, cdmDatabaseSchema) 
     connection = connection,
     sql = sql,
     cdm_database_schema = cdmDatabaseSchema,
+    tempEmulationSchema = tempEmulationSchema,
     has_condition = "Condition" %in% domains,
     has_procedure = "Procedure" %in% domains,
     has_drug = "Drug" %in% domains,

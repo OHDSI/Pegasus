@@ -298,11 +298,11 @@ mapToConcepts <- function(termsPerCategory,
 
 #' Generate concept set targets for a phenotype
 #'
-#' @template PhenotypeName
-#' @template ClinicalDefinition
+#' @template Phenotypes
 #' @template DatabaseReference
 #' @template LlmClient
 #' @template CostTracker
+#' @template CacheFolder
 #'
 #' @description
 #' Enumerates targets for concept sets for a phenotype. The targets themselves are mapped to concepts in the OHDSI
@@ -312,23 +312,66 @@ mapToConcepts <- function(termsPerCategory,
 #' A tibble with concept set targets.
 #'
 #' @export
-generateConceptSetTargets <- function(phenotypeName,
-                                      clinicalDefinition,
+generateConceptSetTargets <- function(phenotypes,
                                       databaseReference = databaseReference,
                                       llmClient,
-                                      costTracker = createCostTracker()) {
+                                      costTracker = createCostTracker(),
+                                      cacheFolder = NULL) {
   errorMessages <- checkmate::makeAssertCollection()
-  checkmate::assertCharacter(phenotypeName, len = 1, add = errorMessages)
-  checkmate::assertCharacter(clinicalDefinition, len = 1, null.ok = TRUE, add = errorMessages)
+  checkmate::assertDataFrame(phenotypes, min.rows = 1, add = errorMessages)
+  checkmate::assertNames(colnames(phenotypes), must.include = c(
+    "phenotypeName",
+    "clinicalDefinition"
+  ), add = errorMessages)
   checkmate::assertClass(databaseReference, "DatabaseReference", null.ok = TRUE, add = errorMessages)
   checkmate::assertR6(llmClient, "Chat", add = errorMessages)
   checkmate::assertClass(costTracker, "CostTracker", add = errorMessages)
+  checkmate::assertCharacter(cacheFolder, len = 1, null.ok = TRUE, add = errorMessages)
   checkmate::reportAssertions(collection = errorMessages)
 
-  message("Creating targets for ", phenotypeName)
+  startTime <- Sys.time()
+  startCost <- costTracker$amount
+
+  if (!is.null(cacheFolder)) {
+    dir.create(cacheFolder, recursive = TRUE, showWarnings = FALSE)
+  }
 
   connection <- DatabaseConnector::connect(databaseReference$connectionDetails)
   on.exit(DatabaseConnector::disconnect(connection))
+
+  conceptSetTargets <- list()
+  for (i in seq_len(nrow(phenotypes))) {
+    conceptSetTargets[[i]] <- withCache({
+      generateConceptSetTargetsForPhenotype(
+        phenotypeName = phenotypes$phenotypeName[i],
+        clinicalDefinition = phenotypes$clinicalDefinition[i],
+        connection = connection,
+        vocabDatabaseSchema = databaseReference$cdmDatabaseSchema,
+        llmClient = llmClient,
+        costTracker = costTracker
+      )},
+      cacheFolder = cacheFolder,
+      fileName = sprintf("targets_%s.csv", gsub("[^[:alnum:]]+", "", phenotypes$phenotypeName[i]))
+    )
+  }
+  conceptSetTargets <- bind_rows(conceptSetTargets)
+
+  delta <- Sys.time() - startTime
+  message(sprintf("Generating phenotype meta data took %0.2f %s and cost $%0.2f.",
+                  delta,
+                  attr(delta, "units"),
+                  costTracker$amount - startCost))
+  return(conceptSetTargets)
+}
+
+generateConceptSetTargetsForPhenotype <- function(phenotypeName,
+                                                  clinicalDefinition,
+                                                  connection,
+                                                  vocabDatabaseSchema,
+                                                  llmClient,
+                                                  costTracker) {
+
+  message("Creating targets for ", phenotypeName)
 
   # Generate targets for the phenotype itself
   promptFile <- system.file("prompts", "CreateConceptSetTargetsPrompt.txt", package = "Pegasus")
@@ -346,7 +389,7 @@ generateConceptSetTargets <- function(phenotypeName,
   targets <- mapToConcepts(
     termsPerCategory = termsPerCategory,
     connection = connection,
-    vocabDatabaseSchema = databaseReference$cdmDatabaseSchema,
+    vocabDatabaseSchema = vocabDatabaseSchema,
     llmClient = llmClient,
     costTracker = costTracker)
 
@@ -368,7 +411,7 @@ generateConceptSetTargets <- function(phenotypeName,
   targetsAd <- mapToConcepts(
     termsPerCategory = termsPerCategoryAd,
     connection = connection,
-    vocabDatabaseSchema = databaseReference$cdmDatabaseSchema,
+    vocabDatabaseSchema = vocabDatabaseSchema,
     llmClient = llmClient,
     costTracker = costTracker)
 

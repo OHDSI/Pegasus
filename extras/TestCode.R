@@ -45,6 +45,11 @@ llmClient <- ellmer::chat_azure_openai(
   credentials = function() keyring::key_get("genai_api_gpt4_key")
 )
 
+phenotypes <- tibble(
+  phenotypeName = "Acute myocardial infarction",
+  clinicalDefinition = "Acute myocardial infarction (AMI) is an acute ischemic event characterized by myocardial necrosis resulting from an abrupt and sustained reduction in coronary blood supply or a critical imbalance between myocardial oxygen supply and demand, leading to detectable cardiomyocyte death as evidenced by a rise and/or fall in cardiac biomarkers (particularly high-sensitivity troponin) with at least one value exceeding the 99th percentile upper reference limit, accompanied by at least one of the following: ischemic symptoms, new or presumed new ischemic ECG changes, development of pathological Q waves, or imaging evidence of new loss of viable myocardium or new regional wall motion abnormality consistent with an ischemic etiology. The phenotype encompasses all pathophysiological subtypes, including spontaneous atherothrombotic plaque rupture or erosion (Type 1), ischemia due to supply-demand mismatch from a non-coronary cause (Type 2), and procedure-related infarctions (Types 3â€“5), and captures both ST-elevation MI (STEMI) and non-ST-elevation MI (NSTEMI) presentations. Explicitly excluded are myocarditis and Takotsubo (stress) cardiomyopathy, which may produce troponin elevation and ischemic-like presentations through non-obstructive, non-ischemic mechanisms fundamentally distinct from coronary-driven myocardial necrosis."
+)
+
 # Test local definition refiner ----------------------------------------------------------------------------------------
 refineDefinition("Acute liver injury", llmClient = llmClient)
 
@@ -52,19 +57,37 @@ refineDefinition("Acute liver injury", llmClient = llmClient)
 createDataModel(pegasusConnectionDetails = pegasusConnectionDetails,
                 pegasusDatabaseSchema = pegasusDatabaseSchema)
 
-# Create concept set targets -------------------------------------------------------------------------------------------
-phenotypes <- tibble(
-  phenotypeName = "Acute liver failure",
-  clinicalDefinition = "Acute liver failure is a rare but life-threatening syndrome characterized by the rapid deterioration of hepatocellular function, manifesting as significant coagulopathy and hepatic encephalopathy of any grade, developing within 28 days of the onset of jaundice or initial hepatic symptoms in an individual without evidence of pre-existing chronic liver disease or cirrhosis. The syndrome arises from a direct, primary insult to hepatocytes â€” including viral, toxic, drug-induced, autoimmune, metabolic, or indeterminate causes â€” and is conceptually distinct from liver dysfunction occurring as a secondary consequence of hemodynamic compromise (e.g., ischemic hepatitis, shock liver), systemic sepsis, or passive hepatic congestion from right-sided heart failure, all of which are explicitly excluded."
-)
+databaseMetaData <- getDatabaseMetaData(databaseReference)
+uploadDatabaseMetaData(databaseMetaData = databaseMetaData,
+                       pegasusConnectionDetails = pegasusConnectionDetails,
+                       pegasusDatabaseSchema = pegasusDatabaseSchema)
 
+# Phenotypes -----------------------------------------------------------------------------------------------------------
+uploadPhenotypes(phenotypes = phenotypes,
+                 pegasusConnectionDetails = pegasusConnectionDetails,
+                 pegasusDatabaseSchema = pegasusDatabaseSchema)
+
+phenotypeMetaData <- generatePhenotypeMetaData(phenotypes = phenotypes,
+                                               llmClient = llmClient)
+
+uploadPhenotypeMetaData(phenotypeMetaData = phenotypeMetaData,
+                        pegasusConnectionDetails = pegasusConnectionDetails,
+                        pegasusDatabaseSchema = pegasusDatabaseSchema)
+
+# Create concept set targets -------------------------------------------------------------------------------------------
 conceptSetTargets <- generateConceptSetTargets(
-  phenotypeName = phenotypes$phenotypeName[1],
-  clinicalDefinition = phenotypes$clinicalDefinition[1],
+  phenotypes = phenotypes,
   databaseReference = databaseReference,
-  llmClient = llmClient
+  llmClient = llmClient,
+  cacheFolder = "e:/temp/PegasusTargetsCache"
 )
 saveRDS(conceptSetTargets, "e:/temp/PegasusTargets.rds")
+
+uploadDraftConceptSetTargets(draftConceptSetTargets = conceptSetTargets,
+                             pegasusConnectionDetails = pegasusConnectionDetails,
+                             pegasusDatabaseSchema = pegasusDatabaseSchema)
+
+
 
 # Create concept set target definitions --------------------------------------------------------------------------------
 conceptSetTargets <- readRDS("e:/temp/PegasusTargets.rds")
@@ -75,7 +98,7 @@ conceptSetTargetDefinitions <- generateOrReuseConceptSetTargetDefinitions(
   llmClient = llmClient,
   pegasusConnectionDetails = pegasusConnectionDetails,
   pegasusDatabaseSchema = pegasusDatabaseSchema,
-  cacheFolder = "e:/temp/pegasusConceptSetTargetCache"
+  cacheFolder = "e:/temp/pegasusConceptSetTargetDefinitionCache"
 )
 saveRDS(conceptSetTargetDefinitions, "e:/temp/PegasusTargetDefinitions.rds")
 
@@ -88,45 +111,31 @@ conceptSets <- generateConceptSets(
   databaseReference = databaseReference,
   cacheFolder = "e:/temp/pegasusConceptSetCache"
 )
-
 saveRDS(conceptSets, "e:/temp/PegasusConceptSets.rds")
-
-# Upload concept set data ----------------------------------------------------------------------------------------------
-conceptSets <- readRDS("e:/temp/PegasusConceptSets.rds")
-
-uploadPhenotypes(phenotypes = phenotypes,
-                 pegasusConnectionDetails = pegasusConnectionDetails,
-                 pegasusDatabaseSchema = pegasusDatabaseSchema)
-
-# downloadPhenotypes(pegasusConnectionDetails = pegasusConnectionDetails,
-#                    pegasusDatabaseSchema = pegasusDatabaseSchema)
-
-uploadDraftConceptSetTargets(draftConceptSetTargets = conceptSetTargets,
-                             pegasusConnectionDetails = pegasusConnectionDetails,
-                             pegasusDatabaseSchema = pegasusDatabaseSchema)
 
 conceptSetsWithIds <- uploadConceptSets(conceptSets = conceptSets,
                                         pegasusConnectionDetails = pegasusConnectionDetails,
                                         pegasusDatabaseSchema = pegasusDatabaseSchema)
-
-# conceptSetsWithIds <- downloadConceptSets(pegasusConnectionDetails = pegasusConnectionDetails,
-#                                           pegasusDatabaseSchema = pegasusDatabaseSchema)
 saveRDS(conceptSetsWithIds, "e:/temp/PegasusConceptSetsWithIds.rds")
 
 # Count persons with concept sets --------------------------------------------------------------------------------------
+conceptSetsWithIds <- readRDS("e:/temp/PegasusConceptSetsWithIds.rds")
+conceptSetPersonCounts <- createConceptSetCounts(conceptSets = conceptSetsWithIds,
+                                                 databaseReference = databaseReference,
+                                                 maxCores = 4,
+                                                 cacheFolder = "e:/temp/pegasusConceptSetCountCache")
+uploadConceptSetPersonCounts(conceptSetPersonCounts = conceptSetPersonCounts,
+                             pegasusConnectionDetails = pegasusConnectionDetails,
+                             pegasusDatabaseSchema = pegasusDatabaseSchema)
 
-counts <- createConceptSetCounts(conceptSets = conceptSetsWithIds,
-                                 databaseReference = databaseReference,
-                                 maxCores = 4,
-                                 cacheFolder = "e:/temp/pegasusConceptSetCountCache")
 
 # Create Keeper reference cohorts --------------------------------------------------------------------------------------
-
-conceptSets <- createKeeperReferenceCohorts(
+status <- createKeeperReferenceCohorts(
   phenotypes = phenotypes,
   llmClient = llmClient,
   databaseReference = databaseReference,
   cacheFolder = "e:/temp/pegasusKeeperReferenceCache"
 )
+
 
 

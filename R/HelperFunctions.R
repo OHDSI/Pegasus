@@ -191,6 +191,8 @@ normalizeNames <- function(names) {
 #' @param candidateCohortDatabaseSchema The name of the database schema where the candidate cohorts will be
 #'                                      instantiated.
 #' @param candidateCohortTable          The name of the tabe where the candidate cohorts will be instantiated.
+#' @param databaseId                    A unique integer to denote a database. Defaults to a hash of
+#'                                      `cdmDatabaseSchema`.
 #'
 #' @returns
 #' An object of type `DatabaseReference`, to be used in various functions.
@@ -205,7 +207,8 @@ createDatabaseReference <- function(databaseName,
                                     referenceCohortDatabaseSchema,
                                     referenceCohortTable,
                                     candidateCohortDatabaseSchema,
-                                    candidateCohortTable) {
+                                    candidateCohortTable,
+                                    databaseId = digest::digest2int(cdmDatabaseSchema)) {
 
   databaseReference <- list()
   for (name in names(formals(createDatabaseReference))) {
@@ -215,4 +218,47 @@ createDatabaseReference <- function(databaseName,
   return(databaseReference)
 }
 
+#' Get database metadata from the server
+#'
+#' @template DatabaseReference
+#'
+#' @returns
+#' A tibble with one row.
+#'
+#' @export
+getDatabaseMetaData <- function(databaseReference) {
+  errorMessages <- checkmate::makeAssertCollection()
+  checkmate::assertClass(databaseReference, "DatabaseReference", add = errorMessages)
+  checkmate::reportAssertions(collection = errorMessages)
 
+  connection <- DatabaseConnector::connect(databaseReference$connectionDetails)
+  on.exit(DatabaseConnector::disconnect(connection))
+
+  sql <- "
+    SELECT TOP 1 *
+    FROM @cdm_database_schema.cdm_source;
+  "
+  metaData <- DatabaseConnector::renderTranslateQuerySql(
+    connection = connection,
+    sql = sql,
+    cdm_database_schema = databaseReference$cdmDatabaseSchema,
+    snakeCaseToCamelCase = TRUE
+  )
+  if (!"cdmReleaseIdentifier" %in% colnames(metaData)) {
+    if (grepl("_v[0-9]*$", databaseReference$cdmDatabaseSchema)) {
+      metaData$cdmReleaseIdentifier <- gsub("^.*_v", "", databaseReference$cdmDatabaseSchema)
+    } else {
+      metaData$cdmReleaseIdentifier <- ""
+    }
+  }
+  metaData <- metaData |>
+    select("cdmSourceName",
+           "cdmSourceAbbreviation",
+           "cdmReleaseDate",
+           "cdmReleaseIdentifier",
+           "vocabularyVersion") |>
+    mutate(databaseId = databaseReference$databaseId,
+           cdmDatabaseSchema = databaseReference$cdmDatabaseSchema,
+           resultDatabaseSchema = databaseReference$referenceCohortDatabaseSchema)
+  return(metaData)
+}
