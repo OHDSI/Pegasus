@@ -436,7 +436,8 @@ uploadConceptSets <- function(conceptSets,
            "clinicalDefinition",
            "conceptId",
            "valid",
-           csSourceType = "sourceType")
+           csSourceType = "sourceType") |>
+    distinct()
   DatabaseConnector::insertTable(
     connection = connection,
     databaseSchema = pegasusDatabaseSchema,

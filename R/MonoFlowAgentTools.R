@@ -75,6 +75,7 @@ PegasusAgentContext <- R6::R6Class(
                        databaseReference$referenceCohortDatabaseSchema,
                        paste0(databaseReference$referenceCohortTable, "_profile")))
         }
+        Pegasus:::ensureStandardConceptSets(connection, databaseReference, self$pegasusConnection, pegasusDatabaseSchema)
         self$connections[[databaseReference$databaseName]] <- connection
       }
     },
@@ -1036,7 +1037,7 @@ samplePatientProfileForDatabase <- function(connection, databaseReference, cohor
     person_id = personId,
     snakeCaseToCamelCase = TRUE
   )
-  profileText <- Keeper:::createPrompt(
+  profileText <- Keeper::createPrompt(
     settings = Keeper::createPromptSettings(),
     subset = profile
   )
@@ -1074,8 +1075,29 @@ listConceptSets <- function(context, phenotype) {
     phenotype = quoteSqlString(phenotype),
     snakeCaseToCamelCase = TRUE
   )
-  #TODO: add standard concept sets
-  subset <- conceptSets |>
+
+  sql <- "
+    SELECT concept_set_name,
+      has_descendants,
+      database_meta_data.database_id,
+      cdm_source_abbreviation,
+      overall_persons
+    FROM @database_schema.concept_set
+    INNER JOIN @database_schema.concept_set_person_count
+      ON concept_set.concept_set_id = concept_set_person_count.concept_set_id
+    INNER JOIN @database_schema.database_meta_data
+      ON concept_set_person_count.database_id = database_meta_data.database_id
+    WHERE concept_set_name IN (@concept_set_names);
+  "
+  standardConceptSets <- DatabaseConnector::renderTranslateQuerySql(
+    connection = context$pegasusConnection,
+    sql = sql,
+    database_schema = context$pegasusDatabaseSchema,
+    concept_set_names = paste(sapply(getStandardConceptSets()$conceptSetName, quoteSqlString), collapse = ", "),
+    snakeCaseToCamelCase = TRUE
+  )
+
+  subset <- bind_rows(conceptSets, standardConceptSets) |>
     filter(.data$databaseId %in% context$getDatabaseIds()) |>
     select("conceptSetName",
            "hasDescendants",
@@ -1092,7 +1114,6 @@ listConceptSets <- function(context, phenotype) {
       values_fill = 0
     ) |>
     arrange(.data$conceptSetName)
-
   table <- formatPipeTable(subset)
   return(table)
 }

@@ -306,7 +306,7 @@ convertCirceConceptSetToCapr <- function(json, conceptSetName) {
 createConceptSetCounts <- function(conceptSets,
                                    databaseReference = databaseReference,
                                    maxCores = 4,
-                                   cacheFolder) {
+                                   cacheFolder = NULL) {
   errorMessages <- checkmate::makeAssertCollection()
   checkmate::assertDataFrame(conceptSets, min.rows = 1, add = errorMessages)
   checkmate::assertNames(colnames(conceptSets), must.include = c(
@@ -335,8 +335,12 @@ createConceptSetCounts <- function(conceptSets,
       filter(!is.na(.data$circeConceptSetExpression))
   }
 
-  databaseCacheFolder <- file.path(cacheFolder, gsub("[^[:alnum:]]+", "", databaseReference$databaseName))
-  dir.create(databaseCacheFolder, recursive = TRUE)
+  if (is.null(cacheFolder)) {
+    databaseCacheFolder <- NULL
+  } else {
+    databaseCacheFolder <- file.path(cacheFolder, gsub("[^[:alnum:]]+", "", databaseReference$databaseName))
+    dir.create(databaseCacheFolder, recursive = TRUE)
+  }
 
   batchSize <- 25
   batches <- split(uniqueConceptSets, (seq_len(nrow(conceptSets)) - 1) %/% batchSize)

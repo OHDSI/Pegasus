@@ -24,3 +24,28 @@ unlink("extras/Pegasus.pdf")
 system("R CMD Rd2pdf ./ --output=extras/Pegasus.pdf")
 
 pkgdown::build_site()
+
+# Add standard concept sets to package:
+library(dplyr)
+connection <- DatabaseConnector::connect(
+  dbms = "spark",
+  connectionString = keyring::key_get("databricksConnectionString"),
+  user = "token",
+  password = keyring::key_get("databricksToken")
+)
+vocabDatabaseSchema <- "optum_extended_dod.cdm_optum_extended_dod_v4020"
+toRow <- function(capr) {
+  capr <- Capr::getConceptSetDetails(capr, connection, vocabDatabaseSchema)
+  json <- Capr::toConceptSetJson(capr)
+  return(tibble(conceptSetName = capr@Name,
+                circeConceptSetExpression = json,
+                caprConceptSetExpression = Pegasus:::convertCirceConceptSetToCapr(json, capr@Name),
+                sourceType = "User"))
+}
+standardConceptSets <- bind_rows(
+  toRow(Capr::cs(Capr::descendants(9201), name = "Inpatient visit")),
+  toRow(Capr::cs(Capr::descendants(9202), name = "Outpatient visit")),
+  toRow(Capr::cs(Capr::descendants(9203, 262), name = "Emergency room visit"))
+)
+readr::write_csv(standardConceptSets, "inst/StandardConceptSets.csv")
+DatabaseConnector::disconnect(connection)

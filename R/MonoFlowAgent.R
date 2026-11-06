@@ -161,3 +161,86 @@ constructContext <- function(phenotype) {
   )
   return(context)
 }
+
+#' Get standard concept sets
+#'
+#' @description
+#' Gets a list of standard concepts from the Pegasus package. These are used by the MonoFlow agent.
+#'
+#' @returns
+#' A tibble similar to `generateConceptSets()`.
+#'
+#' @export
+getStandardConceptSets <- function() {
+  fileName <- system.file("StandardConceptSets.csv", package = "Pegasus")
+  conceptSets <- readr::read_csv(fileName, show_col_types = FALSE)
+  conceptSets <- conceptSets |>
+    mutate(phenotypeName = NA_character_,
+           pertains = NA_character_,
+           category = NA_character_,
+           conceptId = NA_integer_,
+           conceptName = NA_character_,
+           conceptSetId = NA_integer_,
+           hasDescendants = 1,
+           clinicalDefinition = NA_character_)
+  return(conceptSets)
+}
+
+ensureStandardConceptSets <- function(connection, databaseReference, pegasusConnection, pegasusDatabaseSchema) {
+  conceptSets <- getStandardConceptSets()
+  sql <- "
+    SELECT concept_set_id,
+      concept_set_name
+    FROM @database_schema.concept_set;
+  "
+  existingConceptSets <- DatabaseConnector::renderTranslateQuerySql(
+    connection = pegasusConnection,
+    sql = sql,
+    database_schema = pegasusDatabaseSchema,
+    snakeCaseToCamelCase = TRUE
+  )
+  missingConceptSets <- conceptSets[!conceptSets$conceptSetName %in% existingConceptSets$conceptSetName, ]
+  if (nrow(missingConceptSets) > 0) {
+    message(sprintf("Missing standard concept sets '%s'. Adding (including person counts).",
+                    paste(missingConceptSets$conceptSetName, collapse = "', '")))
+    lastId <- max(existingConceptSets$conceptSetId)
+    missingConceptSets <- missingConceptSets |>
+      mutate(conceptSetId = row_number() + lastId)
+
+    counts <- createConceptSetCounts(
+      conceptSets = missingConceptSets,
+      databaseReference = databaseReference
+    )
+
+    dataToUpload <- missingConceptSets |>
+      select("conceptSetId",
+             "conceptSetName",
+             "circeConceptSetExpression",
+             "caprConceptSetExpression",
+             "hasDescendants",
+             "clinicalDefinition",
+             "conceptId",
+             csSourceType = "sourceType") |>
+      mutate(valid = 1)
+    DatabaseConnector::insertTable(
+      connection = pegasusConnection,
+      databaseSchema = pegasusDatabaseSchema,
+      tableName = "concept_set",
+      data = dataToUpload,
+      dropTableIfExists = FALSE,
+      createTable = FALSE,
+      tempTable = FALSE,
+      camelCaseToSnakeCase = TRUE
+    )
+    DatabaseConnector::insertTable(
+      connection = pegasusConnection,
+      databaseSchema = pegasusDatabaseSchema,
+      tableName = "concept_set_person_count",
+      data = counts,
+      dropTableIfExists = FALSE,
+      createTable = FALSE,
+      tempTable = FALSE,
+      camelCaseToSnakeCase = TRUE
+    )
+  }
+}

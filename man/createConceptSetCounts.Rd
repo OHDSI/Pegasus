@@ -8,7 +8,7 @@ createConceptSetCounts(
   conceptSets,
   databaseReference = databaseReference,
   maxCores = 4,
-  cacheFolder
+  cacheFolder = NULL
 )
 }
 \arguments{
