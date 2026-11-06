@@ -241,7 +241,7 @@ cohortDefinitions <- cohortDefinitions |>
 circeToCaprCohortDefinition <- function(json) {
   tempFile <- tempfile(fileext = ".json")
   on.exit(unlink(tempFile))
-  writeLines(cohortDefinitions$circeCohortExpression[1], tempFile)
+  writeLines(json, tempFile)
   capr <- Capr::jsonToCapr(tempFile)
   capr <- strsplit(capr, "\n")[[1]]
   capr <- capr[-(1:5)]

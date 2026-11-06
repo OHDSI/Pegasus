@@ -20,7 +20,6 @@
 #' Generate meta data for phenotypes
 #'
 #' @template Phenotypes
-#' @template DatabaseReference
 #' @template LlmClient
 #' @template CostTracker
 #'

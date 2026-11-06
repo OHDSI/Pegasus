@@ -10,7 +10,8 @@ createKeeperReferenceCohorts(
   costTracker = createCostTracker(),
   databaseReference,
   maxCores = 4,
-  cacheFolder
+  uploadKeeperProfiles = TRUE,
+  workFolder
 )
 }
 \arguments{
@@ -26,7 +27,10 @@ function.}
 
 \item{maxCores}{Maximum number of parallel cores to use.}
 
-\item{cacheFolder}{A folder where data objects can be cached so a restart can continue where it left off.}
+\item{uploadKeeperProfiles}{If TRUE then the patient profiles will also be uploaded to the database, which can be
+used by the MonoFlow agent.}
+
+\item{workFolder}{A folder where data objects are stored.}
 }
 \value{
 A tibble with a row per phenotype, indicating the reference cohort Id, size, and possibly error messages.

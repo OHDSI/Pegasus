@@ -39,8 +39,8 @@ Imports:
 	httr, 
 	jsonlite,
   purrr,
+  tidyr,
 	R6,
-	pool,
 	callr
 Suggests:
 	testthat,

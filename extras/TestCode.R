@@ -134,7 +134,7 @@ status <- createKeeperReferenceCohorts(
   phenotypes = phenotypes,
   llmClient = llmClient,
   databaseReference = databaseReference,
-  cacheFolder = "e:/temp/pegasusKeeperReferenceCache"
+  workFolder = "e:/temp/pegasusKeeperReferenceCache"
 )
 
 

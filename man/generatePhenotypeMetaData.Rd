@@ -17,9 +17,6 @@ generatePhenotypeMetaData(
 \code{ellmer::chat_ollama()}.}
 
 \item{costTracker}{An object as created using \code{createCostTracker()} that keeps track of LLM costs.}
-
-\item{databaseReference}{An object of type \code{DatabaseReference} as created by the \code{createDatabaseReference()}
-function.}
 }
 \value{
 A tibble with one row.

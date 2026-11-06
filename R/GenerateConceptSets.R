@@ -23,8 +23,8 @@
 #' @template LlmClient
 #' @template CostTracker
 #' @template DatabaseReference
-#' @param maxCores Maximum number of parallel cores to use.
-#' @param cacheFolder A folder where data objects can be cached so a restart can continue where it left off.
+#' @template MaxCores
+#' @template CacheFolder
 #'
 #' @returns
 #' A tibble with one row per generated concept set. Targets that already have an existing concept set are omitted.
@@ -296,8 +296,8 @@ convertCirceConceptSetToCapr <- function(json, conceptSetName) {
 #' `downloadConceptSets()` function.
 #'
 #' @template DatabaseReference
-#' @param maxCores Maximum number of parallel cores to use.
-#' @param cacheFolder A folder where data objects can be cached so a restart can continue where it left off.
+#' @template MaxCores
+#' @template CacheFolder
 #'
 #' @returns
 #' A tible with one row per concept set, with columns with counts per domain and overall.

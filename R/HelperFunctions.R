@@ -177,6 +177,9 @@ normalizeNames <- function(names) {
 #' A database reference points to a database holding patient-level data in the CDM, as well as various cohort tables
 #' for that database.
 #'
+#' The `workDatabaseSchema`, `workCohortTable`, and `workConceptSetTable` arguments are only required when running
+#' cohort definition creation workflows such as `generateCohortDefinitionsUsingMonoFlowAgent()`.
+#'
 #' @param databaseName                  A human-readable name for the database.
 #' @param connectionDetails             An R object of type `connectionDetails` created using the
 #'                                      [DatabaseConnector::createConnectionDetails()] function for connecting to the
@@ -190,7 +193,13 @@ normalizeNames <- function(names) {
 #' @param referenceCohortTable          The name of the table where the reference cohorts will be stored.
 #' @param candidateCohortDatabaseSchema The name of the database schema where the candidate cohorts will be
 #'                                      instantiated.
-#' @param candidateCohortTable          The name of the tabe where the candidate cohorts will be instantiated.
+#' @param candidateCohortTable          The name of the table where the candidate cohorts will be instantiated.
+#' @param workDatabaseSchema            The name of the database schema where data can be written in the process of
+#'                                      creating cohort definitions (e.g by agents).
+#' @param workCohortTable               The name of the table where cohort data can be written in the process of
+#'                                      creating cohort definitions (e.g by agents).
+#' @param workConceptSetTable           The name of the table where concept set data can be written in the process of
+#'                                      creating cohort definitions (e.g by agents).
 #' @param databaseId                    A unique integer to denote a database. Defaults to a hash of
 #'                                      `cdmDatabaseSchema`.
 #'
@@ -208,6 +217,9 @@ createDatabaseReference <- function(databaseName,
                                     referenceCohortTable,
                                     candidateCohortDatabaseSchema,
                                     candidateCohortTable,
+                                    workDatabaseSchema = NULL,
+                                    workCohortTable = NULL,
+                                    workConceptSetTable = NULL,
                                     databaseId = digest::digest2int(cdmDatabaseSchema)) {
 
   databaseReference <- list()
@@ -261,4 +273,15 @@ getDatabaseMetaData <- function(databaseReference) {
            cdmDatabaseSchema = databaseReference$cdmDatabaseSchema,
            resultDatabaseSchema = databaseReference$referenceCohortDatabaseSchema)
   return(metaData)
+}
+
+circeToCaprCohortDefinition <- function(json) {
+  tempFile <- tempfile(fileext = ".json")
+  on.exit(unlink(tempFile))
+  writeLines(json, tempFile)
+  capr <- Capr::jsonToCapr(tempFile)
+  capr <- strsplit(capr, "\n")[[1]]
+  capr <- capr[-(1:5)]
+  capr <- paste(capr, collapse = "\n")
+  return(capr)
 }

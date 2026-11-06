@@ -15,6 +15,9 @@ createDatabaseReference(
   referenceCohortTable,
   candidateCohortDatabaseSchema,
   candidateCohortTable,
+  workDatabaseSchema = NULL,
+  workCohortTable = NULL,
+  workConceptSetTable = NULL,
   databaseId = digest::digest2int(cdmDatabaseSchema)
 )
 }
@@ -43,7 +46,16 @@ be instantiated.}
 \item{candidateCohortDatabaseSchema}{The name of the database schema where the candidate cohorts will be
 instantiated.}
 
-\item{candidateCohortTable}{The name of the tabe where the candidate cohorts will be instantiated.}
+\item{candidateCohortTable}{The name of the table where the candidate cohorts will be instantiated.}
+
+\item{workDatabaseSchema}{The name of the database schema where data can be written in the process of
+creating cohort definitions (e.g by agents).}
+
+\item{workCohortTable}{The name of the table where cohort data can be written in the process of
+creating cohort definitions (e.g by agents).}
+
+\item{workConceptSetTable}{The name of the table where concept set data can be written in the process of
+creating cohort definitions (e.g by agents).}
 
 \item{databaseId}{A unique integer to denote a database. Defaults to a hash of
 \code{cdmDatabaseSchema}.}
@@ -54,4 +66,7 @@ An object of type \code{DatabaseReference}, to be used in various functions.
 \description{
 A database reference points to a database holding patient-level data in the CDM, as well as various cohort tables
 for that database.
+
+The \code{workDatabaseSchema}, \code{workCohortTable}, and \code{workConceptSetTable} arguments are only required when running
+cohort definition creation workflows such as \code{generateCohortDefinitionsUsingMonoFlowAgent()}.
 }

@@ -20,8 +20,10 @@
 #' @template LlmClient
 #' @template CostTracker
 #' @template DatabaseReference
-#' @param maxCores Maximum number of parallel cores to use.
-#' @param cacheFolder A folder where data objects can be cached so a restart can continue where it left off.
+#' @template MaxCores
+#' @param uploadKeeperProfiles If TRUE then the patient profiles will also be uploaded to the database, which can be
+#' used by the MonoFlow agent.
+#' @param workFolder A folder where data objects are stored.
 #'
 #' @returns
 #' A tibble with a row per phenotype, indicating the reference cohort Id, size, and possibly error messages.
@@ -32,7 +34,8 @@ createKeeperReferenceCohorts <- function(phenotypes,
                                          costTracker = createCostTracker(),
                                          databaseReference,
                                          maxCores = 4,
-                                         cacheFolder) {
+                                         uploadKeeperProfiles = TRUE,
+                                         workFolder) {
   errorMessages <- checkmate::makeAssertCollection()
   checkmate::assertNames(colnames(phenotypes), must.include = c(
     "phenotypeName",
@@ -42,8 +45,12 @@ createKeeperReferenceCohorts <- function(phenotypes,
   checkmate::assertClass(costTracker, "CostTracker", add = errorMessages)
   checkmate::assertClass(databaseReference, "DatabaseReference", add = errorMessages)
   checkmate::assertInt(maxCores, lower = 1, add = errorMessages)
-  checkmate::assertCharacter(cacheFolder, len = 1, null.ok = TRUE, add = errorMessages)
+  checkmate::assertLogical(uploadKeeperProfiles, len = 1, add = errorMessages)
+  checkmate::assertCharacter(workFolder, len = 1, add = errorMessages)
   checkmate::reportAssertions(collection = errorMessages)
+
+  startTime <- Sys.time()
+  startCost <- costTracker$amount
 
   connection <- DatabaseConnector::connect(databaseReference$connectionDetails)
   on.exit(DatabaseConnector::disconnect(connection))
@@ -63,6 +70,11 @@ createKeeperReferenceCohorts <- function(phenotypes,
     if (nrow(existingCohorts) == 0) {
       lastCohortId <- 0
     } else {
+      overlap <- intersect(phenotypes$phenotypeName, existingCohorts$phenotype)
+      if (length(overlap) > 0) {
+        stop(sprintf("Phenotypes '%s' already have reference cohorts in the database",
+                     paste(overlap, collapse =  "', '")))
+      }
       lastCohortId <- max(existingCohorts$cohortDefinitionId)
     }
   } else {
@@ -91,8 +103,8 @@ createKeeperReferenceCohorts <- function(phenotypes,
   phenotypes <- phenotypes |>
     mutate(cohortId = row_number() + lastCohortId)
 
-  message("Generating Keeper reference profiles")
-  ParallelLogger::addDefaultFileLogger(file.path(cacheFolder, "log.txt"), name = "KEEPER_LOGGER")
+  message("Generating Keeper reference cohorts")
+  ParallelLogger::addDefaultFileLogger(file.path(workFolder, "log.txt"), name = "KEEPER_LOGGER")
   cluster <- ParallelLogger::makeCluster(min(maxCores, nrow(phenotypes)))
   ParallelLogger::clusterRequire(cluster, "dplyr")
   rows <- split(phenotypes, phenotypes$cohortId)
@@ -102,24 +114,74 @@ createKeeperReferenceCohorts <- function(phenotypes,
     fun = createKeeperReferenceCohort,
     llmClient = llmClient,
     databaseReference = databaseReference,
-    cacheFolder = cacheFolder
+    workFolder = workFolder
   )
   ParallelLogger::stopCluster(cluster)
   ParallelLogger::unregisterLogger("KEEPER_LOGGER")
 
   costTracker$amount <- costTracker$amount + sum(unlist(cost))
 
-  message("Uploading Keeper reference profiles")
+  status <- uploadReferenceCohortsAndProfiles(
+    phenotypes = phenotypes,
+    connection = connection,
+    databaseReference = databaseReference,
+    uploadKeeperProfiles = uploadKeeperProfiles,
+    workFolder = workFolder
+  )
+
+  delta <- Sys.time() - startTime
+  message(sprintf("Generating Keeper reference cohorts took %0.2f %s and cost $%0.2f.",
+                  delta,
+                  attr(delta, "units"),
+                  costTracker$amount - startCost))
+  return(status)
+}
+
+uploadReferenceCohortsAndProfiles <- function(phenotypes,
+                                              connection,
+                                              databaseReference,
+                                              uploadKeeperProfiles,
+                                              workFolder) {
+  message("Uploading Keeper reference cohorts and profiles")
+
+  if (uploadKeeperProfiles) {
+    profilesTableExists <- DatabaseConnector::existsTable(
+      connection = connection,
+      databaseSchema = databaseReference$referenceCohortDatabaseSchema,
+      tableName = paste0(databaseReference$referenceCohortTable, "_profile")
+    )
+    if (!profilesTableExists) {
+      message("- Creating profile table")
+      sql <- "
+        CREATE TABLE @database_schema.@table (
+          cohort_definition_id INT,
+          person_id BIGINT,
+          start_day INT,
+          end_day INT,
+          concept_id INT,
+          concept_name VARCHAR,
+          category VARCHAR,
+          target VARCHAR,
+          extra_data VARCHAR
+        );
+      "
+      DatabaseConnector::renderTranslateExecuteSql(
+        connection = connection,
+        sql = sql,
+        database_schema = databaseReference$referenceCohortDatabaseSchema,
+        table = paste0(databaseReference$referenceCohortTable, "_profile")
+      )
+    }
+  }
   status <- phenotypes |>
     select("cohortId", "phenotypeName") |>
     mutate(referenceCohortSize = 0,
            error = "")
   for (i in seq_len(nrow(phenotypes))) {
     row <- phenotypes[i, ]
-    message("- Uploading reference cohort for '", row$phenotypeName,"'.")
-    referenceCohortId <-lastCohortId + 1
+    message("- Uploading reference cohort and profiles for '", row$phenotypeName,"'.")
     databaseForFileName <- gsub("[^[:alnum:]]+", "", databaseReference$databaseName)
-    phenotypeFolder <- file.path(cacheFolder, gsub("[^[:alnum:]]+", "_", row$phenotypeName))
+    phenotypeFolder <- file.path(workFolder, gsub("[^[:alnum:]]+", "_", row$phenotypeName))
 
     fileName <- file.path(phenotypeFolder, sprintf("llmReviews_%s.rds", databaseForFileName))
     if (!file.exists(fileName)) {
@@ -146,23 +208,70 @@ createKeeperReferenceCohorts <- function(phenotypes,
           sensitiveCohortTable = databaseReference$sensitiveCohortTable,
           sensitiveCohortDefinitionId = row$cohortId,
           referenceCohortDatabaseSchema = databaseReference$referenceCohortDatabaseSchema,
-          referenceCohortTableNames = referenceCohortTableNames,
+          referenceCohortTableNames = Keeper::createReferenceCohortTableNames(databaseReference$referenceCohortTable),
           referenceCohortDefinitionId = row$cohortId,
           createReferenceCohortTables = FALSE,
           stratifiedReviews = llmReviews
         )
         status$referenceCohortSize[i] <- nrow(llmReviews$llmReviews)
+
+        if (uploadKeeperProfiles) {
+          subFolder =  file.path(phenotypeFolder, sprintf("cache_%s", databaseForFileName))
+          keeperSamplePhase1 <- readRDS(file.path(subFolder, "keeperSamplePhase1.rds"))
+          keeperSamplePhase2 <- readRDS(file.path(subFolder, "keeperSamplePhase2.rds"))
+          keeper <- bind_rows(personIdToColumn(keeperSamplePhase1),
+                              personIdToColumn(keeperSamplePhase2)) |>
+            mutate(cohortDefinitionId = row$cohortId)
+          sql <- "
+          DELETE FROM @database_schema.@table
+          WHERE cohort_definition_id = @cohort_id;
+        "
+          DatabaseConnector::renderTranslateExecuteSql(
+            connection = connection,
+            sql = sql,
+            database_schema = databaseReference$referenceCohortDatabaseSchema,
+            table = paste0(databaseReference$referenceCohortTable, "_profile"),
+            cohort_id = row$cohortId,
+            reportOverallTime = FALSE,
+            progressBar = FALSE
+          )
+          DatabaseConnector::insertTable(
+            connection = connection,
+            databaseSchema = databaseReference$referenceCohortDatabaseSchema,
+            tableName = paste0(databaseReference$referenceCohortTable, "_profile"),
+            data = keeper,
+            createTable = FALSE,
+            tempTable = FALSE,
+            camelCaseToSnakeCase = TRUE
+          )
+        }
       }
     }
   }
   return(status)
 }
 
+personIdToColumn <- function(keeper) {
+  # Note: generated ID is re-used across samples, so best to drop:
+  keeper <- keeper |>
+    inner_join(
+      keeper |>
+        filter(.data$category == "personId") |>
+        transmute(.data$generatedId,
+                  personId = bit64::as.integer64(.data$conceptName)),
+      by = join_by("generatedId")
+    ) |>
+    select(-"generatedId")
+  return(keeper)
+
+}
+
+
 # row = rows[[1]]
 createKeeperReferenceCohort <- function(row,
                                         llmClient,
                                         databaseReference,
-                                        cacheFolder,
+                                        workFolder,
                                         stratifiedSampling = TRUE) {
 
   message(sprintf("*** Creating Keeper reference set for '%s' in %s ***",
@@ -170,7 +279,7 @@ createKeeperReferenceCohort <- function(row,
                   databaseReference$databaseName))
 
   databaseForFileName <- gsub("[^[:alnum:]]+", "", databaseReference$databaseName)
-  phenotypeFolder <- file.path(cacheFolder, gsub("[^[:alnum:]]+", "_", row$phenotypeName))
+  phenotypeFolder <- file.path(workFolder, gsub("[^[:alnum:]]+", "_", row$phenotypeName))
   dir.create(phenotypeFolder)
 
   # Generate concept sets ----------------------------------------------------------------------------------------------
@@ -227,7 +336,7 @@ createKeeperReferenceCohort <- function(row,
         client = llmClient,
         phenotypeName = row$phenotypeName,
         clinicalDefinition = row$clinicalDefinition,
-        cacheFolder =  file.path(phenotypeFolder, sprintf("cache_%s", databaseForFileName))
+        cacheFolder = file.path(phenotypeFolder, sprintf("cache_%s", databaseForFileName))
       )
     },
     NoCasesInSampleError = function(e) {
