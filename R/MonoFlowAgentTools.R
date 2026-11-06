@@ -101,6 +101,10 @@ PegasusAgentContext <- R6::R6Class(
       return(sapply(self$databaseReferences, function(x) x$databaseId))
     },
 
+    getDatabaseNames = function() {
+      return(names(self$databaseReferences))
+    },
+
     getVocabularyConnection = function() {
       return(self$connections[[1]])
     },
@@ -1553,12 +1557,16 @@ validateCaprTool <- function(context) ellmer::tool(
   )
 )
 
+# Note: this argument is intentionally 'required'. ellmer always serializes OpenAI/Azure tools
+# with strict = TRUE, and renders an optional argument as a nullable union type
+# (e.g. "type": ["array", "null"]). Azure's strict schema validator rejects that union, so the
+# argument is kept required and the LLM is told to pass an empty array to mean 'all databases'.
 createDatabaseArgument <- function(context) {
   ellmer::type_array(
     ellmer::type_string(),
-    description = paste("Names of the databases to use. Defaults to all databases. Available:",
-                        paste(context$databases$databaseName, collapse = "; ")),
-    required = FALSE
+    description = paste("Names of the databases to use. Pass an empty array ([]) to use all databases. Available:",
+                        paste(context$getDatabaseNames(), collapse = "; ")),
+    required = TRUE
   )
 }
 
