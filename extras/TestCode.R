@@ -137,5 +137,17 @@ status <- createKeeperReferenceCohorts(
   workFolder = "e:/temp/pegasusKeeperReferenceCache"
 )
 
+# Create cohort definitions using MonoFlow -----------------------------------------------------------------------------
+databaseReference$workDatabaseSchema <- "scratch.scratch_mschuemi"
+databaseReference$workCohortTable <- "pegasus_agent_cohort"
+databaseReference$workConceptSetTable <- "pegasus_agent_concept_set"
 
+cohortDefinitions <- generateCohortDefinitionsUsingMonoFlowAgent(
+  phenotypes = phenotypes,
+  llmClient = llmClient,
+  pegasusConnectionDetails = pegasusConnectionDetails,
+  pegasusDatabaseSchema = pegasusDatabaseSchema,
+  databaseReferences = list(databaseReference),
+  workFolder = "e:/temp/pegasusMonoFlow"
+)
 

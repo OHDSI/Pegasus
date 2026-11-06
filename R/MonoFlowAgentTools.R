@@ -1216,7 +1216,7 @@ getConceptSetsCapr <- function(context, phenotype, conceptSetNames, detail = "co
   return(json)
 }
 
-validateCapr <- function(caprCode) {
+validateCapr <- function(context, caprCode) {
   result <- tryCatch({
     compileCaprViaWorker(caprCode)
     "Valid"
@@ -1512,7 +1512,7 @@ createAgentTools <- function(context) {
 
 listConceptSetsTool <- function(context) ellmer::tool(
   bindContext(listConceptSets, context),
-  name = "list_concept_sets",
+  name = "listConceptSets",
   description = paste(
     "Retrieve the concept sets associated with a phenotype.",
     "Returns a markdown table with three columns: concept set name, whether the set includes descendants, and the",
@@ -1520,19 +1520,19 @@ listConceptSetsTool <- function(context) ellmer::tool(
     "A count of 0 means nobody has any of the concepts."
   ),
   arguments = list(
-    phenotype = type_string("Name of the phenotype for which concept sets should be returned.")
+    phenotype = ellmer::type_string("Name of the phenotype for which concept sets should be returned.")
   )
 )
 
 getConceptSetsCaprTool <- function(context) ellmer::tool(
   bindContext(getConceptSetsCapr, context),
-  name = "get_concept_sets_capr",
+  name = "getConceptSetsCapr",
   description = paste("Returns the Capr R code for one or more concept sets, and unique person counts per domain",
                       "(only non-zero domains)."),
   arguments = list(
-    phenotype = type_string("Name of the phenotype."),
-    conceptSetNames = type_array(type_string("Names of the concept sets.")),
-    detail = type_enum(c("code", "code_and_counts", "full_reference"),
+    phenotype = ellmer::type_string("Name of the phenotype."),
+    conceptSetNames = ellmer::type_array(ellmer::type_string("Names of the concept sets.")),
+    detail = ellmer::type_enum(c("code", "code_and_counts", "full_reference"),
                        paste("Level of detail to return.",
                              "'code' returns the Capr code,",
                              "'code_and_counts' additionally returns person count per domain, and",
@@ -1546,7 +1546,7 @@ validateCaprTool <- function(context) ellmer::tool(
   name = "validate_capr",
   description = "Validate the provided Capr code. Either returns 'Valid' or an informative error message.",
   arguments = list(
-    caprCode = type_string(paste(
+    caprCode = ellmer::type_string(paste(
       "A single Capr cohort definition as R code: one cohort(...) expression with all concept",
       "sets inlined and no assignments. Compiled server-side - do not pass JSON."
     ))
@@ -1562,27 +1562,26 @@ createDatabaseArgument <- function(context) {
   )
 }
 
-convertCaprToJsonTool <- function(context, databaseArgument = createDatabaseArgument(context)) ellmer::tool(
+convertCaprToJsonTool <- function(context) ellmer::tool(
   bindContext(convertCaprToJson, context),
-  name = "convert_capr_to_json",
+  name = "convertCaprToJson",
   description = paste("Convert Capr code to JSON, including full concept information.",
                       "(This can be a lot of text). Concept details come from the first selected database."),
   arguments = list(
-    caprCode = type_string(paste(
+    caprCode = ellmer::type_string(paste(
       "A single Capr cohort definition as R code: one cohort(...) expression with all concept",
       "sets inlined and no assignments. Compiled server-side - do not pass JSON."
-    )),
-    database = databaseArgument
+    ))
   )
 )
 
 generateCohortTool <- function(context, databaseArgument = createDatabaseArgument(context)) ellmer::tool(
   bindContext(generateCohort, context),
-  name = "generate_cohort",
+  name = "generateCohort",
   description = paste("Generate the cohort in the selected database(s) (default: all) and return the cohort ID.",
                       "The same cohort ID is used in every database."),
   arguments = list(
-    caprCode = type_string(paste(
+    caprCode = ellmer::type_string(paste(
       "A single Capr cohort definition as R code: one cohort(...) expression with all concept",
       "sets inlined and no assignments. Compiled server-side - do not pass JSON."
     )),
@@ -1592,47 +1591,47 @@ generateCohortTool <- function(context, databaseArgument = createDatabaseArgumen
 
 getCohortCountTool <- function(context, databaseArgument = createDatabaseArgument(context)) ellmer::tool(
   bindContext(getCohortCount, context),
-  name = "get_cohort_count",
+  name = "getCohortCount",
   description = paste("Returns cohort sizes per database. For cohorts with attrition rules, also returns the number of persons",
                       "remaining after each rule is applied (incrementalPersons), the number of persons who satisfy",
                       "both the initial event and the rule (marginalPersons), and the number of persons that would be",
                       "added back if the rule were removed (gainCount)."),
   arguments = list(
-    cohortId = type_integer("The cohort ID as returned by the `generate_cohort` tool."),
+    cohortId = ellmer::type_integer("The cohort ID as returned by the `generate_cohort` tool."),
     database = databaseArgument
   )
 )
 
-getDatabaseDescriptionTool <- function(context) ellmer::tool(
+getDatabaseDescriptionTool <- function(context, databaseArgument = createDatabaseArgument(context)) ellmer::tool(
   bindContext(getDatabaseDescription, context),
-  name = "get_database_description",
+  name = "getDatabaseDescription",
   description = "Returns a short description of one or more databases (default: all).",
   arguments = list(
-    databaseName = type_string("Name of the database. Omit for all databases.", required = FALSE)
+    database = databaseArgument
   )
 )
 
 countConceptSetPersonOverlapTool <- function(context, databaseArgument = createDatabaseArgument(context)) ellmer::tool(
   bindContext(countConceptSetPersonOverlap, context),
-  name = "count_concept_set_person_overlap",
+  name = "countConceptSetPersonOverlap",
   description = paste(
     "Instantiate one or more Capr concept sets and count distinct people with their concepts",
     "in the general population and within inclusive day windows relative to generated cohort",
     "index dates. Returns per-domain and overall counts for each window."
   ),
   arguments = list(
-    caprCode = type_array(type_string(paste(
+    caprCode = ellmer::type_array(ellmer::type_string(paste(
       "A standalone Capr cs(...) expression. Supply one or more expressions; include a",
       "name argument in each expression."
     ))),
-    cohortId = type_integer("The cohort ID as returned by the `generate_cohort` tool."),
+    cohortId = ellmer::type_integer("The cohort ID as returned by the `generate_cohort` tool."),
     database = databaseArgument,
-    timeWindows = type_array(
-      type_object(
+    timeWindows = ellmer::type_array(
+      ellmer::type_object(
         "An inclusive time window relative to the cohort index date.",
-        name = type_string("A unique name for the window."),
-        startDay = type_integer("First included day relative to index; negative values are before index."),
-        endDay = type_integer("Last included day relative to index; positive values are after index.")
+        name = ellmer::type_string("A unique name for the window."),
+        startDay = ellmer::type_integer("First included day relative to index; negative values are before index."),
+        endDay = ellmer::type_integer("Last included day relative to index; positive values are after index.")
       ),
       description = paste(
         "Time windows to count. Unless you have a specific reason to change them, pass the standard",
@@ -1645,7 +1644,7 @@ countConceptSetPersonOverlapTool <- function(context, databaseArgument = createD
 
 describeMeasurementValuesTool <- function(context, databaseArgument = createDatabaseArgument(context)) ellmer::tool(
   bindContext(describeMeasurementValues, context),
-  name = "describe_measurement_values",
+  name = "describeMeasurementValues",
   description = paste(
     "For a measurement concept set, enumerate all units observed in the database and return",
     "descriptives of the measurement value distribution per unit: number of measurements,",
@@ -1654,7 +1653,7 @@ describeMeasurementValuesTool <- function(context, databaseArgument = createData
     "a unit are reported as unit concept ID 0 ('No unit')."
   ),
   arguments = list(
-    caprCode = type_array(type_string(paste(
+    caprCode = ellmer::type_array(ellmer::type_string(paste(
       "A standalone Capr cs(...) expression. Supply one or more expressions; include a",
       "name argument in each expression."
     ))),
@@ -1664,7 +1663,7 @@ describeMeasurementValuesTool <- function(context, databaseArgument = createData
 
 computeIncidenceRateTool <- function(context, databaseArgument = createDatabaseArgument(context)) ellmer::tool(
   bindContext(computeIncidenceRate, context),
-  name = "compute_incidence_rate",
+  name = "computeIncidenceRate",
   description = paste(
     "Compute a simple incidence rate for a generated cohort across the entire database population.",
     "Only the first cohort entry per person is counted as an event, and person-time runs from the",
@@ -1674,36 +1673,36 @@ computeIncidenceRateTool <- function(context, databaseArgument = createDatabaseA
     "Age and sex strata are computed separately, not crossed."
   ),
   arguments = list(
-    cohortId = type_integer("The cohort ID as returned by the `generate_cohort` tool."),
+    cohortId = ellmer::type_integer("The cohort ID as returned by the `generate_cohort` tool."),
     database = databaseArgument
   )
 )
 
 evaluateCohortTool <- function(context, databaseArgument = createDatabaseArgument(context)) ellmer::tool(
   bindContext(evaluateCohort, context),
-  name = "evaluate_cohort",
+  name = "evaluateCohort",
   description = paste(
     "Evaluate the cohort using a 10,000 person KEEPER reference cohort.",
     "Returns sensitivity, specificity (adjusted for sampling), PPV, and the confusion matrix."
   ),
   arguments = list(
-    cohortId = type_integer("The cohort ID as returned by the `generate_cohort` tool."),
-    phenotype = type_string("Name of the phenotype."),
+    cohortId = ellmer::type_integer("The cohort ID as returned by the `generate_cohort` tool."),
+    phenotype = ellmer::type_string("Name of the phenotype."),
     database = databaseArgument
   )
 )
 
 samplePatientProfileTool <- function(context, databaseArgument = createDatabaseArgument(context)) ellmer::tool(
   bindContext(samplePatientProfile, context),
-  name = "sample_patient_profile",
+  name = "samplePatientProfile",
   description = paste(
     "Return the patient profile and rationale for one random patient in the KEEPER reference set per selected",
     "database. Call multiple times to sample multiple patients."
   ),
   arguments = list(
-    cohortId = type_integer("The cohort ID as returned by the `generate_cohort` tool."),
-    phenotype = type_string("Name of the phenotype. Used to fetch the gold standard."),
-    type = type_enum(c("TP", "FP", "TN", "FN"), paste(
+    cohortId = ellmer::type_integer("The cohort ID as returned by the `generate_cohort` tool."),
+    phenotype = ellmer::type_string("Name of the phenotype. Used to fetch the gold standard."),
+    type = ellmer::type_enum(c("TP", "FP", "TN", "FN"), paste(
       "Type, based on classification status, using the KEEPER reference cohort as gold standard.",
       "Options: TP, FP, TN, FN"
     )),

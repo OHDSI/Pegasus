@@ -69,11 +69,13 @@ generateCohortDefinitionsUsingMonoFlowAgent <- function(phenotypes,
   startTime <- Sys.time()
   startCost <- costTracker$amount
 
+  dir.create(workFolder)
   toolContext <- PegasusAgentContext$new(pegasusConnectionDetails = pegasusConnectionDetails,
                                          pegasusDatabaseSchema = pegasusDatabaseSchema,
                                          databaseReferences = databaseReferences)
   on.exit(toolContext$close())
-  systemPrompt <- paste(readLines(".agents/AGENTS.md"), collapse = "\n")
+  systemPromptFile <- system.file("prompts", "MonoFlowSystemPrompt.txt", package = "Pegasus")
+  systemPrompt <- paste(readLines(systemPromptFile), collapse = "\n")
 
   monoFlowAgent <- llmClient$clone()
   monoFlowAgent$register_tools(createAgentTools(toolContext))

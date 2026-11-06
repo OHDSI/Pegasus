@@ -48,7 +48,7 @@ caprCohort <- "cohort(entry = entry(conditionOccurrence(cs(descendants(192671L),
 caprConceptSet <- "cs(descendants(192671L), name = \"GI Bleed\")"
 caprMeasurementConceptSet <- "cs(descendants(3004501L), name = \"GI Bleed\")"
 
-validateCapr(caprCohort)
+validateCapr(context, caprCohort)
 convertCaprToJson(context, caprCohort)
 generateCohort(context, caprCohort)
 getDatabaseDescription(context)
