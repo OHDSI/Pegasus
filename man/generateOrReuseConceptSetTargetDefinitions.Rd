@@ -10,6 +10,7 @@ generateOrReuseConceptSetTargetDefinitions(
   minPhenotypeFraction = 0.02,
   llmClient,
   costTracker = createCostTracker(),
+  pegasusConnection = NULL,
   pegasusConnectionDetails = NULL,
   pegasusDatabaseSchema = NULL,
   tempEmulationSchema = getOption("sqlRenderTempEmulationSchema"),
@@ -30,9 +31,14 @@ descendants).}
 
 \item{costTracker}{An object as created using \code{createCostTracker()} that keeps track of LLM costs.}
 
+\item{pegasusConnection}{A connection object created using \code{DatabaseConnector::connect()} for connecting to
+the database holding the Pegasus data model. Can be null if
+\code{pegasusConnectionDetails} is provided.}
+
 \item{pegasusConnectionDetails}{An R object of type \code{connectionDetails} created using the
 \code{\link[DatabaseConnector:createConnectionDetails]{DatabaseConnector::createConnectionDetails()}} function for connecting to the
-database holding the Pegasus data model.}
+database holding the Pegasus data model. Can be null if
+\code{pegasusConnection} is provided.}
 
 \item{pegasusDatabaseSchema}{The name of the database schema holding the Pegasus data model}
 

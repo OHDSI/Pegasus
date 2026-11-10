@@ -6,6 +6,7 @@
 \usage{
 createConceptSetCounts(
   completeConceptSets,
+  pegasusConnection = NULL,
   pegasusConnectionDetails = NULL,
   pegasusDatabaseSchema = NULL,
   databaseReferences,
@@ -17,9 +18,14 @@ createConceptSetCounts(
 \item{completeConceptSets}{Concept sets with concept set IDs and Circe definitions, created either by the
 \code{downloadConceptSets()} or \code{downloadPhenotypeToConceptSets()} function.}
 
+\item{pegasusConnection}{A connection object created using \code{DatabaseConnector::connect()} for connecting to
+the database holding the Pegasus data model. Can be null if
+\code{pegasusConnectionDetails} is provided.}
+
 \item{pegasusConnectionDetails}{An R object of type \code{connectionDetails} created using the
 \code{\link[DatabaseConnector:createConnectionDetails]{DatabaseConnector::createConnectionDetails()}} function for connecting to the
-database holding the Pegasus data model.}
+database holding the Pegasus data model. Can be null if
+\code{pegasusConnection} is provided.}
 
 \item{pegasusDatabaseSchema}{The name of the database schema holding the Pegasus data model}
 

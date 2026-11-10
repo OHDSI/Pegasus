@@ -46,6 +46,7 @@ generateOrReuseConceptSetTargetDefinitions <- function(
     minPhenotypeFraction = 0.02,
     llmClient,
     costTracker = createCostTracker(),
+    pegasusConnection = NULL,
     pegasusConnectionDetails = NULL,
     pegasusDatabaseSchema = NULL,
     tempEmulationSchema = getOption("sqlRenderTempEmulationSchema"),
@@ -72,19 +73,18 @@ generateOrReuseConceptSetTargetDefinitions <- function(
   checkmate::assertNumber(minPhenotypeFraction, lower = 0, upper = 1, add = errorMessages)
   checkmate::assertR6(llmClient, "Chat", add = errorMessages)
   checkmate::assertClass(costTracker, "CostTracker", null.ok = TRUE, add = errorMessages)
+  checkmate::assertClass(pegasusConnection, "DatabaseConnectorConnection", null.ok = TRUE, add = errorMessages)
   checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", null.ok = TRUE, add = errorMessages)
   checkmate::assertCharacter(pegasusDatabaseSchema, len = 1, null.ok = TRUE, add = errorMessages)
   checkmate::assertCharacter(tempEmulationSchema, len = 1, null.ok = TRUE, add = errorMessages)
   checkmate::assertCharacter(cacheFolder, len = 1, null.ok = TRUE, add = errorMessages)
   checkmate::reportAssertions(collection = errorMessages)
-  if (!is.null(pegasusConnectionDetails) && is.null(pegasusDatabaseSchema)) {
-    stop("Must provide pegasusDatabaseSchema when providing pegasusConnectionDetails.")
+  if ((!is.null(pegasusConnection) || !is.null(pegasusConnectionDetails)) && is.null(pegasusDatabaseSchema)) {
+    stop("Must provide pegasusDatabaseSchema when providing pegasusConnection or pegasusConnectionDetails.")
   }
-  if (is.null(pegasusConnectionDetails)) {
-    connection <- NULL
-  } else {
-    connection <- DatabaseConnector::connect(pegasusConnectionDetails)
-    on.exit(DatabaseConnector::disconnect(connection))
+  if (!is.null(pegasusConnectionDetails)) {
+    pegasusConnection <- DatabaseConnector::connect(pegasusConnectionDetails)
+    on.exit(DatabaseConnector::disconnect(pegasusConnection))
   }
   dedupedTargets <- conceptSetTargets |>
     filter(match != "None") |>
@@ -112,7 +112,7 @@ generateOrReuseConceptSetTargetDefinitions <- function(
   hypernymTargets <- dedupedTargets |>
     filter(.data$category == "Hypernym")
   existingHypernymConceptSets <- downloadExistingConceptSetData(
-    connection = connection,
+    pegasusConnection = pegasusConnection,
     pegasusDatabaseSchema = pegasusDatabaseSchema,
     tempEmulationSchema = tempEmulationSchema,
     newTargets = hypernymTargets |>
@@ -128,7 +128,7 @@ generateOrReuseConceptSetTargetDefinitions <- function(
   drugTargets <- dedupedTargets |>
     filter(.data$domainId =="Drug")
   existingDrugConceptSets <- downloadExistingConceptSetData(
-    connection = connection,
+    pegasusConnection = pegasusConnection,
     pegasusDatabaseSchema = pegasusDatabaseSchema,
     tempEmulationSchema = tempEmulationSchema,
     newTargets = drugTargets |>
@@ -147,7 +147,7 @@ generateOrReuseConceptSetTargetDefinitions <- function(
     group_by(.data$conceptId, .data$conceptName) |>
     summarise(nPhenotypes = length(unique(.data$phenotypeName)), .groups = "drop")
   existingDefinitionData <- downloadExistingDefinitionData(
-    connection = connection,
+    pegasusConnection = pegasusConnection,
     pegasusDatabaseSchema = pegasusDatabaseSchema,
     tempEmulationSchema = tempEmulationSchema,
     uniqueTargets = uniqueTargets
@@ -429,11 +429,11 @@ generateNewDefinitions <- function(phenotypeTargetCategories,
   return(generatedDefinitions)
 }
 
-downloadExistingDefinitionData <- function(connection,
+downloadExistingDefinitionData <- function(pegasusConnection,
                                            pegasusDatabaseSchema,
                                            tempEmulationSchema,
                                            uniqueTargets) {
-  if (is.null(connection)) {
+  if (is.null(pegasusConnection)) {
     return(list(draftTargetToConceptSet = tibble(conceptId = 1, conceptSetId = 1) |>
                   filter(.data$conceptId != 1),
                 conceptSets = tibble(conceptSetId = 1) |>
@@ -442,7 +442,7 @@ downloadExistingDefinitionData <- function(connection,
   }
 
   DatabaseConnector::insertTable(
-    connection = connection,
+    connection = pegasusConnection,
     data = uniqueTargets |>
       select("conceptId"),
     tableName = "#target_concept_id",
@@ -461,7 +461,7 @@ downloadExistingDefinitionData <- function(connection,
     );
   "
   draftTargetToConceptSet <- DatabaseConnector::renderTranslateQuerySql(
-    connection = connection,
+    connection = pegasusConnection,
     sql = sql,
     database_schema = pegasusDatabaseSchema,
     snakeCaseToCamelCase = TRUE,
@@ -485,7 +485,7 @@ downloadExistingDefinitionData <- function(connection,
     );
   "
   conceptSets <- DatabaseConnector::renderTranslateQuerySql(
-    connection = connection,
+    connection = pegasusConnection,
     sql = sql,
     database_schema = pegasusDatabaseSchema,
     snakeCaseToCamelCase = TRUE,
@@ -493,7 +493,7 @@ downloadExistingDefinitionData <- function(connection,
   )
 
   DatabaseConnector::renderTranslateExecuteSql(
-    connection = connection,
+    connection = pegasusConnection,
     sql = "DROP TABLE #target_concept_id;",
     tempEmulationSchema = tempEmulationSchema,
     progressBar = FALSE,
@@ -511,7 +511,7 @@ downloadExistingDefinitionData <- function(connection,
       ON phenotype.clinical_definition = concept_set.clinical_definition;
   "
   allPhenotypes <- DatabaseConnector::renderTranslateQuerySql(
-    connection = connection,
+    connection = pegasusConnection,
     sql = sql,
     database_schema = pegasusDatabaseSchema,
     snakeCaseToCamelCase = TRUE,
@@ -528,17 +528,17 @@ downloadExistingDefinitionData <- function(connection,
               definitionsFromPhenotypes = definitionsFromPhenotypes))
 }
 
-downloadExistingConceptSetData <- function(connection,
+downloadExistingConceptSetData <- function(pegasusConnection,
                                            pegasusDatabaseSchema,
                                            tempEmulationSchema,
                                            newTargets,
                                            sourceType) {
-  if (is.null(connection)) {
+  if (is.null(pegasusConnection)) {
     return(tibble(conceptId = 1, conceptSetId = 1) |>
              filter(.data$conceptId != 1))
   }
   DatabaseConnector::insertTable(
-    connection = connection,
+    connection = pegasusConnection,
     data = newTargets |>
       select("conceptId"),
     tableName = "#target_concept_id",
@@ -561,7 +561,7 @@ downloadExistingConceptSetData <- function(connection,
       AND cs_source_type = '@source_type';
   "
   conceptSets <- DatabaseConnector::renderTranslateQuerySql(
-    connection = connection,
+    connection = pegasusConnection,
     sql = sql,
     database_schema = pegasusDatabaseSchema,
     source_type = sourceType,
@@ -569,7 +569,7 @@ downloadExistingConceptSetData <- function(connection,
     tempEmulationSchema = tempEmulationSchema
   )
   DatabaseConnector::renderTranslateExecuteSql(
-    connection = connection,
+    connection = pegasusConnection,
     sql = "DROP TABLE #target_concept_id;",
     tempEmulationSchema = tempEmulationSchema,
     progressBar = FALSE,

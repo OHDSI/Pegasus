@@ -35,11 +35,11 @@ PegasusAgentContext <- R6::R6Class(
     databaseReferences = NULL,
     connections = NULL,
 
-    initialize = function(pegasusConnectionDetails,
+    initialize = function(pegasusConnection,
                           pegasusDatabaseSchema,
                           databaseReferences) {
       errorMessages <- checkmate::makeAssertCollection()
-      checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", add = errorMessages)
+      checkmate::assertClass(pegasusConnection, "DatabaseConnectorConnection", add = errorMessages)
       checkmate::assertCharacter(pegasusDatabaseSchema, len = 1, add = errorMessages)
       checkmate::assertList(databaseReferences, min.len = 1, add = errorMessages)
       for (databaseReference in databaseReferences) {
@@ -53,29 +53,13 @@ PegasusAgentContext <- R6::R6Class(
       }
       checkmate::reportAssertions(collection = errorMessages)
 
-      self$pegasusConnection <- DatabaseConnector::connect(pegasusConnectionDetails)
+      self$pegasusConnection <- pegasusConnection
       self$pegasusDatabaseSchema <- pegasusDatabaseSchema
       names(databaseReferences) <- sapply(databaseReferences, function(x) x$databaseName)
       self$databaseReferences <- databaseReferences
 
       for (databaseReference in databaseReferences) {
         connection <- DatabaseConnector::connect(databaseReference$connectionDetails)
-        # Verify that at least the reference cohort and patient profile tables exist:
-        if (!DatabaseConnector::existsTable(connection = connection,
-                                            databaseSchema = databaseReference$referenceCohortDatabaseSchema,
-                                            tableName = databaseReference$referenceCohortTable)) {
-          stop(sprintf("No reference cohort table with database schema '%s' and table name '%s' found.",
-                       databaseReference$referenceCohortDatabaseSchema,
-                       databaseReference$referenceCohortTable))
-        }
-        if (!DatabaseConnector::existsTable(connection = connection,
-                                            databaseSchema = databaseReference$referenceCohortDatabaseSchema,
-                                            tableName = paste0(databaseReference$referenceCohortTable, "_profile"))) {
-          stop(sprintf("No reference cohort profile table with database schema '%s' and table name '%s' found.",
-                       databaseReference$referenceCohortDatabaseSchema,
-                       paste0(databaseReference$referenceCohortTable, "_profile")))
-        }
-        Pegasus:::ensureStandardConceptSets(connection, databaseReference, self$pegasusConnection, pegasusDatabaseSchema)
         self$connections[[databaseReference$databaseName]] <- connection
       }
     },
@@ -126,7 +110,6 @@ PegasusAgentContext <- R6::R6Class(
     },
 
     close = function() {
-      DatabaseConnector::disconnect(self$pegasusConnection)
       for (databaseReference in self$databaseReferences) {
         connection <- self$getConnection(databaseReference$databaseName)
         DatabaseConnector::disconnect(connection)
@@ -146,17 +129,6 @@ PegasusAgentContext <- R6::R6Class(
 )
 
 # Support functions ----------------------------------------------------------------------------------------------------
-# toMarkdownTable <- function(x) {
-#   rows <- apply(x, 1, paste, collapse = " | ")
-#
-#   paste(
-#     paste(names(x), collapse = " | "),
-#     paste(rep("---", ncol(x)), collapse = " | "),
-#     paste(rows, collapse = "\n"),
-#     sep = "\n"
-#   )
-# }
-
 runQuietly <- function(expr) {
   outputFile <- tempfile(fileext = ".log")
   messageFile <- tempfile(fileext = ".log")
@@ -1040,7 +1012,8 @@ samplePatientProfileForDatabase <- function(connection, databaseReference, cohor
     reference_cohort_definition_id = referenceCohortDefinitionId,
     person_id = personId,
     snakeCaseToCamelCase = TRUE
-  )
+  ) |>
+    mutate(generatedId = 1)
   profileText <- Keeper::createPrompt(
     settings = Keeper::createPromptSettings(),
     subset = profile

@@ -56,4 +56,4 @@ Remotes:
 NeedsCompilation: no
 Roxygen: list(markdown = TRUE)
 Encoding: UTF-8
-Config/roxygen2/version: 8.1.0
+Config/roxygen2/version: 8.1.1

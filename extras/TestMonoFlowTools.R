@@ -36,8 +36,10 @@ databaseReference <- createDatabaseReference(
 
 phenotype <- "Acute myocardial infarction"
 
+pegasusConnection <- DatabaseConnector::connect(pegasusConnectionDetails)
+
 source("R/MonoFlowAgentTools.R")
-context <- PegasusAgentContext$new(pegasusConnectionDetails = pegasusConnectionDetails,
+context <- PegasusAgentContext$new(pegasusConnection = pegasusConnection,
                                    pegasusDatabaseSchema = pegasusDatabaseSchema,
                                    databaseReferences = list(databaseReference))
 listConceptSets(context, phenotype)

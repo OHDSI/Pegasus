@@ -22,24 +22,30 @@
 #' Does not return anything. Creates the tables of the data model on the server.
 #'
 #' @export
-createDataModel <- function(pegasusConnectionDetails,
+createDataModel <- function(pegasusConnection = NULL,
+                            pegasusConnectionDetails = NULL,
                             pegasusDatabaseSchema) {
   errorMessages <- checkmate::makeAssertCollection()
-  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", add = errorMessages)
+  checkmate::assertClass(pegasusConnection, "DatabaseConnectorConnection", null.ok = TRUE, add = errorMessages)
+  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", null.ok = TRUE, add = errorMessages)
   checkmate::assertCharacter(pegasusDatabaseSchema, len = 1, add = errorMessages)
   checkmate::reportAssertions(errorMessages)
-
-  connection <- DatabaseConnector::connect(pegasusConnectionDetails)
-  on.exit(DatabaseConnector::disconnect(connection))
+  if (is.null(pegasusConnection) && is.null(pegasusConnectionDetails)) {
+    stop("Must provide either pegasusConnection or pegasusConnectionDetails")
+  }
+  if (is.null(pegasusConnection)) {
+    pegasusConnection <- DatabaseConnector::connect(pegasusConnectionDetails)
+    on.exit(DatabaseConnector::disconnect(pegasusConnection))
+  }
 
   message("Creating data model in schema ", pegasusDatabaseSchema)
   sql <- SqlRender::loadRenderTranslateSql(
     "CreateDataModel.sql",
     packageName = "Pegasus",
-    dbms = DatabaseConnector::dbms(connection),
+    dbms = DatabaseConnector::dbms(pegasusConnection),
     database_schema = pegasusDatabaseSchema
   )
-  DatabaseConnector::executeSql(connection, sql)
+  DatabaseConnector::executeSql(pegasusConnection, sql)
 }
 
 #' Get the current user name
@@ -77,7 +83,8 @@ uploadPhenotypes <- function(phenotypes,
                              timeCreated = Sys.time(),
                              draft = 0,
                              valid = 1,
-                             pegasusConnectionDetails,
+                             pegasusConnection = NULL,
+                             pegasusConnectionDetails = NULL,
                              pegasusDatabaseSchema) {
   errorMessages <- checkmate::makeAssertCollection()
   checkmate::assertDataFrame(phenotypes, min.rows = 1, add = errorMessages)
@@ -89,12 +96,17 @@ uploadPhenotypes <- function(phenotypes,
   checkmate::assertPOSIXct(timeCreated, len = 1, add = errorMessages)
   checkmate::assertInt(draft, lower = 0, upper = 1, add = errorMessages)
   checkmate::assertInt(valid, lower = 0, upper = 1, add = errorMessages)
-  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", add = errorMessages)
+  checkmate::assertClass(pegasusConnection, "DatabaseConnectorConnection", null.ok = TRUE, add = errorMessages)
+  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", null.ok = TRUE, add = errorMessages)
   checkmate::assertCharacter(pegasusDatabaseSchema, len = 1, add = errorMessages)
   checkmate::reportAssertions(errorMessages)
-
-  connection <- DatabaseConnector::connect(pegasusConnectionDetails)
-  on.exit(DatabaseConnector::disconnect(connection))
+  if (is.null(pegasusConnection) && is.null(pegasusConnectionDetails)) {
+    stop("Must provide either pegasusConnection or pegasusConnectionDetails")
+  }
+  if (is.null(pegasusConnection)) {
+    pegasusConnection <- DatabaseConnector::connect(pegasusConnectionDetails)
+    on.exit(DatabaseConnector::disconnect(pegasusConnection))
+  }
 
   sql <- "
     SELECT phenotype_id,
@@ -102,7 +114,7 @@ uploadPhenotypes <- function(phenotypes,
     FROM @database_schema.phenotype;
   "
   existingPhenotypes <- DatabaseConnector::renderTranslateQuerySql(
-    connection = connection,
+    connection = pegasusConnection,
     sql = sql,
     database_schema = pegasusDatabaseSchema,
     snakeCaseToCamelCase = TRUE
@@ -146,7 +158,7 @@ uploadPhenotypes <- function(phenotypes,
       mutate(valid = !!valid)
   }
   DatabaseConnector::insertTable(
-    connection = connection,
+    connection = pegasusConnection,
     databaseSchema = pegasusDatabaseSchema,
     tableName = "phenotype",
     data = phenotypes,
@@ -158,7 +170,7 @@ uploadPhenotypes <- function(phenotypes,
   message(sprintf("Uploaded %d record(s)", nrow(phenotypes)))
 }
 
-addPhenotypeIdIfMissing <- function(data, connection, pegasusDatabaseSchema) {
+addPhenotypeIdIfMissing <- function(data, pegasusConnection, pegasusDatabaseSchema) {
   if (!"phenotypeId" %in% colnames(data)) {
     sql <- "
       SELECT phenotype_id,
@@ -166,7 +178,7 @@ addPhenotypeIdIfMissing <- function(data, connection, pegasusDatabaseSchema) {
       FROM @database_schema.phenotype;
     "
     existingPhenotypes <- DatabaseConnector::renderTranslateQuerySql(
-      connection = connection,
+      connection = pegasusConnection,
       sql = sql,
       database_schema = pegasusDatabaseSchema,
       snakeCaseToCamelCase = TRUE
@@ -194,7 +206,8 @@ addPhenotypeIdIfMissing <- function(data, connection, pegasusDatabaseSchema) {
 #'
 #' @export
 uploadPhenotypeMetaData <- function(phenotypeMetaData,
-                                    pegasusConnectionDetails,
+                                    pegasusConnection = NULL,
+                                    pegasusConnectionDetails = NULL,
                                     pegasusDatabaseSchema) {
   errorMessages <- checkmate::makeAssertCollection()
   checkmate::assertDataFrame(phenotypeMetaData, min.rows = 1, add = errorMessages)
@@ -217,15 +230,20 @@ uploadPhenotypeMetaData <- function(phenotypeMetaData,
     # "confidence",
     "phenotypeName"
   ), add = errorMessages)
-  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", add = errorMessages)
+  checkmate::assertClass(pegasusConnection, "DatabaseConnectorConnection", null.ok = TRUE, add = errorMessages)
+  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", null.ok = TRUE, add = errorMessages)
   checkmate::assertCharacter(pegasusDatabaseSchema, len = 1, add = errorMessages)
   checkmate::reportAssertions(errorMessages)
-
-  connection <- DatabaseConnector::connect(pegasusConnectionDetails)
-  on.exit(DatabaseConnector::disconnect(connection))
+  if (is.null(pegasusConnection) && is.null(pegasusConnectionDetails)) {
+    stop("Must provide either pegasusConnection or pegasusConnectionDetails")
+  }
+  if (is.null(pegasusConnection)) {
+    pegasusConnection <- DatabaseConnector::connect(pegasusConnectionDetails)
+    on.exit(DatabaseConnector::disconnect(pegasusConnection))
+  }
 
   phenotypeMetaData <- addPhenotypeIdIfMissing(phenotypeMetaData,
-                                               connection = connection,
+                                               pegasusConnection = pegasusConnection,
                                                pegasusDatabaseSchema = pegasusDatabaseSchema)
 
   dataToUpload <- phenotypeMetaData |>
@@ -252,7 +270,7 @@ uploadPhenotypeMetaData <- function(phenotypeMetaData,
     FROM @database_schema.phenotype_meta_data;
   "
   existingData <- DatabaseConnector::renderTranslateQuerySql(
-    connection = connection,
+    connection = pegasusConnection,
     sql = sql,
     database_schema = pegasusDatabaseSchema,
     snakeCaseToCamelCase = TRUE
@@ -264,7 +282,7 @@ uploadPhenotypeMetaData <- function(phenotypeMetaData,
                  nrow(overlap)))
   }
   DatabaseConnector::insertTable(
-    connection = connection,
+    connection = pegasusConnection,
     databaseSchema = pegasusDatabaseSchema,
     tableName = "phenotype_meta_data",
     data = dataToUpload,
@@ -286,7 +304,8 @@ uploadPhenotypeMetaData <- function(phenotypeMetaData,
 #'
 #' @export
 uploadDraftConceptSetTargets <- function(draftConceptSetTargets,
-                                         pegasusConnectionDetails,
+                                         pegasusConnection = NULL,
+                                         pegasusConnectionDetails = NULL,
                                          pegasusDatabaseSchema) {
   errorMessages <- checkmate::makeAssertCollection()
   checkmate::assertDataFrame(draftConceptSetTargets, min.rows = 1, add = errorMessages)
@@ -302,12 +321,17 @@ uploadDraftConceptSetTargets <- function(draftConceptSetTargets,
     "vocabularyId",
     "match"
   ), add = errorMessages)
-  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", add = errorMessages)
+  checkmate::assertClass(pegasusConnection, "DatabaseConnectorConnection", null.ok = TRUE, add = errorMessages)
+  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", null.ok = TRUE, add = errorMessages)
   checkmate::assertCharacter(pegasusDatabaseSchema, len = 1, add = errorMessages)
   checkmate::reportAssertions(errorMessages)
-
-  connection <- DatabaseConnector::connect(pegasusConnectionDetails)
-  on.exit(DatabaseConnector::disconnect(connection))
+  if (is.null(pegasusConnection) && is.null(pegasusConnectionDetails)) {
+    stop("Must provide either pegasusConnection or pegasusConnectionDetails")
+  }
+  if (is.null(pegasusConnection)) {
+    pegasusConnection <- DatabaseConnector::connect(pegasusConnectionDetails)
+    on.exit(DatabaseConnector::disconnect(pegasusConnection))
+  }
 
   sql <- "
     SELECT phenotype.phenotype_id,
@@ -322,7 +346,7 @@ uploadDraftConceptSetTargets <- function(draftConceptSetTargets,
       ON draft_concept_set_target.phenotype_id = phenotype.phenotype_id;
   "
   existingDraftConceptSetTargets <- DatabaseConnector::renderTranslateQuerySql(
-    connection = connection,
+    connection = pegasusConnection,
     sql = sql,
     database_schema = pegasusDatabaseSchema,
     snakeCaseToCamelCase = TRUE
@@ -334,7 +358,7 @@ uploadDraftConceptSetTargets <- function(draftConceptSetTargets,
                  nrow(overlap)))
   }
   draftConceptSetTargets <- addPhenotypeIdIfMissing(draftConceptSetTargets,
-                                                    connection = connection,
+                                                    pegasusConnection = pegasusConnection,
                                                     pegasusDatabaseSchema = pegasusDatabaseSchema)
   dataToUpload <- draftConceptSetTargets |>
     select("phenotypeId",
@@ -350,7 +374,7 @@ uploadDraftConceptSetTargets <- function(draftConceptSetTargets,
     distinct()
 
   DatabaseConnector::insertTable(
-    connection = connection,
+    connection = pegasusConnection,
     databaseSchema = pegasusDatabaseSchema,
     tableName = "draft_concept_set_target",
     data = dataToUpload,
@@ -376,7 +400,8 @@ uploadDraftConceptSetTargets <- function(draftConceptSetTargets,
 #' @export
 uploadConceptSets <- function(conceptSets,
                               valid = 1,
-                              pegasusConnectionDetails,
+                              pegasusConnection = NULL,
+                              pegasusConnectionDetails = NULL,
                               pegasusDatabaseSchema) {
   errorMessages <- checkmate::makeAssertCollection()
   checkmate::assertDataFrame(conceptSets, min.rows = 1, add = errorMessages)
@@ -394,15 +419,20 @@ uploadConceptSets <- function(conceptSets,
     "caprConceptSetExpression"
   ), add = errorMessages)
   checkmate::assertInt(valid, lower = 0, upper = 1, add = errorMessages)
-  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", add = errorMessages)
+  checkmate::assertClass(pegasusConnection, "DatabaseConnectorConnection", null.ok = TRUE, add = errorMessages)
+  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", null.ok = TRUE, add = errorMessages)
   checkmate::assertCharacter(pegasusDatabaseSchema, len = 1, add = errorMessages)
   checkmate::reportAssertions(errorMessages)
-
-  connection <- DatabaseConnector::connect(pegasusConnectionDetails)
-  on.exit(DatabaseConnector::disconnect(connection))
+  if (is.null(pegasusConnection) && is.null(pegasusConnectionDetails)) {
+    stop("Must provide either pegasusConnection or pegasusConnectionDetails")
+  }
+  if (is.null(pegasusConnection)) {
+    pegasusConnection <- DatabaseConnector::connect(pegasusConnectionDetails)
+    on.exit(DatabaseConnector::disconnect(pegasusConnection))
+  }
 
   conceptSets <- addPhenotypeIdIfMissing(conceptSets,
-                                         connection = connection,
+                                         pegasusConnection = pegasusConnection,
                                          pegasusDatabaseSchema = pegasusDatabaseSchema)
 
   # Upload new concept sets to concept_set table
@@ -413,7 +443,7 @@ uploadConceptSets <- function(conceptSets,
     FROM @database_schema.concept_set;
   "
   lastId <- DatabaseConnector::renderTranslateQuerySql(
-    connection = connection,
+    connection = pegasusConnection,
     sql = sql,
     database_schema = pegasusDatabaseSchema,
     snakeCaseToCamelCase = TRUE
@@ -439,7 +469,7 @@ uploadConceptSets <- function(conceptSets,
            csSourceType = "sourceType") |>
     distinct()
   DatabaseConnector::insertTable(
-    connection = connection,
+    connection = pegasusConnection,
     databaseSchema = pegasusDatabaseSchema,
     tableName = "concept_set",
     data = dataToUpload,
@@ -465,7 +495,7 @@ uploadConceptSets <- function(conceptSets,
     FROM @database_schema.phenotype_to_concept_set;
   "
   existingData <- DatabaseConnector::renderTranslateQuerySql(
-    connection = connection,
+    connection = pegasusConnection,
     sql = sql,
     database_schema = pegasusDatabaseSchema,
     snakeCaseToCamelCase = TRUE
@@ -477,7 +507,7 @@ uploadConceptSets <- function(conceptSets,
                  nrow(overlap)))
   }
   DatabaseConnector::insertTable(
-    connection = connection,
+    connection = pegasusConnection,
     databaseSchema = pegasusDatabaseSchema,
     tableName = "phenotype_to_concept_set",
     data = dataToUpload,
@@ -501,7 +531,7 @@ uploadConceptSets <- function(conceptSets,
     FROM @database_schema.draft_target_to_concept_set;
   "
   existingData <- DatabaseConnector::renderTranslateQuerySql(
-    connection = connection,
+    connection = pegasusConnection,
     sql = sql,
     database_schema = pegasusDatabaseSchema,
     snakeCaseToCamelCase = TRUE
@@ -513,7 +543,7 @@ uploadConceptSets <- function(conceptSets,
                  nrow(overlap)))
   }
   DatabaseConnector::insertTable(
-    connection = connection,
+    connection = pegasusConnection,
     databaseSchema = pegasusDatabaseSchema,
     tableName = "draft_target_to_concept_set",
     data = dataToUpload,
@@ -536,7 +566,8 @@ uploadConceptSets <- function(conceptSets,
 #'
 #' @export
 uploadDatabaseMetaData <- function(databaseMetaData,
-                                   pegasusConnectionDetails,
+                                   pegasusConnection = NULL,
+                                   pegasusConnectionDetails = NULL,
                                    pegasusDatabaseSchema) {
   errorMessages <- checkmate::makeAssertCollection()
   checkmate::assertDataFrame(databaseMetaData, min.rows = 1, add = errorMessages)
@@ -550,19 +581,24 @@ uploadDatabaseMetaData <- function(databaseMetaData,
     "cdmDatabaseSchema",
     "resultDatabaseSchema"
   ), add = errorMessages)
-  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", add = errorMessages)
+  checkmate::assertClass(pegasusConnection, "DatabaseConnectorConnection", null.ok = TRUE, add = errorMessages)
+  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", null.ok = TRUE, add = errorMessages)
   checkmate::assertCharacter(pegasusDatabaseSchema, len = 1, add = errorMessages)
   checkmate::reportAssertions(errorMessages)
-
-  connection <- DatabaseConnector::connect(pegasusConnectionDetails)
-  on.exit(DatabaseConnector::disconnect(connection))
+  if (is.null(pegasusConnection) && is.null(pegasusConnectionDetails)) {
+    stop("Must provide either pegasusConnection or pegasusConnectionDetails")
+  }
+  if (is.null(pegasusConnection)) {
+    pegasusConnection <- DatabaseConnector::connect(pegasusConnectionDetails)
+    on.exit(DatabaseConnector::disconnect(pegasusConnection))
+  }
 
   sql <- "
     SELECT database_id
     FROM @database_schema.database_meta_data;
   "
   existingIds <- DatabaseConnector::renderTranslateQuerySql(
-    connection = connection,
+    connection = pegasusConnection,
     sql = sql,
     database_schema = pegasusDatabaseSchema,
     snakeCaseToCamelCase = TRUE
@@ -583,7 +619,7 @@ uploadDatabaseMetaData <- function(databaseMetaData,
            "cdmDatabaseSchema",
            "resultDatabaseSchema")
   DatabaseConnector::insertTable(
-    connection = connection,
+    connection = pegasusConnection,
     databaseSchema = pegasusDatabaseSchema,
     tableName = "database_meta_data",
     data = dataToUpload,
@@ -606,7 +642,8 @@ uploadDatabaseMetaData <- function(databaseMetaData,
 #'
 #' @export
 uploadConceptSetPersonCounts <- function(conceptSetPersonCounts,
-                                         pegasusConnectionDetails,
+                                         pegasusConnection = NULL,
+                                         pegasusConnectionDetails = NULL,
                                          pegasusDatabaseSchema) {
   errorMessages <- checkmate::makeAssertCollection()
   checkmate::assertDataFrame(conceptSetPersonCounts, min.rows = 1, add = errorMessages)
@@ -622,19 +659,24 @@ uploadConceptSetPersonCounts <- function(conceptSetPersonCounts,
     "devicePersons",
     "visitPersons"
   ), add = errorMessages)
-  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", add = errorMessages)
+  checkmate::assertClass(pegasusConnection, "DatabaseConnectorConnection", null.ok = TRUE, add = errorMessages)
+  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", null.ok = TRUE, add = errorMessages)
   checkmate::assertCharacter(pegasusDatabaseSchema, len = 1, add = errorMessages)
   checkmate::reportAssertions(errorMessages)
-
-  connection <- DatabaseConnector::connect(pegasusConnectionDetails)
-  on.exit(DatabaseConnector::disconnect(connection))
+  if (is.null(pegasusConnection) && is.null(pegasusConnectionDetails)) {
+    stop("Must provide either pegasusConnection or pegasusConnectionDetails")
+  }
+  if (is.null(pegasusConnection)) {
+    pegasusConnection <- DatabaseConnector::connect(pegasusConnectionDetails)
+    on.exit(DatabaseConnector::disconnect(pegasusConnection))
+  }
 
   sql <- "
     SELECT concept_set_id
     FROM @database_schema.concept_set_person_count;
   "
   existingCounts <- DatabaseConnector::renderTranslateQuerySql(
-    connection = connection,
+    connection = pegasusConnection,
     sql = sql,
     database_schema = pegasusDatabaseSchema,
     snakeCaseToCamelCase = TRUE
@@ -657,7 +699,7 @@ uploadConceptSetPersonCounts <- function(conceptSetPersonCounts,
            "devicePersons",
            "visitPersons")
   DatabaseConnector::insertTable(
-    connection = connection,
+    connection = pegasusConnection,
     databaseSchema = pegasusDatabaseSchema,
     tableName = "concept_set_person_count",
     data = dataToUpload,
@@ -678,12 +720,14 @@ uploadConceptSetPersonCounts <- function(conceptSetPersonCounts,
 #' A tibble with one row per phenotype, including its ID, name, and clinical definition.
 #'
 #' @export
-downloadPhenotypes <- function(pegasusConnectionDetails,
+downloadPhenotypes <- function(pegasusConnection = NULL,
+                               pegasusConnectionDetails = NULL,
                                pegasusDatabaseSchema) {
   data <- genericDownload(
     tableName = "phenotype",
-    pegasusConnectionDetails,
-    pegasusDatabaseSchema
+    pegasusConnection = pegasusConnection,
+    pegasusConnectionDetails = pegasusConnectionDetails,
+    pegasusDatabaseSchema = pegasusDatabaseSchema
   )
   return(data)
 }
@@ -696,33 +740,41 @@ downloadPhenotypes <- function(pegasusConnectionDetails,
 #' A tibble with one row per concept set, including its ID, name, and clinical definition.
 #'
 #' @export
-downloadConceptSets <- function(pegasusConnectionDetails,
+downloadConceptSets <- function(pegasusConnection = NULL,
+                                pegasusConnectionDetails = NULL,
                                 pegasusDatabaseSchema) {
   data <- genericDownload(
     tableName = "concept_set",
-    pegasusConnectionDetails,
-    pegasusDatabaseSchema
+    pegasusConnection = pegasusConnection,
+    pegasusConnectionDetails = pegasusConnectionDetails,
+    pegasusDatabaseSchema = pegasusDatabaseSchema
   )
   return(data)
 }
 
 genericDownload <- function(tableName,
+                            pegasusConnection,
                             pegasusConnectionDetails,
                             pegasusDatabaseSchema) {
   errorMessages <- checkmate::makeAssertCollection()
-  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", add = errorMessages)
+  checkmate::assertClass(pegasusConnection, "DatabaseConnectorConnection", null.ok = TRUE, add = errorMessages)
+  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", null.ok = TRUE, add = errorMessages)
   checkmate::assertCharacter(pegasusDatabaseSchema, len = 1, add = errorMessages)
   checkmate::reportAssertions(errorMessages)
-
-  connection <- DatabaseConnector::connect(pegasusConnectionDetails)
-  on.exit(DatabaseConnector::disconnect(connection))
+  if (is.null(pegasusConnection) && is.null(pegasusConnectionDetails)) {
+    stop("Must provide either pegasusConnection or pegasusConnectionDetails")
+  }
+  if (is.null(pegasusConnection)) {
+    pegasusConnection <- DatabaseConnector::connect(pegasusConnectionDetails)
+    on.exit(DatabaseConnector::disconnect(pegasusConnection))
+  }
 
   sql <- "
     SELECT *
     FROM @database_schema.@table;
   "
   data <- DatabaseConnector::renderTranslateQuerySql(
-    connection = connection,
+    connection = pegasusConnection,
     sql = sql,
     database_schema = pegasusDatabaseSchema,
     table = tableName,
@@ -741,10 +793,12 @@ genericDownload <- function(tableName,
 #'
 #' @export
 downloadPhenotypeToConceptSets <- function(phenotypes,
-                                           pegasusConnectionDetails,
+                                           pegasusConnection = NULL,
+                                           pegasusConnectionDetails = NULL,
                                            pegasusDatabaseSchema) {
   errorMessages <- checkmate::makeAssertCollection()
-  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", add = errorMessages)
+  checkmate::assertClass(pegasusConnection, "DatabaseConnectorConnection", null.ok = TRUE, add = errorMessages)
+  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", null.ok = TRUE, add = errorMessages)
   checkmate::assertCharacter(pegasusDatabaseSchema, len = 1, add = errorMessages)
   checkmate::assertDataFrame(phenotypes, min.rows = 1, add = errorMessages)
   checkmate::assertNames(colnames(phenotypes), must.include = c(
@@ -752,13 +806,17 @@ downloadPhenotypeToConceptSets <- function(phenotypes,
     "clinicalDefinition"
   ), add = errorMessages)
   checkmate::reportAssertions(errorMessages)
-
-  connection <- DatabaseConnector::connect(pegasusConnectionDetails)
-  on.exit(DatabaseConnector::disconnect(connection))
+  if (is.null(pegasusConnection) && is.null(pegasusConnectionDetails)) {
+    stop("Must provide either pegasusConnection or pegasusConnectionDetails")
+  }
+  if (is.null(pegasusConnection)) {
+    pegasusConnection <- DatabaseConnector::connect(pegasusConnectionDetails)
+    on.exit(DatabaseConnector::disconnect(pegasusConnection))
+  }
 
   phenotypes <- addPhenotypeIdIfMissing(
     data = phenotypes,
-    connection = connection,
+    pegasusConnection = pegasusConnection,
     pegasusDatabaseSchema = pegasusDatabaseSchema
   )
   sql <- "
@@ -781,7 +839,7 @@ downloadPhenotypeToConceptSets <- function(phenotypes,
     WHERE phenotype_id IN (@phenotype_ids);
   "
   result <-  DatabaseConnector::renderTranslateQuerySql(
-    connection =  connection,
+    connection =  pegasusConnection,
     sql = sql,
     database_schema = pegasusDatabaseSchema,
     phenotype_ids = phenotypes$phenotypeId,

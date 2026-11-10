@@ -28,9 +28,7 @@
 #' @template LlmClient
 #' @template CostTracker
 #' @template PegasusConnectionDetails
-#' @param databaseReferences A list of 1 or more objects of type `DatabaseReference` as created by the
-#'                           `createDatabaseReference()` funnction. These should have the  `workDatabaseSchema`,
-#'                           `workCohortTable`, and `workConceptSetTable` properties defined.
+#' @template DatabaseReferences
 #' @param workFolder A folder where data objects are stored.
 #'
 #' @returns
@@ -40,7 +38,8 @@
 generateCohortDefinitionsUsingMonoFlowAgent <- function(phenotypes,
                                                         llmClient,
                                                         costTracker = createCostTracker(),
-                                                        pegasusConnectionDetails,
+                                                        pegasusConnection = NULL,
+                                                        pegasusConnectionDetails = NULL,
                                                         pegasusDatabaseSchema,
                                                         databaseReferences,
                                                         workFolder) {
@@ -52,7 +51,8 @@ generateCohortDefinitionsUsingMonoFlowAgent <- function(phenotypes,
   ), add = errorMessages)
   checkmate::assertR6(llmClient, "Chat", add = errorMessages)
   checkmate::assertClass(costTracker, "CostTracker", add = errorMessages)
-  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", add = errorMessages)
+  checkmate::assertClass(pegasusConnection, "DatabaseConnectorConnection", null.ok = TRUE, add = errorMessages)
+  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", null.ok = TRUE, add = errorMessages)
   checkmate::assertCharacter(pegasusDatabaseSchema, len = 1, add = errorMessages)
   checkmate::assertList(databaseReferences, min.len = 1, add = errorMessages)
   for (databaseReference in databaseReferences) {
@@ -65,12 +65,26 @@ generateCohortDefinitionsUsingMonoFlowAgent <- function(phenotypes,
   }
   checkmate::assertCharacter(workFolder, len = 1, add = errorMessages)
   checkmate::reportAssertions(collection = errorMessages)
+  if (is.null(pegasusConnection) && is.null(pegasusConnectionDetails)) {
+    stop("Must provide either pegasusConnection or pegasusConnectionDetails")
+  }
+  if (is.null(pegasusConnection)) {
+    pegasusConnection <- DatabaseConnector::connect(pegasusConnectionDetails)
+    on.exit(DatabaseConnector::disconnect(pegasusConnection))
+  }
+
+  checkRequirementsMet(phenotypes,
+                       llmClient,
+                       costTracker,
+                       pegasusConnection,
+                       pegasusDatabaseSchema,
+                       databaseReferences)
 
   startTime <- Sys.time()
   startCost <- costTracker$amount
 
   dir.create(workFolder)
-  toolContext <- PegasusAgentContext$new(pegasusConnectionDetails = pegasusConnectionDetails,
+  toolContext <- PegasusAgentContext$new(pegasusConnection = pegasusConnection,
                                          pegasusDatabaseSchema = pegasusDatabaseSchema,
                                          databaseReferences = databaseReferences)
   on.exit(toolContext$close())
@@ -87,7 +101,7 @@ generateCohortDefinitionsUsingMonoFlowAgent <- function(phenotypes,
     outputFolder <- file.path(workFolder, gsub("[^[:alnum:]]+", "_", phenotype$phenotypeName))
     bestJsonFile <- file.path(outputFolder, "best_cohort.json")
     if (!file.exists(bestJsonFile)) {
-      message("Creating cohort defintion for ", phenotype$phenotypeName)
+      message("Creating cohort definition for ", phenotype$phenotypeName)
       dir.create(outputFolder)
 
       context <- constructContext(phenotype)
@@ -188,11 +202,29 @@ getStandardConceptSets <- function() {
   return(conceptSets)
 }
 
-ensureStandardConceptSets <- function(connection, databaseReference, pegasusConnection, pegasusDatabaseSchema) {
-  conceptSets <- getStandardConceptSets()
+checkRequirementsMet <- function(phenotypes,
+                                 llmClient,
+                                 costTracker,
+                                 pegasusConnection,
+                                 pegasusDatabaseSchema,
+                                 databaseReferences) {
+
+  message("- Checking if phenotypes have concepts sets")
+  phenotypeToConceptSets <- downloadPhenotypeToConceptSets(phenotypes = phenotypes,
+                                                           pegasusConnection = pegasusConnection,
+                                                           pegasusDatabaseSchema = pegasusDatabaseSchema)
+  phenotypeNames <- unique(phenotypeToConceptSets$phenotypeName)
+  if (length(phenotypeNames) != nrow(phenotypes)) {
+    stop(sprintf("No concept sets found for phenotype(s) '%s'",
+                 paste(phenotypes$phenotypeName[!phenotypes$phenotypeName %in% phenotypeNames], collapse = "', '")))
+  }
+
+  message(" - Ensuring standard concept sets exist in Pegasus schema")
+  standardConceptSets <- getStandardConceptSets()
   sql <- "
     SELECT concept_set_id,
-      concept_set_name
+      concept_set_name,
+      circe_concept_set_expression
     FROM @database_schema.concept_set;
   "
   existingConceptSets <- DatabaseConnector::renderTranslateQuerySql(
@@ -201,20 +233,18 @@ ensureStandardConceptSets <- function(connection, databaseReference, pegasusConn
     database_schema = pegasusDatabaseSchema,
     snakeCaseToCamelCase = TRUE
   )
-  missingConceptSets <- conceptSets[!conceptSets$conceptSetName %in% existingConceptSets$conceptSetName, ]
-  if (nrow(missingConceptSets) > 0) {
-    message(sprintf("Missing standard concept sets '%s'. Adding (including person counts).",
-                    paste(missingConceptSets$conceptSetName, collapse = "', '")))
+  existingStandardConceptSets <- existingConceptSets |>
+    filter(.data$conceptSetName %in% standardConceptSets$conceptSetName)
+  missingStandardConceptSets <- standardConceptSets |>
+    filter(!.data$conceptSetName %in% existingStandardConceptSets$conceptSetName)
+  if (nrow(missingStandardConceptSets) > 0) {
+    message(sprintf("Missing standard concept sets '%s'. Adding.",
+                    paste(missingStandardConceptSets$conceptSetName, collapse = "', '")))
     lastId <- max(existingConceptSets$conceptSetId)
-    missingConceptSets <- missingConceptSets |>
+    missingStandardConceptSets <- missingStandardConceptSets |>
       mutate(conceptSetId = row_number() + lastId)
 
-    counts <- createConceptSetCounts(
-      completeConceptSets = missingConceptSets,
-      databaseReferences = list(databaseReference)
-    )
-
-    dataToUpload <- missingConceptSets |>
+    dataToUpload <- missingStandardConceptSets |>
       select("conceptSetId",
              "conceptSetName",
              "circeConceptSetExpression",
@@ -234,15 +264,94 @@ ensureStandardConceptSets <- function(connection, databaseReference, pegasusConn
       tempTable = FALSE,
       camelCaseToSnakeCase = TRUE
     )
-    DatabaseConnector::insertTable(
-      connection = pegasusConnection,
-      databaseSchema = pegasusDatabaseSchema,
-      tableName = "concept_set_person_count",
-      data = counts,
-      dropTableIfExists = FALSE,
-      createTable = FALSE,
-      tempTable = FALSE,
-      camelCaseToSnakeCase = TRUE
+    standardConceptSets <- bind_rows(
+      existingStandardConceptSets,
+      missingStandardConceptSets
     )
+  } else {
+    standardConceptSets <- existingStandardConceptSets
+  }
+
+  message(" - Ensuring standard concept sets have counts")
+  conceptSetPersonCounts <- createConceptSetCounts(completeConceptSets = standardConceptSets,
+                                                   pegasusConnection = pegasusConnection,
+                                                   pegasusDatabaseSchema = pegasusDatabaseSchema,
+                                                   databaseReferences = databaseReferences,
+                                                   maxCores = 1)
+  if  (nrow(conceptSetPersonCounts) > 0) {
+    uploadConceptSetPersonCounts(
+      conceptSetPersonCounts = conceptSetPersonCounts,
+      pegasusConnection = pegasusConnection,
+      pegasusDatabaseSchema = pegasusDatabaseSchema
+    )
+  }
+  for (databaseReference in databaseReferences) {
+    checkRequirementsMetDatabase(phenotypes = phenotypes,
+                                 databaseReference = databaseReference)
+  }
+}
+
+checkRequirementsMetDatabase <- function(phenotypes,
+                                         databaseReference) {
+  connection <- DatabaseConnector::connect(databaseReference$connectionDetails)
+  on.exit(DatabaseConnector::disconnect(connection))
+
+  referenceTables <- Keeper::createReferenceCohortTableNames(databaseReference$referenceCohortTable)
+
+  message("- Checking if Keeper reference cohort exists for ", databaseReference$databaseName)
+  if (!DatabaseConnector::existsTable(connection = connection,
+                                      databaseSchema = databaseReference$referenceCohortDatabaseSchema,
+                                      tableName = referenceTables$referenceCohortMetadataTable)) {
+
+    stop(sprintf("No reference cohort table with database schema '%s' and table name '%s' found.",
+                 databaseReference$referenceCohortDatabaseSchema,
+                 referenceTables$referenceCohortMetadataTable))
+  }
+  sql <- "
+      SELECT phenotype,
+        cohort_definition_id
+      FROM @database_schema.@table;
+    "
+  existingPhenotypes <- DatabaseConnector::renderTranslateQuerySql(
+    connection = connection,
+    sql = sql,
+    database_schema = databaseReference$referenceCohortDatabaseSchema,
+    table = referenceTables$referenceCohortMetadataTable,
+    snakeCaseToCamelCase = TRUE
+  )
+  missingPhenotypes <- phenotypes |>
+    filter(!.data$phenotypeName %in% existingPhenotypes$phenotype)
+  if (nrow(missingPhenotypes) > 0) {
+    stop(sprintf("Missing reference cohort for phenotype(s): '%s'",
+                 paste(missingPhenotypes$phenotype, collapse = "', '")))
+  }
+  existingPhenotypes <- existingPhenotypes|>
+    filter(.data$phenotype %in% phenotypes$phenotypeName)
+
+  message("- Checking if Keeper patient profiles exists for ", databaseReference$databaseName)
+  if (!DatabaseConnector::existsTable(connection = connection,
+                                      databaseSchema = databaseReference$referenceCohortDatabaseSchema,
+                                      tableName = paste0(databaseReference$referenceCohortTable, "_profile"))) {
+    stop(sprintf("No reference cohort profile table with database schema '%s' and table name '%s' found.",
+                 databaseReference$referenceCohortDatabaseSchema,
+                 paste0(databaseReference$referenceCohortTable, "_profile")))
+  }
+  sql <- "
+      SELECT DISTINCT(cohort_definition_id)
+      FROM @database_schema.@table
+      WHERE cohort_definition_id IN (@cohort_ids);
+    "
+  existingProfileCohortIds <- DatabaseConnector::renderTranslateQuerySql(
+    connection = connection,
+    sql = sql,
+    database_schema = databaseReference$referenceCohortDatabaseSchema,
+    table = paste0(databaseReference$referenceCohortTable, "_profile"),
+    cohort_ids = existingPhenotypes$cohortDefinitionId
+  )[, 1]
+  missingPhenotypes <- existingPhenotypes |>
+    filter(!.data$cohortDefinitionId %in% existingProfileCohortIds)
+  if (nrow(missingPhenotypes) > 0) {
+    stop(sprintf("Missing reference cohort for phenotype(s): '%s'",
+                 paste(missingPhenotypes$phenotype, collapse = "', '")))
   }
 }

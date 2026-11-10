@@ -8,7 +8,8 @@ generateCohortDefinitionsUsingMonoFlowAgent(
   phenotypes,
   llmClient,
   costTracker = createCostTracker(),
-  pegasusConnectionDetails,
+  pegasusConnection = NULL,
+  pegasusConnectionDetails = NULL,
   pegasusDatabaseSchema,
   databaseReferences,
   workFolder
@@ -22,15 +23,19 @@ generateCohortDefinitionsUsingMonoFlowAgent(
 
 \item{costTracker}{An object as created using \code{createCostTracker()} that keeps track of LLM costs.}
 
+\item{pegasusConnection}{A connection object created using \code{DatabaseConnector::connect()} for connecting to
+the database holding the Pegasus data model. Can be null if
+\code{pegasusConnectionDetails} is provided.}
+
 \item{pegasusConnectionDetails}{An R object of type \code{connectionDetails} created using the
 \code{\link[DatabaseConnector:createConnectionDetails]{DatabaseConnector::createConnectionDetails()}} function for connecting to the
-database holding the Pegasus data model.}
+database holding the Pegasus data model. Can be null if
+\code{pegasusConnection} is provided.}
 
 \item{pegasusDatabaseSchema}{The name of the database schema holding the Pegasus data model}
 
-\item{databaseReferences}{A list of 1 or more objects of type \code{DatabaseReference} as created by the
-\code{createDatabaseReference()} funnction. These should have the  \code{workDatabaseSchema},
-\code{workCohortTable}, and \code{workConceptSetTable} properties defined.}
+\item{databaseReferences}{A list of objects of type \code{DatabaseReference} as created by the \code{createDatabaseReference()}
+function.}
 
 \item{workFolder}{A folder where data objects are stored.}
 }

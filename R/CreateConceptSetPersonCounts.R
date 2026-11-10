@@ -35,6 +35,7 @@
 #'
 #' @export
 createConceptSetCounts <- function(completeConceptSets,
+                                   pegasusConnection = NULL,
                                    pegasusConnectionDetails = NULL,
                                    pegasusDatabaseSchema = NULL,
                                    databaseReferences,
@@ -46,19 +47,25 @@ createConceptSetCounts <- function(completeConceptSets,
     "conceptSetId",
     "circeConceptSetExpression"
   ), add = errorMessages)
+  checkmate::assertClass(pegasusConnection, "DatabaseConnectorConnection", null.ok = TRUE, add = errorMessages)
   checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", null.ok = TRUE, add = errorMessages)
   checkmate::assertCharacter(pegasusDatabaseSchema, len = 1, null.ok = TRUE, add = errorMessages)
   checkmate::assertList(databaseReferences, types = "DatabaseReference", min.len = 1, add = errorMessages)
   checkmate::assertInt(maxCores, lower = 1, add = errorMessages)
   checkmate::assertCharacter(cacheFolder, len = 1, null.ok = TRUE, add = errorMessages)
   checkmate::reportAssertions(collection = errorMessages)
-  if (!is.null(pegasusConnectionDetails) && is.null(pegasusDatabaseSchema)) {
-    stop("Must provide pegasusDatabaseSchema when providing pegasusConnectionDetails.")
+  if ((!is.null(pegasusConnection) || !is.null(pegasusConnectionDetails)) && is.null(pegasusDatabaseSchema)) {
+    stop("Must provide pegasusDatabaseSchema when providing pegasusConnection or  pegasusConnectionDetails.")
   }
   if (any(is.na(completeConceptSets$conceptSetId))) {
     stop("All concept sets should have a concept set ID.")
   }
   startTime <- Sys.time()
+
+  if (is.null(pegasusConnection)) {
+    pegasusConnection <- DatabaseConnector::connect(pegasusConnectionDetails)
+    on.exit(DatabaseConnector::disconnect(pegasusConnection))
+  }
 
   uniqueConceptSets <- completeConceptSets |>
     filter(!duplicated(.data$conceptSetId))
@@ -91,7 +98,7 @@ createConceptSetCounts <- function(completeConceptSets,
       removeConceptSetsWithExistingCounts(
         uniqueConceptSets = uniqueConceptSets,
         databaseId = databaseReference$databaseId,
-        pegasusConnectionDetails = pegasusConnectionDetails,
+        pegasusConnection = pegasusConnection,
         pegasusDatabaseSchema = pegasusDatabaseSchema
       )
     },
@@ -130,7 +137,7 @@ createConceptSetCounts <- function(completeConceptSets,
   }
 
   delta <- Sys.time() - startTime
-  message(sprintf("Generating concept sets took %0.2f %s.",
+  message(sprintf("Creating concept sets person counts took %0.2f %s.",
                   delta,
                   attr(delta, "units")))
   return(counts)
@@ -343,23 +350,21 @@ getCounts <- function(circeConceptSetExpression, connection, cdmDatabaseSchema, 
 
 removeConceptSetsWithExistingCounts <- function(uniqueConceptSets,
                                                 databaseId,
-                                                pegasusConnectionDetails,
+                                                pegasusConnection,
                                                 pegasusDatabaseSchema) {
-  if (is.null(pegasusConnectionDetails)) {
+  if (is.null(pegasusConnection)) {
     return(uniqueConceptSets)
   } else {
-    connection <- DatabaseConnector::connect(pegasusConnectionDetails)
-    on.exit(DatabaseConnector::disconnect(connection))
-
     sql <- "
       SELECT concept_set_id
       FROM @database_schema.concept_set_person_count
       WHERE database_id = @database_id;
     "
     existingConceptSetIds <- DatabaseConnector::renderTranslateQuerySql(
-      connection = connection,
+      connection = pegasusConnection,
       sql = sql,
-      database_schema = pegasusDatabaseSchema
+      database_schema = pegasusDatabaseSchema,
+      database_id = databaseId
     )[, 1]
     conceptSetsToCount <- uniqueConceptSets |>
       filter(!.data$conceptSetId %in% existingConceptSetIds)
@@ -368,3 +373,4 @@ removeConceptSetsWithExistingCounts <- function(uniqueConceptSets,
     return(conceptSetsToCount)
   }
 }
+
