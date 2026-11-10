@@ -348,7 +348,7 @@ selectExistingDefinitions <- function(existingDefinitions,
   templateFile <- system.file("prompts", "SelectExistingConceptSetTargetDefinitionsPrompt.txt", package = "Pegasus")
   promptTemplate <- paste(readLines(templateFile), collapse = "\n")
 
-  prompt <- gsub("%term%", row$conceptName, promptTemplate)
+  prompt <- gsub("%term%", phenotypeTargetCategories$conceptName[1], promptTemplate)
   prompt <- gsub("%contexts%", paste(sprintf("- %s", phenotypeTargetCategories$context), collapse = "\n"), prompt)
   definitionsJson <- existingDefinitions |>
     select(label = "conceptSetName", definition = "clinicalDefinition") |>

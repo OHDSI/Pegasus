@@ -13,7 +13,7 @@ Existing definitions:
 
 ### Definition Rules & Constraints
 1. Selecting none:
-   - Select 'none' when all candidate definitions are semantically incompatible with the context. For example, when the definition specifies s hereditary disease, but the context (e.g the complication of some disease) implies an acquired nature.
+   - Select 'none' when all candidate definitions are semantically incompatible with the context. For example, when the definition specifies a hereditary disease, but the context (e.g the complication of some disease) implies an acquired nature.
 2. Context-Driven Subtyping:
    - Analyze the full list of Contexts to deduce if distinct phenotypic, procedural, or measurement-based subtypes exist.
    - For example, if contexts split between diagnostic and treatment uses, or between different underlying phenotypes, select distinct definitions for each variant.

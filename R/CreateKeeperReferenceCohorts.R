@@ -19,7 +19,7 @@
 #' @template Phenotypes
 #' @template LlmClient
 #' @template CostTracker
-#' @template DatabaseReference
+#' @template DatabaseReferences
 #' @template MaxCores
 #' @param uploadKeeperProfiles If TRUE then the patient profiles will also be uploaded to the database, which can be
 #' used by the MonoFlow agent.
@@ -32,7 +32,7 @@
 createKeeperReferenceCohorts <- function(phenotypes,
                                          llmClient,
                                          costTracker = createCostTracker(),
-                                         databaseReference,
+                                         databaseReferences,
                                          maxCores = 4,
                                          uploadKeeperProfiles = TRUE,
                                          workFolder) {
@@ -43,7 +43,7 @@ createKeeperReferenceCohorts <- function(phenotypes,
   ), add = errorMessages)
   checkmate::assertR6(llmClient, "Chat", add = errorMessages)
   checkmate::assertClass(costTracker, "CostTracker", add = errorMessages)
-  checkmate::assertClass(databaseReference, "DatabaseReference", add = errorMessages)
+  checkmate::assertList(databaseReferences, types = "DatabaseReference", min.len = 1, add = errorMessages)
   checkmate::assertInt(maxCores, lower = 1, add = errorMessages)
   checkmate::assertLogical(uploadKeeperProfiles, len = 1, add = errorMessages)
   checkmate::assertCharacter(workFolder, len = 1, add = errorMessages)
@@ -51,6 +51,42 @@ createKeeperReferenceCohorts <- function(phenotypes,
 
   startTime <- Sys.time()
   startCost <- costTracker$amount
+
+  dir.create(workFolder, recursive = TRUE, showWarnings = FALSE)
+
+  status <- list()
+  for (i in seq_along(databaseReferences)) {
+    status[[i]] <- createKeeperReferenceCohortsForDatabase(
+      phenotypes = phenotypes,
+      llmClient = llmClient,
+      costTracker = costTracker,
+      databaseReference = databaseReferences[[i]],
+      maxCores = maxCores,
+      uploadKeeperProfiles = uploadKeeperProfiles,
+      workFolder = workFolder
+    )
+  }
+  status <- bind_rows(status)
+  delta <- Sys.time() - startTime
+  message(sprintf("Generating Keeper reference cohorts took %0.2f %s and cost $%0.2f.",
+                  delta,
+                  attr(delta, "units"),
+                  costTracker$amount - startCost))
+  return(status)
+}
+
+createKeeperReferenceCohortsForDatabase <- function(phenotypes,
+                                                    llmClient,
+                                                    costTracker,
+                                                    databaseReference,
+                                                    maxCores,
+                                                    uploadKeeperProfiles,
+                                                    workFolder) {
+  message(sprintf("Creating Keeper reference cohorts for database %s",
+                  databaseReference$databaseName))
+
+  databaseWorkFolder <- file.path(workFolder, gsub("[^[:alnum:]]+", "", databaseReference$databaseName))
+  dir.create(databaseWorkFolder, recursive = TRUE)
 
   connection <- DatabaseConnector::connect(databaseReference$connectionDetails)
   on.exit(DatabaseConnector::disconnect(connection))
@@ -103,7 +139,6 @@ createKeeperReferenceCohorts <- function(phenotypes,
   phenotypes <- phenotypes |>
     mutate(cohortId = row_number() + lastCohortId)
 
-  message("Generating Keeper reference cohorts")
   ParallelLogger::addDefaultFileLogger(file.path(workFolder, "log.txt"), name = "KEEPER_LOGGER")
   cluster <- ParallelLogger::makeCluster(min(maxCores, nrow(phenotypes)))
   ParallelLogger::clusterRequire(cluster, "dplyr")
@@ -114,7 +149,7 @@ createKeeperReferenceCohorts <- function(phenotypes,
     fun = createKeeperReferenceCohort,
     llmClient = llmClient,
     databaseReference = databaseReference,
-    workFolder = workFolder
+    databaseWorkFolder = databaseWorkFolder
   )
   ParallelLogger::stopCluster(cluster)
   ParallelLogger::unregisterLogger("KEEPER_LOGGER")
@@ -126,14 +161,8 @@ createKeeperReferenceCohorts <- function(phenotypes,
     connection = connection,
     databaseReference = databaseReference,
     uploadKeeperProfiles = uploadKeeperProfiles,
-    workFolder = workFolder
+    databaseWorkFolder = databaseWorkFolder
   )
-
-  delta <- Sys.time() - startTime
-  message(sprintf("Generating Keeper reference cohorts took %0.2f %s and cost $%0.2f.",
-                  delta,
-                  attr(delta, "units"),
-                  costTracker$amount - startCost))
   return(status)
 }
 
@@ -141,7 +170,7 @@ uploadReferenceCohortsAndProfiles <- function(phenotypes,
                                               connection,
                                               databaseReference,
                                               uploadKeeperProfiles,
-                                              workFolder) {
+                                              databaseWorkFolder) {
   message("Uploading Keeper reference cohorts and profiles")
 
   if (uploadKeeperProfiles) {
@@ -175,13 +204,14 @@ uploadReferenceCohortsAndProfiles <- function(phenotypes,
   }
   status <- phenotypes |>
     select("cohortId", "phenotypeName") |>
-    mutate(referenceCohortSize = 0,
+    mutate(databaseId = databaseReference$databaseId,
+           referenceCohortSize = 0,
            error = "")
   for (i in seq_len(nrow(phenotypes))) {
     row <- phenotypes[i, ]
     message("- Uploading reference cohort and profiles for '", row$phenotypeName,"'.")
     databaseForFileName <- gsub("[^[:alnum:]]+", "", databaseReference$databaseName)
-    phenotypeFolder <- file.path(workFolder, gsub("[^[:alnum:]]+", "_", row$phenotypeName))
+    phenotypeFolder <- file.path(databaseWorkFolder, gsub("[^[:alnum:]]+", "_", row$phenotypeName))
 
     fileName <- file.path(phenotypeFolder, sprintf("llmReviews_%s.rds", databaseForFileName))
     if (!file.exists(fileName)) {
@@ -217,15 +247,24 @@ uploadReferenceCohortsAndProfiles <- function(phenotypes,
 
         if (uploadKeeperProfiles) {
           subFolder =  file.path(phenotypeFolder, sprintf("cache_%s", databaseForFileName))
-          keeperSamplePhase1 <- readRDS(file.path(subFolder, "keeperSamplePhase1.rds"))
-          keeperSamplePhase2 <- readRDS(file.path(subFolder, "keeperSamplePhase2.rds"))
-          keeper <- bind_rows(personIdToColumn(keeperSamplePhase1),
-                              personIdToColumn(keeperSamplePhase2)) |>
+          keeperSamplePhase1File <- file.path(subFolder, "keeperSamplePhase1.rds")
+          keeper <- readRDS(keeperSamplePhase1File) |>
+            personIdToColumn()
+
+          keeperSamplePhase2File <- file.path(subFolder, "keeperSamplePhase2.rds")
+          if (file.exists(keeperSamplePhase2File)) {
+            # Phase 2 sample may not exist if phase 1 sample was already bigger than required.
+            keeperSamplePhase2 <- readRDS(keeperSamplePhase2File) |>
+              personIdToColumn()
+            keeper <- bind_rows(keeper,
+                                keeperSamplePhase2)
+          }
+          keeper <- keeper |>
             mutate(cohortDefinitionId = row$cohortId)
           sql <- "
-          DELETE FROM @database_schema.@table
-          WHERE cohort_definition_id = @cohort_id;
-        "
+            DELETE FROM @database_schema.@table
+            WHERE cohort_definition_id = @cohort_id;
+          "
           DatabaseConnector::renderTranslateExecuteSql(
             connection = connection,
             sql = sql,
@@ -271,7 +310,7 @@ personIdToColumn <- function(keeper) {
 createKeeperReferenceCohort <- function(row,
                                         llmClient,
                                         databaseReference,
-                                        workFolder,
+                                        databaseWorkFolder,
                                         stratifiedSampling = TRUE) {
 
   message(sprintf("*** Creating Keeper reference set for '%s' in %s ***",
@@ -279,7 +318,7 @@ createKeeperReferenceCohort <- function(row,
                   databaseReference$databaseName))
 
   databaseForFileName <- gsub("[^[:alnum:]]+", "", databaseReference$databaseName)
-  phenotypeFolder <- file.path(workFolder, gsub("[^[:alnum:]]+", "_", row$phenotypeName))
+  phenotypeFolder <- file.path(databaseWorkFolder, gsub("[^[:alnum:]]+", "_", row$phenotypeName))
   dir.create(phenotypeFolder)
 
   # Generate concept sets ----------------------------------------------------------------------------------------------

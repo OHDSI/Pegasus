@@ -41,7 +41,8 @@ Imports:
   purrr,
   tidyr,
 	R6,
-	callr
+	callr,
+	bit64
 Suggests:
 	testthat,
 	duckdb,

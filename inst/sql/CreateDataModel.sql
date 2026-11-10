@@ -97,7 +97,7 @@ CREATE TABLE @database_schema.cohort_definition_evaluation (
   database_id INT NOT NULL,
   cohort_entries INT NOT NULL,
   cohort_subjects INT NOT NULL,
-  generation_seconds INT NOT NULL,
+  generation_seconds INT,
   true_positives INT NOT NULL,
   false_positives INT NOT NULL,
   true_negatives INT NOT NULL,

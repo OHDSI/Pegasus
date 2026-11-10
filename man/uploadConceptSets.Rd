@@ -23,8 +23,7 @@ database holding the Pegasus data model.}
 \item{pegasusDatabaseSchema}{The name of the database schema holding the Pegasus data model}
 }
 \value{
-Invisibly returns the concept sets which received new concept set IDs. Is mainly executed for uploading the data to
-the server.
+Returns nothing. Is executed for uploading the data to the server.
 }
 \description{
 Upload concept sets

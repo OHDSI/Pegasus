@@ -8,7 +8,7 @@ createKeeperReferenceCohorts(
   phenotypes,
   llmClient,
   costTracker = createCostTracker(),
-  databaseReference,
+  databaseReferences,
   maxCores = 4,
   uploadKeeperProfiles = TRUE,
   workFolder
@@ -22,7 +22,7 @@ createKeeperReferenceCohorts(
 
 \item{costTracker}{An object as created using \code{createCostTracker()} that keeps track of LLM costs.}
 
-\item{databaseReference}{An object of type \code{DatabaseReference} as created by the \code{createDatabaseReference()}
+\item{databaseReferences}{A list of objects of type \code{DatabaseReference} as created by the \code{createDatabaseReference()}
 function.}
 
 \item{maxCores}{Maximum number of parallel cores to use.}

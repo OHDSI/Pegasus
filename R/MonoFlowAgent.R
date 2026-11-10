@@ -210,8 +210,8 @@ ensureStandardConceptSets <- function(connection, databaseReference, pegasusConn
       mutate(conceptSetId = row_number() + lastId)
 
     counts <- createConceptSetCounts(
-      conceptSets = missingConceptSets,
-      databaseReference = databaseReference
+      completeConceptSets = missingConceptSets,
+      databaseReferences = list(databaseReference)
     )
 
     dataToUpload <- missingConceptSets |>

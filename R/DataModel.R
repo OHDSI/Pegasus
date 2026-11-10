@@ -360,6 +360,7 @@ uploadDraftConceptSetTargets <- function(draftConceptSetTargets,
     camelCaseToSnakeCase = TRUE
   )
   message(sprintf("Uploaded %d records", nrow(draftConceptSetTargets)))
+  invisible(NULL)
 }
 
 
@@ -370,8 +371,7 @@ uploadDraftConceptSetTargets <- function(draftConceptSetTargets,
 #' @template PegasusConnectionDetails
 #'
 #' @returns
-#' Invisibly returns the concept sets which received new concept set IDs. Is mainly executed for uploading the data to
-#' the server.
+#' Returns nothing. Is executed for uploading the data to the server.
 #'
 #' @export
 uploadConceptSets <- function(conceptSets,
@@ -523,8 +523,7 @@ uploadConceptSets <- function(conceptSets,
     camelCaseToSnakeCase = TRUE
   )
   message(sprintf("Uploaded %d records to the draft_target_to_concept_set table", nrow(dataToUpload)))
-
-  invisible(newConceptSets)
+  invisible(NULL)
 }
 
 #' Upload database metadata
@@ -594,6 +593,7 @@ uploadDatabaseMetaData <- function(databaseMetaData,
     camelCaseToSnakeCase = TRUE
   )
   message(sprintf("Uploaded %d records", nrow(dataToUpload)))
+  invisible(NULL)
 }
 
 #' Upload draft concept set targets
@@ -667,6 +667,7 @@ uploadConceptSetPersonCounts <- function(conceptSetPersonCounts,
     camelCaseToSnakeCase = TRUE
   )
   message(sprintf("Uploaded %d records", nrow(dataToUpload)))
+  invisible(NULL)
 }
 
 #' Download phenotypes from the server
@@ -728,5 +729,68 @@ genericDownload <- function(tableName,
     snakeCaseToCamelCase = TRUE
   )
   return(data)
+}
+
+#' Download concept sets for phenotypes from the server
+#'
+#' @template PegasusConnectionDetails
+#' @template Phenotypes
+#'
+#' @returns
+#' A tibble with concept sets for each provided phenotype.
+#'
+#' @export
+downloadPhenotypeToConceptSets <- function(phenotypes,
+                                           pegasusConnectionDetails,
+                                           pegasusDatabaseSchema) {
+  errorMessages <- checkmate::makeAssertCollection()
+  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", add = errorMessages)
+  checkmate::assertCharacter(pegasusDatabaseSchema, len = 1, add = errorMessages)
+  checkmate::assertDataFrame(phenotypes, min.rows = 1, add = errorMessages)
+  checkmate::assertNames(colnames(phenotypes), must.include = c(
+    "phenotypeName",
+    "clinicalDefinition"
+  ), add = errorMessages)
+  checkmate::reportAssertions(errorMessages)
+
+  connection <- DatabaseConnector::connect(pegasusConnectionDetails)
+  on.exit(DatabaseConnector::disconnect(connection))
+
+  phenotypes <- addPhenotypeIdIfMissing(
+    data = phenotypes,
+    connection = connection,
+    pegasusDatabaseSchema = pegasusDatabaseSchema
+  )
+  sql <- "
+    SELECT phenotype_id,
+      pertains,
+      category,
+      concept_set.concept_set_id,
+      concept_set_name,
+      circe_concept_set_expression,
+      capr_concept_set_expression,
+      has_descendants,
+      clinical_definition,
+      concept_id ,
+      valid,
+      atlas_concept_set_id,
+      cs_source_type
+    FROM @database_schema.phenotype_to_concept_set
+    INNER JOIN @database_schema.concept_set
+      ON phenotype_to_concept_set.concept_set_id = concept_set.concept_set_id
+    WHERE phenotype_id IN (@phenotype_ids);
+  "
+  result <-  DatabaseConnector::renderTranslateQuerySql(
+    connection =  connection,
+    sql = sql,
+    database_schema = pegasusDatabaseSchema,
+    phenotype_ids = phenotypes$phenotypeId,
+    snakeCaseToCamelCase = TRUE
+  )
+  result <- result |>
+    inner_join(phenotypes |>
+                 select("phenotypeId", "phenotypeName"),
+               by = join_by("phenotypeId"))
+  return(result)
 }
 

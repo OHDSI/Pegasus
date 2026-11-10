@@ -357,7 +357,7 @@ generateConceptSetTargets <- function(phenotypes,
   conceptSetTargets <- bind_rows(conceptSetTargets)
 
   delta <- Sys.time() - startTime
-  message(sprintf("Generating phenotype meta data took %0.2f %s and cost $%0.2f.",
+  message(sprintf("Generating concept set targets data took %0.2f %s and cost $%0.2f.",
                   delta,
                   attr(delta, "units"),
                   costTracker$amount - startCost))

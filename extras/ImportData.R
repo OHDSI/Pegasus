@@ -23,13 +23,7 @@ cdmDatabaseSchemas <- c("optum_extended_dod.cdm_optum_extended_dod_v4020",
 options(sqlRenderTempEmulationSchema = "scratch.scratch_mschuemi")
 
 connection <- DatabaseConnector::connect(connectionDetails)
-# Create data model ----------------------------------------------------------------------------------------------------
-# DatabaseConnector::executeSql(connection, "CREATE SCHEMA pegasus;")
 
-createDataModel(pegasusConnectionDetails = connectionDetails,
-                pegasusDatabaseSchema = databaseSchema)
-
-# Upload phenotype -----------------------------------------------------------------------------------------
 definitions <- openxlsx::readWorkbook("../largescalephentest/ClinicalDefinitionLibrary564.xlsx")
 definitions <- definitions |>
   as_tibble() |>
@@ -40,6 +34,14 @@ definitions <- definitions |>
             timeCreated = as.POSIXct("2026-09-01"),
             draft = 0,
             valid = 1)
+# Create data model ----------------------------------------------------------------------------------------------------
+# DatabaseConnector::executeSql(connection, "CREATE SCHEMA pegasus;")
+
+createDataModel(pegasusConnectionDetails = connectionDetails,
+                pegasusDatabaseSchema = databaseSchema)
+
+# Upload phenotype -----------------------------------------------------------------------------------------
+
 DatabaseConnector::insertTable(
   connection = connection,
   databaseSchema = databaseSchema,
@@ -139,7 +141,7 @@ existingConceptSets <- DatabaseConnector::renderTranslateQuerySql(
 )
 conceptSets <- conceptSets |>
   anti_join(existingConceptSets |>
-            select("conceptSetName", "hasDescendants"),
+              select("conceptSetName", "hasDescendants"),
             by = join_by("conceptSetName", "hasDescendants"))
 conceptSets <- conceptSets |>
   mutate(conceptSetId = row_number() + max(existingConceptSets$conceptSetId))
@@ -202,20 +204,49 @@ DatabaseConnector::insertTable(
 )
 
 # Upload cohort_definition ------------------------------------------------------------------------------
+# # Backup table:
+# sql <- "
+#   SELECT *
+#   FROM @schema.cohort_definition;
+# "
+# existingData <- DatabaseConnector::renderTranslateQuerySql(
+#   connection = connection,
+#   sql = sql,
+#   schema = databaseSchema,
+#   snakeCaseToCamelCase = TRUE
+# )
+# saveRDS(existingData, "e:/temp/PegasusCohortDefinition.rds")
+
 humanAndTemplatedCohortRef <- readr::read_csv("../largescalephentest/CohortReferenceTemplatesAndHuman.csv", show_col_types = FALSE)
 monoFlowCohortRef <- readr::read_csv("../largescalephentest/CohortReferenceMonoFlow.csv", show_col_types = FALSE)
 phenotypeDesignerCohortRef <- readr::read_csv("../largescalephentest/CohortReferencePhenotypeDesigner.csv", show_col_types = FALSE)
+human500CohortRef <- readr::read_csv("../largescalephentest/CohortReferenceHuman500.csv", show_col_types = FALSE)
 
 cohortRef <- bind_rows(
   humanAndTemplatedCohortRef,
   monoFlowCohortRef |>
     mutate(approach = "Mono flow"),
   phenotypeDesignerCohortRef |>
-    mutate(approach = "PhenotypeDesigner")
+    mutate(approach = "PhenotypeDesigner"),
+  human500CohortRef
 )
+
+sql <- "
+  SELECT cohort_definition_id
+  FROM @schema.cohort_definition;
+"
+existingCohortIds <- DatabaseConnector::renderTranslateQuerySql(
+  connection = connection,
+  sql = sql,
+  schema = databaseSchema,
+  snakeCaseToCamelCase = TRUE
+)[, 1]
+newCohortRef <- cohortRef |>
+  filter(!cohortId %in% existingCohortIds)
+
 baseUrl <- "https://epi.jnj.com:8443/WebAPI"
 ROhdsiWebApi::authorizeWebApi(baseUrl, authMethod = "windows")
-fromAtlas <- lapply(cohortRef$cohortId, ROhdsiWebApi::getCohortDefinition, baseUrl = baseUrl)
+fromAtlas <- lapply(newCohortRef$cohortId, ROhdsiWebApi::getCohortDefinition, baseUrl = baseUrl)
 cohortDefinitions <- tibble(
   atlasCohortDefinitionId = sapply(fromAtlas, function(x) x$id),
   cohortDefinitionName = sapply(fromAtlas, function(x) x$name),
@@ -223,7 +254,7 @@ cohortDefinitions <- tibble(
 )
 cohortDefinitions <- cohortDefinitions |>
   mutate(cohortDefinitionId = atlasCohortDefinitionId) |>
-  inner_join(cohortRef |>
+  inner_join(newCohortRef |>
                select(atlasCohortDefinitionId = "cohortId", "approach", "phenotype"),
              by = join_by("atlasCohortDefinitionId")) |>
   inner_join(definitions |>
@@ -242,7 +273,13 @@ circeToCaprCohortDefinition <- function(json) {
   tempFile <- tempfile(fileext = ".json")
   on.exit(unlink(tempFile))
   writeLines(json, tempFile)
-  capr <- Capr::jsonToCapr(tempFile)
+  capr <- tryCatch({
+    Capr::jsonToCapr(tempFile)
+  },
+  error = function(e) {
+    warning(e)
+    ""
+  })
   capr <- strsplit(capr, "\n")[[1]]
   capr <- capr[-(1:5)]
   capr <- paste(capr, collapse = "\n")
@@ -251,6 +288,7 @@ circeToCaprCohortDefinition <- function(json) {
 
 cohortDefinitions$caprCohortExpression <- sapply(cohortDefinitions$circeCohortExpression,
                                                  circeToCaprCohortDefinition)
+
 
 DatabaseConnector::insertTable(
   connection = connection,
@@ -331,7 +369,37 @@ DatabaseConnector::insertTable(
 )
 
 # Upload cohort_definition_evaluation --------------------------------------------
+# # Backup table:
+# sql <- "
+#   SELECT *
+#   FROM @schema.cohort_definition_evaluation;
+# "
+# existingData <- DatabaseConnector::renderTranslateQuerySql(
+#   connection = connection,
+#   sql = sql,
+#   schema = databaseSchema,
+#   snakeCaseToCamelCase = TRUE
+# )
+# saveRDS(existingData, "e:/temp/PegasusCohortDefinitionEvaluation.rds")
+
+
 performance <- readRDS("../largescalephentest/PhenotypeEvaluation/Performance.rds")
+bulkPerformance <- readRDS("../largescalephentest/PhenotypeEvaluation/BulkPerformance.rds") |>
+  mutate(cohortId = 100000 + cohortId)
+performance <- bind_rows(performance, bulkPerformance)
+
+sql <- "
+  SELECT cohort_definition_id,
+    database_id
+  FROM @schema.cohort_definition_evaluation;
+"
+existingCohortDatabaseIds <- DatabaseConnector::renderTranslateQuerySql(
+  connection = connection,
+  sql = sql,
+  schema = databaseSchema,
+  snakeCaseToCamelCase = TRUE
+)
+
 # Warning: note hard-coded database IDs:
 cdEvaluations <- performance |>
   transmute(cohortDefinitionId = cohortId,
@@ -356,6 +424,22 @@ cdEvaluations <- performance |>
             npvLb = npvOverallLb,
             npvUb = npvOverallUb,
             evaluationType = "KEEPER + LLM")
+
+newCdEvaluations <- cdEvaluations |>
+  anti_join(existingCohortDatabaseIds, by = join_by("cohortDefinitionId", "databaseId"))
+
+# nrow(newCdEvaluations) + nrow(existingCohortDatabaseIds)
+# nrow(cdEvaluations)
+# cdEvaluations |>
+#   filter(duplicated(paste(cohortDefinitionId, databaseId)))
+# existingCohortDatabaseIds |>
+#   filter(duplicated(paste(cohortDefinitionId, databaseId)))
+#
+# x <- existingCohortDatabaseIds |>
+#   anti_join(cdEvaluations)
+# sql <- "TRUNCATE TABLE @schema.cohort_definition_evaluation;"
+# DatabaseConnector::renderTranslateExecuteSql(connection = connection, sql, schema = databaseSchema)
+
 DatabaseConnector::insertTable(
   connection = connection,
   databaseSchema = databaseSchema,
@@ -365,6 +449,12 @@ DatabaseConnector::insertTable(
   createTable = FALSE,
   camelCaseToSnakeCase = TRUE
 )
+
+# sql <- "alter table pegasus.cohort_definition_evaluation alter column generation_seconds drop not null;"
+# DatabaseConnector::executeSql(connection, sql)
+
+# Bulk upload
+
 
 # Upload atlas_instance ----------------------------------------------------------
 atlasInstance <- tibble(baseUrl = "https://epi.jnj.com/atlas3")
@@ -573,8 +663,8 @@ for (i in seq_len(nrow(remainingConceptSets))) {
   sql <- CirceR::buildConceptSetQuery(remainingConceptSets$circeConceptSetExpression[i])
   for (j in seq_along(cdmDatabaseSchemas)) {
     counts <- getCounts(conceptSetSql = sql,
-              connection = cdmConnection,
-              cdmDatabaseSchema = cdmDatabaseSchemas[j])
+                        connection = cdmConnection,
+                        cdmDatabaseSchema = cdmDatabaseSchemas[j])
     conceptSetPersonCounts[[length(conceptSetPersonCounts) + 1]] <- counts |>
       mutate(conceptSetId = remainingConceptSets$conceptSetId[i],
              databaseId = databaseMetaDatas$databaseId[databaseMetaDatas$cdmDatabaseSchema == cdmDatabaseSchemas[j]])
@@ -712,12 +802,12 @@ DatabaseConnector::disconnect(connection)
 
 # Some checks on what data is in the model -----------------------------------------------------------------------------
 existingConceptSets <- Pegasus::downloadConceptSets(pegasusConnectionDetails = connectionDetails,
-                                            pegasusDatabaseSchema = databaseSchema)
+                                                    pegasusDatabaseSchema = databaseSchema)
 existingConceptSets |>
   filter(conceptSetName == "Motor vehicle accident")
 
 existingConceptSets2 <- Pegasus::downloadConceptSets(pegasusConnectionDetails = connectionDetails,
-                                                    pegasusDatabaseSchema = "pegasus_dev_2")
+                                                     pegasusDatabaseSchema = "pegasus_dev_2")
 
 
 
@@ -742,4 +832,63 @@ existingPhenotypeToConceptSet2 <- DatabaseConnector::renderTranslateQuerySql(
   database_schema = "pegasus_dev_2",
   snakeCaseToCamelCase = TRUE
 )
+
+sql <- "
+  SELECT phenotype_id,
+    cd_source_type
+  FROM @database_schema.cohort_definition;
+"
+counts <- DatabaseConnector::renderTranslateQuerySql(
+  connection = connection,
+  sql = sql,
+  database_schema = databaseSchema,
+  snakeCaseToCamelCase = TRUE
+)
+counts |>
+  group_by(cdSourceType) |>
+  count()
+
+counts |>
+  distinct(phenotypeId) |>
+  count()
+
+nrow(counts)
+
+
+cohortSizes <- readr::read_csv("../largescalephentest/Keeper/referenceCohortSizes.csv")
+cohortSizes |>
+  filter(countOptumClinformatics != 10000) |>
+  summarise(mean(countOptumClinformatics))
+max(cohortSizes$countOptumClinformatics)
+
+100 * 740*564 / 10000
+
+# Copy tables from one schema to another -------------------------------------------------------------------------------
+targetSchema <- "pegasus_stage"
+
+copyTable <- function(tableName) {
+  sql <- "
+    DROP TABLE IF EXISTS @target_schema.@table;
+
+    CREATE TABLE @target_schema.@table (
+    LIKE @source_schema.@table INCLUDING ALL
+    );
+
+    INSERT INTO @target_schema.@table
+    SELECT * FROM @source_schema.@table;
+  "
+  sql <- SqlRender::render(sql = sql,
+                           source_schema = databaseSchema,
+                           target_schema = targetSchema,
+                           table = tableName)
+  DatabaseConnector::executeSql(connection = connection, sql = sql)
+}
+copyTable("phenotype")
+copyTable("draft_concept_set_target")
+copyTable("concept_set")
+copyTable("concept_set_person_count")
+copyTable("cohort_definition")
+copyTable("cohort_definition_evaluation")
+
+
 
