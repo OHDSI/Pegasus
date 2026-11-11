@@ -70,17 +70,6 @@ createConceptSetCounts <- function(completeConceptSets,
   uniqueConceptSets <- completeConceptSets |>
     filter(!duplicated(.data$conceptSetId))
 
-  # emptyDefinitionCount <- uniqueConceptSets |>
-  #   filter(is.na(.data$circeConceptSetExpression)) |>
-  #   count() |>
-  #   pull(n)
-  # if (emptyDefinitionCount > 0) {
-  #   warning(sprintf("Found %d concept sets without Circe concept set expression. Skipping those.",
-  #                   emptyDefinitionCount))
-  #   uniqueConceptSets <- uniqueConceptSets |>
-  #     filter(!is.na(.data$circeConceptSetExpression))
-  # }
-
   cluster <- ParallelLogger::makeCluster(maxCores)
   ParallelLogger::clusterRequire(cluster, "dplyr")
 
