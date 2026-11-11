@@ -306,6 +306,19 @@ circeToCaprCohortDefinition <- function(json) {
 #'
 #' @export
 insertCohortDefinitionsInAtlas <- function(cohortDefinitions, baseUrl) {
+  errorMessages <- checkmate::makeAssertCollection()
+  checkmate::assertDataFrame(cohortDefinitions, min.rows = 1, add = errorMessages)
+  checkmate::assertNames(colnames(cohortDefinitions), must.include = c(
+    "phenotypeName",
+    "cohortDefinitionName",
+    "circeCohortExpression",
+    "caprCohortExpression",
+    "cdSourceType"
+  ), add = errorMessages)
+  checkmate::assertCharacter(baseUrl, len = 1, add = errorMessages)
+  checkmate::reportAssertions(errorMessages)
+
+
   cohortDefinitions$atlasCohortDefinitionId <- NA_real_
   existingCohorts <- ROhdsiWebApi::getDefinitionsMetadata(baseUrl, "cohort")
   for (i in seq_len(nrow(cohortDefinitions))) {
