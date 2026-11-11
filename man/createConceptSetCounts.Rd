@@ -5,18 +5,17 @@
 \title{Create concept set person counts}
 \usage{
 createConceptSetCounts(
-  completeConceptSets,
+  phenotypes,
   pegasusConnection = NULL,
   pegasusConnectionDetails = NULL,
-  pegasusDatabaseSchema = NULL,
+  pegasusDatabaseSchema,
   databaseReferences,
   maxCores = 4,
   cacheFolder = NULL
 )
 }
 \arguments{
-\item{completeConceptSets}{Concept sets with concept set IDs and Circe definitions, created either by the
-\code{downloadConceptSets()} or \code{downloadPhenotypeToConceptSets()} function.}
+\item{phenotypes}{A tibble with two columns: \code{phenotypeName}, and \code{clinicalDefinition}.}
 
 \item{pegasusConnection}{A connection object created using \code{DatabaseConnector::connect()} for connecting to
 the database holding the Pegasus data model. Can be null if
@@ -40,8 +39,8 @@ function.}
 A tibble with one row per concept set, with columns with counts per domain and overall.
 }
 \description{
-Counts the number of persons with at least one concept in the concept set, both overall and stratified by domain.
+For all concept sets associated with the provided phenotypes, counts the number of persons with at least one concept
+in the concept set, both overall and stratified by domain.
 
-If the Pegasus connection details are provided this function will skip concept set - database combinations that
-already have counts.
+IThis function will skip concept set - database combinations that already have counts.
 }

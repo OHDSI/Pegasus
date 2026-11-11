@@ -18,13 +18,12 @@
 #' Create concept set person counts
 #'
 #' @description
-#' Counts the number of persons with at least one concept in the concept set, both overall and stratified by domain.
+#' For all concept sets associated with the provided phenotypes, counts the number of persons with at least one concept
+#' in the concept set, both overall and stratified by domain.
 #'
-#' If the Pegasus connection details are provided this function will skip concept set - database combinations that
-#' already have counts.
+#' IThis function will skip concept set - database combinations that already have counts.
 #'
-#' @param completeConceptSets Concept sets with concept set IDs and Circe definitions, created either by the
-#'                            `downloadConceptSets()` or `downloadPhenotypeToConceptSets()` function.
+#' @template Phenotypes
 #' @template PegasusConnectionDetails
 #' @template DatabaseReferences
 #' @template MaxCores
@@ -34,18 +33,18 @@
 #' A tibble with one row per concept set, with columns with counts per domain and overall.
 #'
 #' @export
-createConceptSetCounts <- function(completeConceptSets,
+createConceptSetCounts <- function(phenotypes,
                                    pegasusConnection = NULL,
                                    pegasusConnectionDetails = NULL,
-                                   pegasusDatabaseSchema = NULL,
+                                   pegasusDatabaseSchema,
                                    databaseReferences,
                                    maxCores = 4,
                                    cacheFolder = NULL) {
   errorMessages <- checkmate::makeAssertCollection()
-  checkmate::assertDataFrame(completeConceptSets, min.rows = 1, add = errorMessages)
-  checkmate::assertNames(colnames(completeConceptSets), must.include = c(
-    "conceptSetId",
-    "circeConceptSetExpression"
+  checkmate::assertDataFrame(phenotypes, min.rows = 1, add = errorMessages)
+  checkmate::assertNames(colnames(phenotypes), must.include = c(
+    "phenotypeName",
+    "clinicalDefinition"
   ), add = errorMessages)
   checkmate::assertClass(pegasusConnection, "DatabaseConnectorConnection", null.ok = TRUE, add = errorMessages)
   checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", null.ok = TRUE, add = errorMessages)
@@ -54,11 +53,8 @@ createConceptSetCounts <- function(completeConceptSets,
   checkmate::assertInt(maxCores, lower = 1, add = errorMessages)
   checkmate::assertCharacter(cacheFolder, len = 1, null.ok = TRUE, add = errorMessages)
   checkmate::reportAssertions(collection = errorMessages)
-  if ((!is.null(pegasusConnection) || !is.null(pegasusConnectionDetails)) && is.null(pegasusDatabaseSchema)) {
-    stop("Must provide pegasusDatabaseSchema when providing pegasusConnection or  pegasusConnectionDetails.")
-  }
-  if (any(is.na(completeConceptSets$conceptSetId))) {
-    stop("All concept sets should have a concept set ID.")
+  if (is.null(pegasusConnection) && is.null(pegasusConnectionDetails)) {
+    stop("Must provide either pegasusConnection or pegasusConnectionDetails")
   }
   startTime <- Sys.time()
 
@@ -67,7 +63,13 @@ createConceptSetCounts <- function(completeConceptSets,
     on.exit(DatabaseConnector::disconnect(pegasusConnection))
   }
 
-  uniqueConceptSets <- completeConceptSets |>
+  phenotypeToConceptSets <- downloadPhenotypeToConceptSets(
+    phenotypes = phenotypes,
+    pegasusConnection = pegasusConnection,
+    pegasusDatabaseSchema = pegasusDatabaseSchema
+  )
+
+  uniqueConceptSets <- phenotypeToConceptSets |>
     filter(!duplicated(.data$conceptSetId))
 
   cluster <- ParallelLogger::makeCluster(maxCores)

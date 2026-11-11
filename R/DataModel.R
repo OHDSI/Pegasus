@@ -819,6 +819,65 @@ uploadCohortDefinitions <- function(cohortDefinitions,
   invisible(NULL)
 }
 
+#' Upload ATLAS instance
+#'
+#' @param baseUrl The base URL of the OHDSI Web API.
+#' @template PegasusConnectionDetails
+#'
+#' @returns
+#' Returns nothing. Is executed for uploading the data to the server.
+#'
+#' @export
+uploadAtlasInstance <- function(baseUrl,
+                                    pegasusConnection = NULL,
+                                    pegasusConnectionDetails = NULL,
+                                    pegasusDatabaseSchema) {
+  errorMessages <- checkmate::makeAssertCollection()
+  checkmate::assertCharacter(baseUrl, len = 1, add = errorMessages)
+  checkmate::assertClass(pegasusConnection, "DatabaseConnectorConnection", null.ok = TRUE, add = errorMessages)
+  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", null.ok = TRUE, add = errorMessages)
+  checkmate::assertCharacter(pegasusDatabaseSchema, len = 1, add = errorMessages)
+  checkmate::reportAssertions(errorMessages)
+  if (is.null(pegasusConnection) && is.null(pegasusConnectionDetails)) {
+    stop("Must provide either pegasusConnection or pegasusConnectionDetails")
+  }
+  if (is.null(pegasusConnection)) {
+    pegasusConnection <- DatabaseConnector::connect(pegasusConnectionDetails)
+    on.exit(DatabaseConnector::disconnect(pegasusConnection))
+  }
+
+  sql <- "
+    SELECT *
+    FROM @database_schema.atlas_instance;
+  "
+  existingData <- DatabaseConnector::renderTranslateQuerySql(
+    connection = pegasusConnection,
+    sql = sql,
+    database_schema = pegasusDatabaseSchema,
+    snakeCaseToCamelCase = TRUE
+  )
+  if (nrow(existingData) != 0) {
+    stop("An existing ATLAS instance is already registered with base URL ", existingData$baseUrl)
+  }
+
+  dataToUpload <- tibble(
+    baseUrl = baseUrl
+  )
+
+  DatabaseConnector::insertTable(
+    connection = pegasusConnection,
+    databaseSchema = pegasusDatabaseSchema,
+    tableName = "atlas_instance",
+    data = dataToUpload,
+    dropTableIfExists = FALSE,
+    createTable = FALSE,
+    tempTable = FALSE,
+    camelCaseToSnakeCase = TRUE
+  )
+  message(sprintf("Uploaded %d record(s)", nrow(dataToUpload)))
+  invisible(NULL)
+}
+
 #' Download phenotypes from the server
 #'
 #' @template PegasusConnectionDetails
