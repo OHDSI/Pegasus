@@ -890,5 +890,6 @@ copyTable("concept_set_person_count")
 copyTable("cohort_definition")
 copyTable("cohort_definition_evaluation")
 
+copyTable("phenotype_ancestor")
 
 

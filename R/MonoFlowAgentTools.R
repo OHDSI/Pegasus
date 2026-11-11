@@ -291,10 +291,6 @@ compileCaprConceptSetsViaWorker <- function(caprCode, timeoutSeconds = 60) {
   )
 }
 
-quoteSqlString <- function(value) {
-  paste0("'", gsub("'", "''", value, fixed = TRUE), "'")
-}
-
 formatPipeTable <- function(data, zeroAsBlank = character()) {
   escapeCell <- function(value, blankZero = FALSE) {
     if (length(value) == 0L || is.na(value) || (blankZero && value == 0)) {
@@ -892,27 +888,6 @@ computeIncidenceRateForDatabase <- function(connection, databaseReference, cohor
     select(-"stratumOrder")
   return(rates)
 }
-
-getKeeperReferenceCohortId <- function(connection, databaseReference, phenotype) {
-  sql <- "
-    SELECT cohort_definition_id
-    FROM @database_schema.@table
-    WHERE LOWER(phenotype) = LOWER(@phenotype);
-  "
-  keeperReference <- DatabaseConnector::renderTranslateQuerySql(
-    connection = connection,
-    sql = sql,
-    database_schema = databaseReference$referenceCohortDatabaseSchema,
-    table = Keeper::createReferenceCohortTableNames(databaseReference$referenceCohortTable)$referenceCohortMetadataTable,
-    phenotype = quoteSqlString(phenotype),
-    snakeCaseToCamelCase = TRUE
-  )
-  if (nrow(keeperReference) == 0) {
-    stop("Could not find reference cohort for phenotype ", phenotype, " in database '", databaseReference$databaseName, "'")
-  }
-  return(keeperReference$cohortDefinitionId)
-}
-
 
 evaluateCohortForDatabase <- function(connection, databaseReference, cohortId, phenotype) {
   referenceCohortDefinitionId <- getKeeperReferenceCohortId(connection = connection,

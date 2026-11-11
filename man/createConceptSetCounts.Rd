@@ -5,7 +5,8 @@
 \title{Create concept set person counts}
 \usage{
 createConceptSetCounts(
-  phenotypes,
+  conceptSets = NULL,
+  phenotypes = NULL,
   pegasusConnection = NULL,
   pegasusConnectionDetails = NULL,
   pegasusDatabaseSchema,
@@ -15,6 +16,9 @@ createConceptSetCounts(
 )
 }
 \arguments{
+\item{conceptSets}{A data frame with concept sets. Only the \code{conceptSetId} column is used. If not provided, all
+concept sets associated with the provided phenotypes will be counted.}
+
 \item{phenotypes}{A tibble with two columns: \code{phenotypeName}, and \code{clinicalDefinition}.}
 
 \item{pegasusConnection}{A connection object created using \code{DatabaseConnector::connect()} for connecting to
@@ -39,8 +43,8 @@ function.}
 A tibble with one row per concept set, with columns with counts per domain and overall.
 }
 \description{
-For all concept sets associated with the provided phenotypes, counts the number of persons with at least one concept
-in the concept set, both overall and stratified by domain.
+For eah concept sets counts the number of persons with at least one concept in the concept set, both overall and
+stratified by domain.
 
-IThis function will skip concept set - database combinations that already have counts.
+This function will skip concept set - database combinations that already have counts.
 }

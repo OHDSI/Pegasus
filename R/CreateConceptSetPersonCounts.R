@@ -18,12 +18,14 @@
 #' Create concept set person counts
 #'
 #' @description
-#' For all concept sets associated with the provided phenotypes, counts the number of persons with at least one concept
-#' in the concept set, both overall and stratified by domain.
+#' For eah concept sets counts the number of persons with at least one concept in the concept set, both overall and
+#' stratified by domain.
 #'
-#' IThis function will skip concept set - database combinations that already have counts.
+#' This function will skip concept set - database combinations that already have counts.
 #'
 #' @template Phenotypes
+#' @param conceptSets A data frame with concept sets. Only the `conceptSetId` column is used. If not provided, all
+#'                    concept sets associated with the provided phenotypes will be counted.
 #' @template PegasusConnectionDetails
 #' @template DatabaseReferences
 #' @template MaxCores
@@ -33,7 +35,8 @@
 #' A tibble with one row per concept set, with columns with counts per domain and overall.
 #'
 #' @export
-createConceptSetCounts <- function(phenotypes,
+createConceptSetCounts <- function(conceptSets = NULL,
+                                   phenotypes = NULL,
                                    pegasusConnection = NULL,
                                    pegasusConnectionDetails = NULL,
                                    pegasusDatabaseSchema,
@@ -41,11 +44,18 @@ createConceptSetCounts <- function(phenotypes,
                                    maxCores = 4,
                                    cacheFolder = NULL) {
   errorMessages <- checkmate::makeAssertCollection()
-  checkmate::assertDataFrame(phenotypes, min.rows = 1, add = errorMessages)
-  checkmate::assertNames(colnames(phenotypes), must.include = c(
-    "phenotypeName",
-    "clinicalDefinition"
-  ), add = errorMessages)
+  checkmate::assertDataFrame(phenotypes, min.rows = 1, null.ok = TRUE, add = errorMessages)
+  if (!is.null(phenotypes)) {
+    checkmate::assertNames(colnames(phenotypes), must.include = c(
+      "phenotypeName"
+    ), add = errorMessages)
+  }
+  checkmate::assertDataFrame(conceptSets, min.rows = 1, null.ok = TRUE, add = errorMessages)
+  if (!is.null(conceptSets)) {
+    checkmate::assertNames(colnames(conceptSets), must.include = c(
+      "conceptSetId"
+    ), add = errorMessages)
+  }
   checkmate::assertClass(pegasusConnection, "DatabaseConnectorConnection", null.ok = TRUE, add = errorMessages)
   checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", null.ok = TRUE, add = errorMessages)
   checkmate::assertCharacter(pegasusDatabaseSchema, len = 1, null.ok = TRUE, add = errorMessages)
@@ -53,6 +63,9 @@ createConceptSetCounts <- function(phenotypes,
   checkmate::assertInt(maxCores, lower = 1, add = errorMessages)
   checkmate::assertCharacter(cacheFolder, len = 1, null.ok = TRUE, add = errorMessages)
   checkmate::reportAssertions(collection = errorMessages)
+  if (is.null(conceptSets) && is.null(phenotypes)) {
+    stop("Must provide either conceptSets or phenotypes")
+  }
   if (is.null(pegasusConnection) && is.null(pegasusConnectionDetails)) {
     stop("Must provide either pegasusConnection or pegasusConnectionDetails")
   }
@@ -63,13 +76,15 @@ createConceptSetCounts <- function(phenotypes,
     on.exit(DatabaseConnector::disconnect(pegasusConnection))
   }
 
-  phenotypeToConceptSets <- downloadPhenotypeToConceptSets(
-    phenotypes = phenotypes,
-    pegasusConnection = pegasusConnection,
-    pegasusDatabaseSchema = pegasusDatabaseSchema
-  )
+  if (is.null(conceptSets)) {
+    conceptSets <- downloadPhenotypeToConceptSets(
+      phenotypes = phenotypes,
+      pegasusConnection = pegasusConnection,
+      pegasusDatabaseSchema = pegasusDatabaseSchema
+    )
+  }
 
-  uniqueConceptSets <- phenotypeToConceptSets |>
+  uniqueConceptSets <- conceptSets |>
     filter(!duplicated(.data$conceptSetId))
 
   cluster <- ParallelLogger::makeCluster(maxCores)

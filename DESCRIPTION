@@ -42,7 +42,8 @@ Imports:
   tidyr,
 	R6,
 	callr,
-	bit64
+	bit64,
+	ROhdsiWebApi
 Suggests:
 	testthat,
 	duckdb,

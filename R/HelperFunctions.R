@@ -328,3 +328,7 @@ insertCohortDefinitionsInAtlas <- function(cohortDefinitions, baseUrl) {
   }
   return(cohortDefinitions)
 }
+
+quoteSqlString <- function(value) {
+  paste0("'", gsub("'", "''", value, fixed = TRUE), "'")
+}

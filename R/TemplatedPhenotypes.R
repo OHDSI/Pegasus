@@ -43,8 +43,7 @@ generateCohortDefinitionssUsingTemplates <- function(phenotypes,
   errorMessages <- checkmate::makeAssertCollection()
   checkmate::assertDataFrame(phenotypes, min.rows = 1, add = errorMessages)
   checkmate::assertNames(colnames(phenotypes), must.include = c(
-    "phenotypeName",
-    "clinicalDefinition"
+    "phenotypeName"
   ), add = errorMessages)
   checkmate::assertClass(pegasusConnection, "DatabaseConnectorConnection", null.ok = TRUE, add = errorMessages)
   checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", null.ok = TRUE, add = errorMessages)

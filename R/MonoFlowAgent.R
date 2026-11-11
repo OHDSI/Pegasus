@@ -273,7 +273,7 @@ checkRequirementsMet <- function(phenotypes,
   }
 
   message(" - Ensuring standard concept sets have counts")
-  conceptSetPersonCounts <- createConceptSetCounts(completeConceptSets = standardConceptSets,
+  conceptSetPersonCounts <- createConceptSetCounts(conceptSets = standardConceptSets,
                                                    pegasusConnection = pegasusConnection,
                                                    pegasusDatabaseSchema = pegasusDatabaseSchema,
                                                    databaseReferences = databaseReferences,

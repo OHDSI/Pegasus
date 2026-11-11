@@ -392,3 +392,234 @@ createKeeperReferenceCohort <- function(row,
     return(0)
   }
 }
+
+#' Evaluate cohort definitions using Keeper reference cohorts
+#'
+#' @template Phenotypes
+#' @template PegasusConnectionDetails
+#' @template DatabaseReferences
+#'
+#' @returns
+#' A tibble with one row per cohort definition - database combination.
+#'
+#' @export
+
+evaluateUsingKeeperReferenceCohorts <- function(phenotypes,
+                                                pegasusConnection = NULL,
+                                                pegasusConnectionDetails = NULL,
+                                                pegasusDatabaseSchema,
+                                                databaseReferences) {
+  errorMessages <- checkmate::makeAssertCollection()
+  checkmate::assertDataFrame(phenotypes, min.rows = 1, add = errorMessages)
+  checkmate::assertNames(colnames(phenotypes), must.include = c(
+    "phenotypeName"
+  ), add = errorMessages)
+  checkmate::assertClass(pegasusConnection, "DatabaseConnectorConnection", null.ok = TRUE, add = errorMessages)
+  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", null.ok = TRUE, add = errorMessages)
+  checkmate::assertCharacter(pegasusDatabaseSchema, len = 1, add = errorMessages)
+  checkmate::assertList(databaseReferences, min.len = 1, add = errorMessages)
+  for (databaseReference in databaseReferences) {
+    checkmate::assertClass(databaseReference, "DatabaseReference", add = errorMessages)
+  }
+  checkmate::reportAssertions(collection = errorMessages)
+  if (is.null(pegasusConnection) && is.null(pegasusConnectionDetails)) {
+    stop("Must provide either pegasusConnection or pegasusConnectionDetails")
+  }
+
+  startTime <- Sys.time()
+
+  if (is.null(pegasusConnection)) {
+    pegasusConnection <- DatabaseConnector::connect(pegasusConnectionDetails)
+    on.exit(DatabaseConnector::disconnect(pegasusConnection))
+  }
+
+  cohortDefinitions <- downloadCohortDefinition(
+    phenotypes = phenotypes,
+    pegasusConnection = pegasusConnection,
+    pegasusDatabaseSchema = pegasusDatabaseSchema
+  )
+
+  existingEvaluations <- getExistingEvaluations(
+    cohortDefinitionIds = cohortDefinitions$cohortDefinitionId,
+    databaseIds = sapply(databaseReferences, function(x) x$databaseId),
+    pegasusConnection = pegasusConnection,
+    pegasusDatabaseSchema = pegasusDatabaseSchema
+  )
+
+  jsonToSql <- function(json) {
+    expression <- CirceR::cohortExpressionFromJson(json)
+    sql <- CirceR::buildCohortQuery(expression, CirceR::createGenerateOptions(generateStats = FALSE))
+    return(sql)
+  }
+
+  cohortDefinitions <- cohortDefinitions |>
+    mutate(sql = sapply(.data$circeCohortExpression, jsonToSql))
+
+  results <- list()
+  for (i in seq_along(databaseReferences)) {
+    databaseReference <- databaseReferences[[i]]
+    toSkip <- existingEvaluations |>
+      filter(.data$databaseId == databaseReferences$databaseId)
+    results[[i]] <- evaluateInDatabase(
+      cohortDefinitions = cohortDefinitions,
+      databaseReference = databaseReference,
+      toSkip = toSkip
+    )
+  }
+  results <- bind_rows(results)
+
+  delta <- Sys.time() - startTime
+  message(sprintf("Evaluating cohort definitions took %0.2f %s.",
+                  delta,
+                  attr(delta, "units")))
+  return(results)
+}
+
+evaluateInDatabase <- function(cohortDefinitions, databaseReference, toSkip) {
+  connection <- DatabaseConnector::connect(databaseReference$connectionDetails)
+  on.exit(DatabaseConnector::disconnect(connection))
+
+  # Instantiate cohorts ------------------------------------------------------------------------------------------------
+  cohortTableNames <- CohortGenerator::getCohortTableNames(databaseReference$candidateCohortTable)
+  if (!DatabaseConnector::existsTable(connection = connection,
+                                      databaseSchema = databaseReference$candidateCohortDatabaseSchema,
+                                      tableName = databaseReference$candidateCohortTable)) {
+    CohortGenerator::createCohortTables(
+      connection = connection,
+      cohortDatabaseSchema = databaseReference$candidateCohortDatabaseSchema,
+      cohortTableNames = cohortTableNames
+    )
+  }
+  toEvaluate <- cohortDefinitions  |>
+    filter(!.data$cohortDefinitionId %in% toSkip$cohortDefinitionId)
+  if (nrow(toEvaluate) == 0) {
+    return(NULL)
+  }
+  cohortDefinitionSet <- toEvaluate |>
+    select(
+      cohortId = "cohortDefinitionId",
+      cohortName = "cohortDefinitionName",
+      "sql",
+      json = "circeCohortExpression"
+    )
+  CohortGenerator::generateCohortSet(
+    connection = connection,
+    cdmDatabaseSchema = databaseReference$cdmDatabaseSchema,
+    cohortDatabaseSchema = databaseReference$candidateCohortDatabaseSchema,
+    cohortTableNames = cohortTableNames,
+    cohortDefinitionSet = cohortDefinitionSet,
+    incremental = TRUE,
+    tempEmulationSchema = databaseReference$tempEmulationSchema
+  )
+  counts <- CohortGenerator::getCohortCounts(
+    connection = connection,
+    cohortDatabaseSchema = databaseReference$candidateCohortDatabaseSchema,
+    cohortTable = databaseReference$candidateCohortTable,
+    cohortIds = toEvaluate$cohortDefinitionId
+  )
+  times <- DatabaseConnector::renderTranslateQuerySql(
+    connection = connection,
+    sql = "SELECT * FROM @database_schema.@table WHERE cohort_definition_id IN (@cohort_ids);",
+    database_schema = databaseReference$candidateCohortDatabaseSchema,
+    table = cohortTableNames$cohortChecksumTable,
+    cohort_ids = toEvaluate$cohortDefinitionId,
+    snakeCaseToCamelCase = TRUE
+  )
+  times <- times |>
+    mutate(generationSeconds = (.data$endTime - .data$startTime) / 1000)
+
+  # Evaluate cohorts ---------------------------------------------------------------------------------------------------
+  results <- list()
+  for (i in seq_len(nrow(toEvaluate))) {
+    cohortDefinition <- toEvaluate[i, ]
+    referenceCohortDefinitionId <- getKeeperReferenceCohortId(connection = connection,
+                                                              databaseReference = databaseReference,
+                                                              phenotype = cohortDefinition$phenotypeName)
+    metrics <- Keeper::evaluateCohortUsingReferenceCohort(
+      connection = connection,
+      cohortDatabaseSchema = databaseReference$candidateCohortDatabaseSchema,
+      cohortTable = databaseReference$candidateCohortTable,
+      cohortDefinitionId = cohortDefinition$cohortDefinitionId,
+      referenceCohortDatabaseSchema = databaseReference$referenceCohortDatabaseSchema,
+      referenceCohortTableNames = Keeper::createReferenceCohortTableNames(databaseReference$referenceCohortTable),
+      referenceCohortDefinitionId = referenceCohortDefinitionId
+    )
+    results[[i]] <- metrics |>
+      select(
+        truePositives = "tp",
+        falsePositives = "fp",
+        trueNegatives = "tn",
+        falseNegatives = "fn",
+        "ppv",
+        "ppvLb",
+        "ppvUb",
+        "sensitivity",
+        "sensitivityLb",
+        "sensitivityUb",
+        specificity = "specificityOverall",
+        specificityLb = "specificityOverallLb",
+        specificityUb = "specificityOverallUb",
+        npv = "npvOverall",
+        npvLb = "npvOverallLb",
+        npvUb = "npvOverallUb"
+      ) |>
+      mutate(cohortDefinitionId = cohortDefinition$cohortDefinitionId,
+             phenotypeId = cohortDefinition$phenotypeId,
+             phenotypeName = cohortDefinition$phenotypeName)
+  }
+  results <- bind_rows(results) |>
+    mutate(databaseId = databaseReference$databaseId,
+           databaseName = databaseReference$databaseName,
+           evaluationType = "KEEPER + llm") |>
+    inner_join(counts |>
+                 select(cohortDefinitionId = "cohortId",
+                        "cohortEntries",
+                        "cohortSubjects"),
+               by = join_by("cohortDefinitionId"))|>
+    inner_join(times |>
+                 select("cohortDefinitionId",
+                        "generationSeconds"),
+               by = join_by("cohortDefinitionId"))
+  return(results)
+}
+
+getExistingEvaluations <- function(cohortDefinitionIds, databaseIds, pegasusConnection, pegasusDatabaseSchema) {
+  sql <- "
+    SELECT cohort_definition_id,
+      database_id
+    FROM @database_schema.cohort_definition_evaluation
+    WHERE cohort_definition_id IN (@cohort_ids)
+      AND database_id IN (@database_ids)
+      AND evaluation_type = 'KEEPER + llm';
+  "
+  existingEvaluations <- DatabaseConnector::renderTranslateQuerySql(
+    connection = pegasusConnection,
+    sql = sql,
+    database_schema = pegasusDatabaseSchema,
+    cohort_ids = cohortDefinitionIds,
+    database_ids = databaseIds,
+    snakeCaseToCamelCase = TRUE
+  )
+  return(existingEvaluations)
+}
+
+
+getKeeperReferenceCohortId <- function(connection, databaseReference, phenotype) {
+  sql <- "
+    SELECT cohort_definition_id
+    FROM @database_schema.@table
+    WHERE LOWER(phenotype) = LOWER(@phenotype);
+  "
+  keeperReference <- DatabaseConnector::renderTranslateQuerySql(
+    connection = connection,
+    sql = sql,
+    database_schema = databaseReference$referenceCohortDatabaseSchema,
+    table = Keeper::createReferenceCohortTableNames(databaseReference$referenceCohortTable)$referenceCohortMetadataTable,
+    phenotype = quoteSqlString(phenotype),
+    snakeCaseToCamelCase = TRUE
+  )
+  if (nrow(keeperReference) == 0) {
+    stop("Could not find reference cohort for phenotype ", phenotype, " in database '", databaseReference$databaseName, "'")
+  }
+  return(keeperReference$cohortDefinitionId)
+}
