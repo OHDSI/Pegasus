@@ -14,11 +14,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+#' Steps reported to `progressCallback` by [createCohortDefinitionsAndEvaluate()], in order.
+#'
+#' @export
+createCohortDefinitionsAndEvaluateSteps <- c(
+  "Phenotype metadata",
+  "Concept set targets",
+  "Concept set target definitions",
+  "Concept sets",
+  "Concept set person counts",
+  "Keeper reference cohorts",
+  "Cohort definitions (MonoFlow agent)",
+  "Cohort definitions (templates)",
+  "Evaluation"
+)
+
 #' Create cohort definitions and evaluate them
 #'
 #' @template Phenotypes
 #' @template LlmClient
-#' @param llmClientFrontier
+#' @param llmClientFrontier The LLM client used for the MonoFlow agent, which benefits from a more capable model.
+#'                          Defaults to `llmClient`.
 #' @template CostTracker
 #' @param pegasusConnectionDetails An R object of type `connectionDetails` created using the
 #'                                 [DatabaseConnector::createConnectionDetails()] function for connecting to the
@@ -28,6 +44,8 @@
 #' @template MaxCores
 #' @param baseUrl The base URL of the OHDSI Web API.
 #' @param rootWorkFolder A folder on the local file system where results can be written.
+#' @param progressCallback Optional function that is called with a single string, the name of the step about to
+#'                         start (see `createCohortDefinitionsAndEvaluateSteps`). Can be used to report progress.
 #'
 #' @returns
 #' Does not return anything. Is executed for populated the Pegasus data model.
@@ -42,7 +60,8 @@ createCohortDefinitionsAndEvaluate <- function(phenotypes,
                                                databaseReferences,
                                                maxCores = 4,
                                                baseUrl,
-                                               rootWorkFolder) {
+                                               rootWorkFolder,
+                                               progressCallback = NULL) {
   errorMessages <- checkmate::makeAssertCollection()
   checkmate::assertNames(colnames(phenotypes), must.include = c(
     "phenotypeName",
@@ -56,17 +75,27 @@ createCohortDefinitionsAndEvaluate <- function(phenotypes,
   checkmate::assertList(databaseReferences, types = c("DatabaseReference"), min.len = 1, add = errorMessages)
   checkmate::assertInt(maxCores, lower = 1, add = errorMessages)
   checkmate::assertCharacter(baseUrl, len = 1, add = errorMessages)
+  checkmate::assertCharacter(rootWorkFolder, len = 1, add = errorMessages)
+  checkmate::assertFunction(progressCallback, null.ok = TRUE, add = errorMessages)
   checkmate::reportAssertions(collection = errorMessages)
 
   startTime <- Sys.time()
   startCost <- costTracker$amount
 
+  dir.create(rootWorkFolder, recursive = TRUE, showWarnings = FALSE)
+
   ParallelLogger::addDefaultFileLogger(file.path(rootWorkFolder, "log.txt"), name = "COHORT_DEF_AND_EVAL_LOGGER")
   on.exit(ParallelLogger::unregisterLogger("COHORT_DEF_AND_EVAL_LOGGER"))
 
-  dir.create(rootWorkFolder, recursive = TRUE, showWarnings = FALSE)
+  progress <- function(step) {
+    stopifnot(step %in% createCohortDefinitionsAndEvaluateSteps)
+    if (!is.null(progressCallback)) {
+      progressCallback(step)
+    }
+  }
 
   # Phenotype meta data ------------------------------------------------------------------------------------------------
+  progress("Phenotype metadata")
   phenotypeMetaData <- generatePhenotypeMetaData(phenotypes = phenotypes,
                                                  llmClient = llmClient,
                                                  costTracker = costTracker)
@@ -77,6 +106,7 @@ createCohortDefinitionsAndEvaluate <- function(phenotypes,
 
 
   # Create concept sets ------------------------------------------------------------------------------------------------
+  progress("Concept set targets")
   conceptSetTargets <- generateConceptSetTargets(
     phenotypes = phenotypes,
     databaseReference = databaseReferences[[1]],
@@ -92,6 +122,7 @@ createCohortDefinitionsAndEvaluate <- function(phenotypes,
 
 
   # Create concept set target definitions ------------------------------------------------------------------------------
+  progress("Concept set target definitions")
   conceptSetTargetDefinitions <- generateOrReuseConceptSetTargetDefinitions(
     conceptSetTargets = conceptSetTargets,
     phenotypes = phenotypes,
@@ -105,6 +136,7 @@ createCohortDefinitionsAndEvaluate <- function(phenotypes,
 
 
   # Create concept sets ------------------------------------------------------------------------------------------------
+  progress("Concept sets")
   conceptSets <- generateConceptSets(
     conceptSetTargetDefinitions = conceptSetTargetDefinitions,
     llmClient = llmClient,
@@ -120,11 +152,13 @@ createCohortDefinitionsAndEvaluate <- function(phenotypes,
 
 
   # Count persons with concept sets ------------------------------------------------------------------------------------
+  progress("Concept set person counts")
   conceptSetPersonCounts <- createConceptSetCounts(
     pegasusConnectionDetails = pegasusConnectionDetails,
     pegasusDatabaseSchema = pegasusDatabaseSchema,
+    phenotypes = phenotypes,
     databaseReferences = databaseReferences,
-    maxCores = 4,
+    maxCores = maxCores,
     cacheFolder = file.path(rootWorkFolder, "cacheConceptSetPersonCounts")
   )
   uploadConceptSetPersonCounts(conceptSetPersonCounts = conceptSetPersonCounts,
@@ -133,6 +167,7 @@ createCohortDefinitionsAndEvaluate <- function(phenotypes,
 
 
   # Create Keeper reference cohorts ------------------------------------------------------------------------------------
+  progress("Keeper reference cohorts")
   status <- createKeeperReferenceCohorts(
     phenotypes = phenotypes,
     llmClient = llmClient,
@@ -143,13 +178,14 @@ createCohortDefinitionsAndEvaluate <- function(phenotypes,
 
 
   # Create cohort definitions using MonoFlow ---------------------------------------------------------------------------
+  progress("Cohort definitions (MonoFlow agent)")
   cohortDefinitions <- generateCohortDefinitionsUsingMonoFlowAgent(
     phenotypes = phenotypes,
     llmClient = llmClientFrontier,
     costTracker = costTracker,
     pegasusConnectionDetails = pegasusConnectionDetails,
     pegasusDatabaseSchema = pegasusDatabaseSchema,
-    databaseReferences = ldatabaseReferences,
+    databaseReferences = databaseReferences,
     workFolder = file.path(rootWorkFolder, "cacheMonoFlow")
   )
 
@@ -166,6 +202,7 @@ createCohortDefinitionsAndEvaluate <- function(phenotypes,
 
 
   # Create cohort definitions using templates --------------------------------------------------------------------------
+  progress("Cohort definitions (templates)")
   cohortDefinitions <- generateCohortDefinitionssUsingTemplates(
     phenotypes = phenotypes,
     pegasusConnectionDetails = pegasusConnectionDetails,
@@ -182,6 +219,7 @@ createCohortDefinitionsAndEvaluate <- function(phenotypes,
 
 
   # Evaluate cohort definitions ----------------------------------------------------------------------------------------
+  progress("Evaluation")
   cohortDefinitionsEvaluations <-evaluateUsingKeeperReferenceCohorts(
     phenotypes = phenotypes,
     pegasusConnectionDetails = pegasusConnectionDetails,
@@ -196,7 +234,7 @@ createCohortDefinitionsAndEvaluate <- function(phenotypes,
     draft = 0,
     valid = 1,
     pegasusConnectionDetails = pegasusConnectionDetails,
-    pegasusDatabaseSchema = pegasusDatabaseSchema,
+    pegasusDatabaseSchema = pegasusDatabaseSchema
   )
 
 

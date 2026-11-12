@@ -58,6 +58,8 @@ generateCohortDefinitionssUsingTemplates <- function(phenotypes,
 
   startTime <- Sys.time()
 
+  dir.create(workFolder, recursive = TRUE, showWarnings = FALSE)
+
   ParallelLogger::addDefaultFileLogger(file.path(workFolder, "log.txt"), name = "TEMPLATES_LOGGER")
   on.exit(ParallelLogger::unregisterLogger("TEMPLATES_LOGGER"))
 
