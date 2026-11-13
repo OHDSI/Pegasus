@@ -100,17 +100,12 @@ createConceptSetCounts <- function(conceptSets = NULL,
       databaseCacheFolder <- file.path(cacheFolder, gsub("[^[:alnum:]]+", "", databaseReference$databaseName))
       dir.create(databaseCacheFolder, recursive = TRUE)
     }
-    conceptSetsToCount <- withCache({
-      removeConceptSetsWithExistingCounts(
+    conceptSetsToCount <- removeConceptSetsWithExistingCounts(
         uniqueConceptSets = uniqueConceptSets,
         databaseId = databaseReference$databaseId,
         pegasusConnection = pegasusConnection,
         pegasusDatabaseSchema = pegasusDatabaseSchema
       )
-    },
-    cacheFolder = databaseCacheFolder,
-    fileName = "conceptSetsToCount.rds"
-    )
     batchSize <- 25
     batches <- split(conceptSetsToCount, (seq_len(nrow(conceptSetsToCount)) - 1) %/% batchSize)
     databaseCounts <- ParallelLogger::clusterApply(

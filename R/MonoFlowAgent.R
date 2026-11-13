@@ -73,12 +73,16 @@ generateCohortDefinitionsUsingMonoFlowAgent <- function(phenotypes,
     on.exit(DatabaseConnector::disconnect(pegasusConnection))
   }
 
-  checkRequirementsMet(phenotypes,
-                       llmClient,
-                       costTracker,
-                       pegasusConnection,
-                       pegasusDatabaseSchema,
-                       databaseReferences)
+  phenotypes <- addPhenotypeIdIfMissing(phenotypes,
+                                        pegasusConnection,
+                                        pegasusDatabaseSchema)
+
+  checkRequirementsMet(phenotypes = phenotypes,
+                       llmClient = llmClient,
+                       costTracker = costTracker,
+                       pegasusConnection = pegasusConnection,
+                       pegasusDatabaseSchema = pegasusDatabaseSchema,
+                       databaseReferences = databaseReferences)
 
   startTime <- Sys.time()
   startCost <- costTracker$amount
@@ -285,7 +289,35 @@ checkRequirementsMet <- function(phenotypes,
       pegasusDatabaseSchema = pegasusDatabaseSchema
     )
   }
+
   for (databaseReference in databaseReferences) {
+    message("- Checking if all concept sets have counts in ", databaseReference$databaseName)
+    sql <- "
+      SELECT TOP 10 concept_set_name
+      FROM @database_schema.phenotype
+      INNER JOIN @database_schema.phenotype_to_concept_set
+        ON phenotype.phenotype_id = phenotype_to_concept_set.phenotype_id
+      INNER JOIN @database_schema.concept_set
+        ON phenotype_to_concept_set.concept_set_id = concept_set.concept_set_id
+      LEFT JOIN @database_schema.concept_set_person_count
+        ON phenotype_to_concept_set.concept_set_id = concept_set_person_count.concept_set_id
+          AND concept_set_person_count.database_id = @database_id
+      WHERE phenotype.phenotype_id = @phenotype_ids
+        AND concept_set_person_count.concept_set_id IS NULL;
+    "
+    missingCounts <- DatabaseConnector::renderTranslateQuerySql(
+      connection = pegasusConnection,
+      sql = sql,
+      database_schema = pegasusDatabaseSchema,
+      database_id = databaseReference$databaseId,
+      phenotype_ids = phenotypes$phenotypeId,
+      snakeCaseToCamelCase = TRUE
+    )
+    if (nrow(missingCounts) > 0) {
+      stop("Missing concept set counts for (amongst others) concept sets '%s'",
+           paste(missingCounts$conceptsetName), collapse("', '"))
+    }
+
     checkRequirementsMetDatabase(phenotypes = phenotypes,
                                  databaseReference = databaseReference)
   }

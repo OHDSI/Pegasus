@@ -1149,7 +1149,8 @@ listConceptSets <- function(context, phenotype) {
       ON concept_set.concept_set_id = concept_set_person_count.concept_set_id
     INNER JOIN @database_schema.database_meta_data
       ON concept_set_person_count.database_id = database_meta_data.database_id
-    WHERE LOWER(phenotype_name) = LOWER(@phenotype);
+    WHERE LOWER(phenotype_name) = LOWER(@phenotype)
+      AND capr_concept_set_expression IS NOT NULL;
   "
   conceptSets <- DatabaseConnector::renderTranslateQuerySql(
     connection = context$pegasusConnection,
@@ -1205,6 +1206,7 @@ getConceptSetsCapr <- function(context, phenotype, conceptSetNames, detail = "co
   if (!detail %in% c("code", "code_and_counts", "full_reference")) {
     stop("The detail argument should be 'code', 'code_and_counts', or 'full_reference'")
   }
+  browser()
   sql <- "
     SELECT concept_set_name,
       has_descendants,
@@ -1239,7 +1241,6 @@ getConceptSetsCapr <- function(context, phenotype, conceptSetNames, detail = "co
     concept_set_names = paste(tolower(quoteSqlString(conceptSetNames)), collapse = ", "),
     snakeCaseToCamelCase = TRUE
   )
-  #TODO: add standard concept sets
   caprWithReference <- conceptSets |>
     filter(.data$databaseId %in% context$getDatabaseIds()) |>
     slice_head(n =1, by = c("conceptSetName",

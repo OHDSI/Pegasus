@@ -4,14 +4,30 @@
 \alias{getDatabaseMetaData}
 \title{Get database metadata from the server}
 \usage{
-getDatabaseMetaData(databaseReference)
+getDatabaseMetaData(
+  databaseReferences,
+  pegasusConnection = NULL,
+  pegasusConnectionDetails = NULL,
+  pegasusDatabaseSchema = NULL
+)
 }
 \arguments{
-\item{databaseReference}{An object of type \code{DatabaseReference} as created by the \code{createDatabaseReference()}
+\item{databaseReferences}{A list of objects of type \code{DatabaseReference} as created by the \code{createDatabaseReference()}
 function.}
+
+\item{pegasusConnection}{A connection object created using \code{DatabaseConnector::connect()} for connecting to
+the database holding the Pegasus data model. Can be null if
+\code{pegasusConnectionDetails} is provided.}
+
+\item{pegasusConnectionDetails}{An R object of type \code{connectionDetails} created using the
+\code{\link[DatabaseConnector:createConnectionDetails]{DatabaseConnector::createConnectionDetails()}} function for connecting to the
+database holding the Pegasus data model. Can be null if
+\code{pegasusConnection} is provided.}
+
+\item{pegasusDatabaseSchema}{The name of the database schema holding the Pegasus data model}
 }
 \value{
-A tibble with one row.
+A tibble with one row per database.
 }
 \description{
 Get database metadata from the server

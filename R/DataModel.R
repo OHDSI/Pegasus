@@ -674,7 +674,8 @@ uploadConceptSetPersonCounts <- function(conceptSetPersonCounts,
   }
 
   sql <- "
-    SELECT concept_set_id
+    SELECT concept_set_id,
+      database_id
     FROM @database_schema.concept_set_person_count;
   "
   existingCounts <- DatabaseConnector::renderTranslateQuerySql(
@@ -684,7 +685,7 @@ uploadConceptSetPersonCounts <- function(conceptSetPersonCounts,
     snakeCaseToCamelCase = TRUE
   )
   overlap <- existingCounts |>
-    inner_join(conceptSetPersonCounts, by = join_by("conceptSetId"))
+    inner_join(conceptSetPersonCounts, by = join_by("conceptSetId", "databaseId"))
   if (nrow(overlap) > 0) {
     stop(sprintf("%s rows of data overlap with existing data in the concept_set_person_count table. Aborting",
                  nrow(overlap)))

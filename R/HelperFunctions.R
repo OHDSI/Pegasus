@@ -232,47 +232,86 @@ createDatabaseReference <- function(databaseName,
 
 #' Get database metadata from the server
 #'
-#' @template DatabaseReference
+#' @template DatabaseReferences
+#' @template PegasusConnectionDetails
 #'
 #' @returns
-#' A tibble with one row.
+#' A tibble with one row per database.
 #'
 #' @export
-getDatabaseMetaData <- function(databaseReference) {
+getDatabaseMetaData <- function(databaseReferences,
+                                pegasusConnection = NULL,
+                                pegasusConnectionDetails = NULL,
+                                pegasusDatabaseSchema = NULL) {
   errorMessages <- checkmate::makeAssertCollection()
-  checkmate::assertClass(databaseReference, "DatabaseReference", add = errorMessages)
+  checkmate::assertList(databaseReferences, types = "DatabaseReference", min.len = 1, add = errorMessages)
+  checkmate::assertClass(pegasusConnection, "DatabaseConnectorConnection", null.ok = TRUE, add = errorMessages)
+  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", null.ok = TRUE, add = errorMessages)
+  checkmate::assertCharacter(pegasusDatabaseSchema, len = 1, null.ok = TRUE, add = errorMessages)
   checkmate::reportAssertions(collection = errorMessages)
 
-  connection <- DatabaseConnector::connect(databaseReference$connectionDetails)
-  on.exit(DatabaseConnector::disconnect(connection))
-
-  sql <- "
-    SELECT TOP 1 *
-    FROM @cdm_database_schema.cdm_source;
-  "
-  metaData <- DatabaseConnector::renderTranslateQuerySql(
-    connection = connection,
-    sql = sql,
-    cdm_database_schema = databaseReference$cdmDatabaseSchema,
-    snakeCaseToCamelCase = TRUE
-  )
-  if (!"cdmReleaseIdentifier" %in% colnames(metaData)) {
-    if (grepl("_v[0-9]*$", databaseReference$cdmDatabaseSchema)) {
-      metaData$cdmReleaseIdentifier <- gsub("^.*_v", "", databaseReference$cdmDatabaseSchema)
-    } else {
-      metaData$cdmReleaseIdentifier <- ""
-    }
+  if ((!is.null(pegasusConnection) || !is.null(pegasusConnectionDetails)) && is.null(pegasusDatabaseSchema)) {
+    stop("Must provide pegasusDatabaseSchema when providing pegasusConnection or pegasusConnectionDetails.")
   }
-  metaData <- metaData |>
-    select("cdmSourceName",
-           "cdmSourceAbbreviation",
-           "cdmReleaseDate",
-           "cdmReleaseIdentifier",
-           "vocabularyVersion") |>
-    mutate(databaseId = databaseReference$databaseId,
-           cdmDatabaseSchema = databaseReference$cdmDatabaseSchema,
-           resultDatabaseSchema = databaseReference$referenceCohortDatabaseSchema)
-  return(metaData)
+  if (!is.null(pegasusConnectionDetails)) {
+    pegasusConnection <- DatabaseConnector::connect(pegasusConnectionDetails)
+    on.exit(DatabaseConnector::disconnect(pegasusConnection))
+  }
+  if (is.null(pegasusConnection)) {
+    existingDatabaseIds <- c()
+  } else {
+    sql <- "
+      SELECT database_id
+      FROM @database_schema.database_meta_data;
+    "
+    existingDatabaseIds <- DatabaseConnector::renderTranslateQuerySql(
+      connection = pegasusConnection,
+      sql = sql,
+      database_schema = pegasusDatabaseSchema,
+      snakeCaseToCamelCase = TRUE
+    ) |>
+      pull(.data$databaseId)
+  }
+
+  metaDatas <- list()
+  for (i in seq_along(databaseReferences)) {
+    databaseReference <- databaseReferences[[i]]
+    if (databaseReference$databaseId %in% existingDatabaseIds) {
+      next
+    }
+    connection <- DatabaseConnector::connect(databaseReference$connectionDetails)
+    on.exit(DatabaseConnector::disconnect(connection))
+
+    sql <- "
+      SELECT TOP 1 *
+      FROM @cdm_database_schema.cdm_source;
+    "
+    metaData <- DatabaseConnector::renderTranslateQuerySql(
+      connection = connection,
+      sql = sql,
+      cdm_database_schema = databaseReference$cdmDatabaseSchema,
+      snakeCaseToCamelCase = TRUE
+    )
+    if (!"cdmReleaseIdentifier" %in% colnames(metaData)) {
+      if (grepl("_v[0-9]*$", databaseReference$cdmDatabaseSchema)) {
+        metaData$cdmReleaseIdentifier <- gsub("^.*_v", "", databaseReference$cdmDatabaseSchema)
+      } else {
+        metaData$cdmReleaseIdentifier <- ""
+      }
+    }
+    metaData <- metaData |>
+      select("cdmSourceName",
+             "cdmSourceAbbreviation",
+             "cdmReleaseDate",
+             "cdmReleaseIdentifier",
+             "vocabularyVersion") |>
+      mutate(databaseId = databaseReference$databaseId,
+             cdmDatabaseSchema = databaseReference$cdmDatabaseSchema,
+             resultDatabaseSchema = databaseReference$referenceCohortDatabaseSchema)
+    metaDatas[[i]] <- metaData
+  }
+  metaDatas <- bind_rows(metaDatas)
+  return(metaDatas)
 }
 
 circeToCaprCohortDefinition <- function(json) {
