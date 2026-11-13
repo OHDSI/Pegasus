@@ -291,6 +291,137 @@ compileCaprConceptSetsViaWorker <- function(caprCode, timeoutSeconds = 60) {
   )
 }
 
+# Predefined concept set check -------------------------------------------------------------------------------------------
+# Every concept set in client-supplied Capr code must exist in the Pegasus concept_set table (matched by name,
+# case-insensitive) and have exactly the same items as at least one stored row with that name.
+
+# Canonical, order-independent representation of the items of a Circe concept set expression.
+conceptSetItemKeys <- function(expression) {
+  items <- expression$items
+  if (length(items) == 0) {
+    return(character())
+  }
+  keys <- vapply(items, function(item) {
+    flag <- function(value) as.integer(isTRUE(value))
+    paste(item$concept$CONCEPT_ID,
+          flag(item$isExcluded),
+          flag(item$includeDescendants),
+          flag(item$includeMapped),
+          sep = "|")
+  }, character(1))
+  return(sort(unique(keys)))
+}
+
+parseCompiledCohortConceptSets <- function(cohortJson) {
+  cohort <- jsonlite::fromJSON(cohortJson, simplifyVector = FALSE)
+  lapply(cohort$ConceptSets, function(conceptSet) {
+    list(name = conceptSet$name, items = conceptSetItemKeys(conceptSet$expression))
+  })
+}
+
+parseCompiledConceptSets <- function(compiledConceptSets) {
+  lapply(compiledConceptSets, function(conceptSet) {
+    list(name = conceptSet$name,
+         items = conceptSetItemKeys(jsonlite::fromJSON(conceptSet$json, simplifyVector = FALSE)))
+  })
+}
+
+fetchStoredConceptSets <- function(context, names) {
+  sql <- "
+    SELECT concept_set_name,
+      capr_concept_set_expression
+    FROM @database_schema.concept_set
+    WHERE LOWER(concept_set_name) IN (@concept_set_names);
+  "
+  stored <- DatabaseConnector::renderTranslateQuerySql(
+    connection = context$pegasusConnection,
+    sql = sql,
+    database_schema = context$pegasusDatabaseSchema,
+    concept_set_names = paste(quoteSqlString(unique(tolower(names))), collapse = ", "),
+    snakeCaseToCamelCase = TRUE
+  )
+  stored <- stored |>
+    distinct()
+  if (nrow(stored) == 0) {
+    stored$items <- list()
+    return(stored)
+  }
+  compiled <- parseCompiledConceptSets(compileCaprConceptSetsViaWorker(stored$caprConceptSetExpression))
+  stored$items <- lapply(compiled, `[[`, "items")
+  return(stored)
+}
+
+fetchStoredConceptSetNames <- function(context) {
+  sql <- "SELECT DISTINCT concept_set_name FROM @database_schema.concept_set;"
+  names <- DatabaseConnector::renderTranslateQuerySql(
+    connection = context$pegasusConnection,
+    sql = sql,
+    database_schema = context$pegasusDatabaseSchema,
+    snakeCaseToCamelCase = TRUE
+  )
+  return(names$conceptSetName)
+}
+
+# Returns NULL when all concept sets are predefined and identical, otherwise throws an error.
+# `submitted`: list of list(name, items). `stored`: data frame with conceptSetName, caprConceptSetExpression, and a
+# list column `items`. `allNames` is only used to suggest names when a concept set is not found.
+verifyConceptSetsAreStored <- function(submitted, stored, allNames = character()) {
+  problems <- character()
+  for (conceptSet in submitted) {
+    name <- conceptSet$name
+    if (is.null(name) || is.na(name) || !nzchar(name)) {
+      problems <- c(problems, "A concept set has no name. Use a predefined concept set (see getConceptSetsCapr).")
+      next
+    }
+    candidates <- which(tolower(stored$conceptSetName) == tolower(name))
+    if (length(candidates) == 0) {
+      distances <- as.vector(utils::adist(tolower(name), tolower(allNames)))
+      closest <- head(unique(allNames[order(distances)]), 5)
+      problem <- sprintf("Concept set '%s' is not a predefined concept set.", name)
+      if (length(closest) > 0) {
+        problem <- paste0(problem, " Closest predefined names: ", paste(sprintf("'%s'", closest), collapse = ", "), ".")
+      }
+      problems <- c(problems, problem)
+    } else if (!any(vapply(stored$items[candidates], identical, logical(1), conceptSet$items))) {
+      problems <- c(problems, paste0(
+        sprintf("Concept set '%s' does not match its predefined definition. Predefined definition(s):\n", name),
+        paste(unique(stored$caprConceptSetExpression[candidates]), collapse = "\n")
+      ))
+    }
+  }
+  if (length(problems) > 0) {
+    stop(paste(c("Concept sets must be used exactly as predefined (names and contents).", problems),
+               collapse = "\n"),
+         call. = FALSE)
+  }
+  return(invisible(NULL))
+}
+
+checkConceptSetsAreStored <- function(context, submitted) {
+  if (length(submitted) == 0) {
+    return(invisible(NULL))
+  }
+  stored <- fetchStoredConceptSets(context, vapply(submitted, `[[`, character(1), "name"))
+  allNames <- if (all(tolower(vapply(submitted, `[[`, character(1), "name")) %in% tolower(stored$conceptSetName))) {
+    character()
+  } else {
+    fetchStoredConceptSetNames(context)
+  }
+  verifyConceptSetsAreStored(submitted, stored, allNames)
+}
+
+compileCaprChecked <- function(context, caprCode) {
+  json <- compileCaprViaWorker(caprCode)
+  checkConceptSetsAreStored(context, parseCompiledCohortConceptSets(json))
+  return(json)
+}
+
+compileCaprConceptSetsChecked <- function(context, caprCode) {
+  compiled <- compileCaprConceptSetsViaWorker(caprCode)
+  checkConceptSetsAreStored(context, parseCompiledConceptSets(compiled))
+  return(compiled)
+}
+
 formatPipeTable <- function(data, zeroAsBlank = character()) {
   escapeCell <- function(value, blankZero = FALSE) {
     if (length(value) == 0L || is.na(value) || (blankZero && value == 0)) {
@@ -1170,18 +1301,19 @@ getConceptSetsCapr <- function(context, phenotype, conceptSetNames, detail = "co
 
 validateCapr <- function(context, caprCode) {
   result <- tryCatch({
-    compileCaprViaWorker(caprCode)
+    compileCaprChecked(context, caprCode)
     "Valid"
   },
   error = function(e) {
-    return(paste("Error:", e$parent$message))
+    message <- if (is.null(e$parent)) conditionMessage(e) else e$parent$message
+    return(paste("Error:", message))
   }
   )
   return(result)
 }
 
 convertCaprToJson <- function(context, caprCode) {
-  json <- compileCaprViaWorker(caprCode)
+  json <- compileCaprChecked(context, caprCode)
 
   conceptIdMatches <- regmatches(json, gregexpr('"CONCEPT_ID"\\s*:\\s*\\d+', json))[[1]]
   conceptIds <- unique(as.integer(sub('.*:\\s*', '', conceptIdMatches)))
@@ -1217,7 +1349,7 @@ convertCaprToJson <- function(context, caprCode) {
 }
 
 generateCohort <- function(context, caprCode, database = NULL) {
-  json <- compileCaprViaWorker(caprCode)
+  json <- compileCaprChecked(context, caprCode)
   cohortId <- ensureCohortExists(context, json, database)
   return(cohortId)
 }
@@ -1302,7 +1434,7 @@ countConceptSetPersonOverlap <- function(
     stop("Time window bounds must be finite integers with startDay less than or equal to endDay")
   }
 
-  compiledConceptSets <- compileCaprConceptSetsViaWorker(caprCode)
+  compiledConceptSets <- compileCaprConceptSetsChecked(context, caprCode)
   conceptSetsToCount <- tibble(
     inputOrder = seq_along(compiledConceptSets),
     name = vapply(compiledConceptSets, `[[`, character(1), "name"),
@@ -1350,7 +1482,7 @@ countConceptSetPersonOverlap <- function(
 }
 
 describeMeasurementValues <- function(context, caprCode, database = NULL) {
-  compiledConceptSets <- compileCaprConceptSetsViaWorker(caprCode)
+  compiledConceptSets <- compileCaprConceptSetsChecked(context, caprCode)
   conceptSetsToDescribe <- tibble(
     inputOrder = seq_along(compiledConceptSets),
     name = vapply(compiledConceptSets, `[[`, character(1), "name"),
@@ -1445,6 +1577,11 @@ bindContext <- function(fun, context) {
   return(bound)
 }
 
+predefinedConceptSetNote <- paste(
+  "Every concept set must be a predefined one (see listConceptSets / getConceptSetsCapr), used with its exact name",
+  "and exact content; unknown or modified concept sets are rejected."
+)
+
 createAgentTools <- function(context) {
   return(list(
     listConceptSetsTool(context),
@@ -1496,7 +1633,8 @@ getConceptSetsCaprTool <- function(context) ellmer::tool(
 validateCaprTool <- function(context) ellmer::tool(
   bindContext(validateCapr, context),
   name = "validate_capr",
-  description = "Validate the provided Capr code. Either returns 'Valid' or an informative error message.",
+  description = paste("Validate the provided Capr code. Either returns 'Valid' or an informative error message.",
+                      predefinedConceptSetNote),
   arguments = list(
     caprCode = ellmer::type_string(paste(
       "A single Capr cohort definition as R code: one cohort(...) expression with all concept",
@@ -1522,7 +1660,8 @@ convertCaprToJsonTool <- function(context) ellmer::tool(
   bindContext(convertCaprToJson, context),
   name = "convertCaprToJson",
   description = paste("Convert Capr code to JSON, including full concept information.",
-                      "(This can be a lot of text). Concept details come from the first selected database."),
+                      "(This can be a lot of text). Concept details come from the first selected database.",
+                      predefinedConceptSetNote),
   arguments = list(
     caprCode = ellmer::type_string(paste(
       "A single Capr cohort definition as R code: one cohort(...) expression with all concept",
@@ -1535,7 +1674,7 @@ generateCohortTool <- function(context, databaseArgument = createDatabaseArgumen
   bindContext(generateCohort, context),
   name = "generateCohort",
   description = paste("Generate the cohort in the selected database(s) (default: all) and return the cohort ID.",
-                      "The same cohort ID is used in every database."),
+                      "The same cohort ID is used in every database.", predefinedConceptSetNote),
   arguments = list(
     caprCode = ellmer::type_string(paste(
       "A single Capr cohort definition as R code: one cohort(...) expression with all concept",
@@ -1573,7 +1712,7 @@ countConceptSetPersonOverlapTool <- function(context, databaseArgument = createD
   description = paste(
     "Instantiate one or more Capr concept sets and count distinct people with their concepts",
     "in the general population and within inclusive day windows relative to generated cohort",
-    "index dates. Returns per-domain and overall counts for each window."
+    "index dates. Returns per-domain and overall counts for each window.", predefinedConceptSetNote
   ),
   arguments = list(
     caprCode = ellmer::type_array(ellmer::type_string(paste(
@@ -1606,7 +1745,7 @@ describeMeasurementValuesTool <- function(context, databaseArgument = createData
     "descriptives of the measurement value distribution per unit: number of measurements,",
     "number of distinct persons, number of measurements without a value, minimum, 10th, 25th,",
     "50th, 75th and 90th percentile, maximum, mean, and standard deviation. Measurements without",
-    "a unit are reported as unit concept ID 0 ('No unit')."
+    "a unit are reported as unit concept ID 0 ('No unit').", predefinedConceptSetNote
   ),
   arguments = list(
     caprCode = ellmer::type_array(ellmer::type_string(paste(
