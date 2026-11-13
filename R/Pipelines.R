@@ -18,7 +18,8 @@
 #'
 #' @template Phenotypes
 #' @template LlmClient
-#' @param llmClientFrontier
+#' @param llmClientFrontier An `ellmer` chat object to connect to an **advanced reasoning** LLM, as created for example
+#'                          using `ellmer::chat_ollama()`.
 #' @template CostTracker
 #' @param pegasusConnectionDetails An R object of type `connectionDetails` created using the
 #'                                 [DatabaseConnector::createConnectionDetails()] function for connecting to the
@@ -149,7 +150,7 @@ createCohortDefinitionsAndEvaluate <- function(phenotypes,
     costTracker = costTracker,
     pegasusConnectionDetails = pegasusConnectionDetails,
     pegasusDatabaseSchema = pegasusDatabaseSchema,
-    databaseReferences = ldatabaseReferences,
+    databaseReferences = databaseReferences,
     workFolder = file.path(rootWorkFolder, "cacheMonoFlow")
   )
 

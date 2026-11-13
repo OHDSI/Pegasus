@@ -53,11 +53,24 @@ createKeeperReferenceCohorts <- function(phenotypes,
   startCost <- costTracker$amount
 
   dir.create(workFolder, recursive = TRUE, showWarnings = FALSE)
+  ParallelLogger::addDefaultFileLogger(file.path(workFolder, "log.txt"), name = "KEEPER_LOGGER")
+
+
+  phenotypesWithFolders <- phenotypes |>
+    mutate(phenotypeFolder =  file.path(workFolder, gsub("[^[:alnum:]]+", "", .data$phenotypeName)))
+  for (i in seq_len(nrow(phenotypesWithFolders))) {
+    createKeeperConceptSets(
+      phenotype = phenotypesWithFolders[i, ],
+      llmClient = llmClient,
+      costTracker = costTracker,
+      databaseReference = databaseReferences[[1]]
+    )
+  }
 
   status <- list()
   for (i in seq_along(databaseReferences)) {
     status[[i]] <- createKeeperReferenceCohortsForDatabase(
-      phenotypes = phenotypes,
+      phenotypesWithFolders = phenotypesWithFolders,
       llmClient = llmClient,
       costTracker = costTracker,
       databaseReference = databaseReferences[[i]],
@@ -66,16 +79,19 @@ createKeeperReferenceCohorts <- function(phenotypes,
       workFolder = workFolder
     )
   }
+
   status <- bind_rows(status)
   delta <- Sys.time() - startTime
   message(sprintf("Generating Keeper reference cohorts took %0.2f %s and cost $%0.2f.",
                   delta,
                   attr(delta, "units"),
                   costTracker$amount - startCost))
+  ParallelLogger::unregisterLogger("KEEPER_LOGGER")
+
   return(status)
 }
 
-createKeeperReferenceCohortsForDatabase <- function(phenotypes,
+createKeeperReferenceCohortsForDatabase <- function(phenotypesWithFolders,
                                                     llmClient,
                                                     costTracker,
                                                     databaseReference,
@@ -84,9 +100,6 @@ createKeeperReferenceCohortsForDatabase <- function(phenotypes,
                                                     workFolder) {
   message(sprintf("Creating Keeper reference cohorts for database %s",
                   databaseReference$databaseName))
-
-  databaseWorkFolder <- file.path(workFolder, gsub("[^[:alnum:]]+", "", databaseReference$databaseName))
-  dir.create(databaseWorkFolder, recursive = TRUE)
 
   connection <- DatabaseConnector::connect(databaseReference$connectionDetails)
   on.exit(DatabaseConnector::disconnect(connection))
@@ -97,6 +110,7 @@ createKeeperReferenceCohortsForDatabase <- function(phenotypes,
     databaseSchema = databaseReference$referenceCohortDatabaseSchema,
     tableName = referenceCohortTableNames$referenceCohortMetadataTable
   )
+  remainingPhenotypes <- phenotypesWithFolders
   if (referenceCohortTableExists) {
     existingCohorts <- Keeper::listReferenceCohorts(
       connection = connection,
@@ -106,10 +120,16 @@ createKeeperReferenceCohortsForDatabase <- function(phenotypes,
     if (nrow(existingCohorts) == 0) {
       lastCohortId <- 0
     } else {
-      overlap <- intersect(phenotypes$phenotypeName, existingCohorts$phenotype)
+      overlap <- intersect(phenotypesWithFolders$phenotypeName, existingCohorts$phenotype)
       if (length(overlap) > 0) {
-        stop(sprintf("Phenotypes '%s' already have reference cohorts in the database",
-                     paste(overlap, collapse =  "', '")))
+        message(sprintf("- Phenotypes '%s' already have reference cohorts in database %s. Skipping",
+                     paste(overlap, collapse =  "', '"),
+                     databaseReference$databaseName))
+        remainingPhenotypes <- phenotypesWithFolders |>
+          filter(!.data$phenotypeName %in% existingCohorts$phenotype)
+        if (nrow(remainingPhenotypes) == 0) {
+          return(NULL)
+        }
       }
       lastCohortId <- max(existingCohorts$cohortDefinitionId)
     }
@@ -136,41 +156,36 @@ createKeeperReferenceCohortsForDatabase <- function(phenotypes,
     )
   }
 
-  phenotypes <- phenotypes |>
+  phenotypesWithIds <- remainingPhenotypes |>
     mutate(cohortId = row_number() + lastCohortId)
 
-  ParallelLogger::addDefaultFileLogger(file.path(workFolder, "log.txt"), name = "KEEPER_LOGGER")
-  cluster <- ParallelLogger::makeCluster(min(maxCores, nrow(phenotypes)))
+  cluster <- ParallelLogger::makeCluster(min(maxCores, nrow(phenotypesWithIds)))
   ParallelLogger::clusterRequire(cluster, "dplyr")
-  rows <- split(phenotypes, phenotypes$cohortId)
+  rows <- split(phenotypesWithIds, phenotypesWithIds$cohortId)
   cost <- ParallelLogger::clusterApply(
     cluster = cluster,
     x = rows,
     fun = createKeeperReferenceCohort,
     llmClient = llmClient,
-    databaseReference = databaseReference,
-    databaseWorkFolder = databaseWorkFolder
+    databaseReference = databaseReference
   )
   ParallelLogger::stopCluster(cluster)
-  ParallelLogger::unregisterLogger("KEEPER_LOGGER")
 
   costTracker$amount <- costTracker$amount + sum(unlist(cost))
 
   status <- uploadReferenceCohortsAndProfiles(
-    phenotypes = phenotypes,
+    phenotypesWithIds = phenotypesWithIds,
     connection = connection,
     databaseReference = databaseReference,
-    uploadKeeperProfiles = uploadKeeperProfiles,
-    databaseWorkFolder = databaseWorkFolder
+    uploadKeeperProfiles = uploadKeeperProfiles
   )
   return(status)
 }
 
-uploadReferenceCohortsAndProfiles <- function(phenotypes,
+uploadReferenceCohortsAndProfiles <- function(phenotypesWithIds,
                                               connection,
                                               databaseReference,
-                                              uploadKeeperProfiles,
-                                              databaseWorkFolder) {
+                                              uploadKeeperProfiles) {
   message("Uploading Keeper reference cohorts and profiles")
 
   if (uploadKeeperProfiles) {
@@ -202,23 +217,22 @@ uploadReferenceCohortsAndProfiles <- function(phenotypes,
       )
     }
   }
-  status <- phenotypes |>
+  status <- phenotypesWithIds |>
     select("cohortId", "phenotypeName") |>
     mutate(databaseId = databaseReference$databaseId,
            referenceCohortSize = 0,
            error = "")
-  for (i in seq_len(nrow(phenotypes))) {
-    row <- phenotypes[i, ]
+  for (i in seq_len(nrow(phenotypesWithIds))) {
+    row <- phenotypesWithIds[i, ]
     message("- Uploading reference cohort and profiles for '", row$phenotypeName,"'.")
     databaseForFileName <- gsub("[^[:alnum:]]+", "", databaseReference$databaseName)
-    phenotypeFolder <- file.path(databaseWorkFolder, gsub("[^[:alnum:]]+", "_", row$phenotypeName))
 
-    fileName <- file.path(phenotypeFolder, sprintf("llmReviews_%s.rds", databaseForFileName))
+    fileName <- file.path(row$phenotypeFolder, sprintf("llmReviews_%s.rds", databaseForFileName))
     if (!file.exists(fileName)) {
       message("- No reference cohort found for '", row$phenotypeName, "'. Skipping")
       error <- "No reference cohort"
       # There may be a more informative error message in the specific concepts file:
-      fileName <- file.path(phenotypeFolder, sprintf("SpecificConcepts_%s.csv", databaseForFileName))
+      fileName <- file.path(row$phenotypeFolder, sprintf("SpecificConcepts_%s.csv", databaseForFileName))
       if (!file.exists(fileName)) {
         specificConcepts <- readr::read_csv(fileName, show_col_types = FALSE)
         if ("error" %in% colnames(specificConcepts)) {
@@ -246,7 +260,7 @@ uploadReferenceCohortsAndProfiles <- function(phenotypes,
         status$referenceCohortSize[i] <- nrow(llmReviews$llmReviews)
 
         if (uploadKeeperProfiles) {
-          subFolder =  file.path(phenotypeFolder, sprintf("cache_%s", databaseForFileName))
+          subFolder =  file.path(row$phenotypeFolder, sprintf("cache_%s", databaseForFileName))
           keeperSamplePhase1File <- file.path(subFolder, "keeperSamplePhase1.rds")
           keeper <- readRDS(keeperSamplePhase1File) |>
             personIdToColumn()
@@ -305,35 +319,45 @@ personIdToColumn <- function(keeper) {
 
 }
 
+createKeeperConceptSets <- function(phenotype,
+                                    llmClient,
+                                    costTracker,
+                                    databaseReference) {
+  message(sprintf("Creating Keeper concept sets for '%s'", phenotype$phenotypeName))
 
-# row = rows[[1]]
-createKeeperReferenceCohort <- function(row,
-                                        llmClient,
-                                        databaseReference,
-                                        databaseWorkFolder,
-                                        stratifiedSampling = TRUE) {
+  dir.create(phenotype$phenotypeFolder)
 
-  message(sprintf("*** Creating Keeper reference set for '%s' in %s ***",
-                  row$phenotypeName,
-                  databaseReference$databaseName))
+  fileName <- file.path(phenotype$phenotypeFolder, "KeeperConceptSets.csv")
 
-  databaseForFileName <- gsub("[^[:alnum:]]+", "", databaseReference$databaseName)
-  phenotypeFolder <- file.path(databaseWorkFolder, gsub("[^[:alnum:]]+", "_", row$phenotypeName))
-  dir.create(phenotypeFolder)
-
-  # Generate concept sets ----------------------------------------------------------------------------------------------
-  conceptSets <- withCache({
-    Keeper::generateKeeperConceptSets(
-      phenotype = row$phenotypeName,
-      clinicalDefinition = row$clinicalDefinition,
+  if (!file.exists(fileName)) {
+    conceptSets <- Keeper::generateKeeperConceptSets(
+      phenotype = phenotype$phenotypeName,
+      clinicalDefinition = phenotype$clinicalDefinition,
       client = llmClient,
       vocabConnectionDetails = databaseReference$connectionDetails,
       vocabDatabaseSchema = databaseReference$cdmDatabaseSchema
     )
-  },
-  cacheFolder = phenotypeFolder,
-  fileName = "KeeperConceptSets.csv"
-  )
+    readr::write_csv(conceptSets, fileName)
+  }
+}
+
+
+# phenotype = phenotypesWithFolders[1,]
+createKeeperReferenceCohort <- function(phenotype,
+                                        llmClient,
+                                        databaseReference,
+                                        stratifiedSampling = TRUE) {
+  message(sprintf("*** Creating Keeper reference set for '%s' in %s ***",
+                  phenotype$phenotypeName,
+                  databaseReference$databaseName))
+
+  databaseForFileName <- gsub("[^[:alnum:]]+", "", databaseReference$databaseName)
+  databaseCacheFolder <- file.path(phenotype$phenotypeFolder, sprintf("cache_%s", databaseForFileName))
+  dir.create(databaseCacheFolder, showWarnings = FALSE)
+
+  # Load concept sets ----------------------------------------------------------------------------------------------
+  fileName <- file.path(phenotype$phenotypeFolder, "KeeperConceptSets.csv")
+  conceptSets <- readr::read_csv(fileName, show_col_types = FALSE)
 
   # Create sensitive cohort --------------------------------------------------------------------------------------------
   specificConcepts <- withCache({
@@ -344,7 +368,7 @@ createKeeperReferenceCohort <- function(row,
         tempEmulationSchema = databaseReference$tempEmulationSchema,
         sensitiveCohortDatabaseSchema = databaseReference$sensitiveCohortDatabaseSchema,
         sensitiveCohortTable = databaseReference$sensitiveCohortTable,
-        sensitiveCohortDefinitionId = row$cohortId,
+        sensitiveCohortDefinitionId = phenotype$cohortId,
         createCohortTable = FALSE,
         keeperConceptSets = conceptSets
       )
@@ -354,7 +378,7 @@ createKeeperReferenceCohort <- function(row,
       return(tibble(error = "No persons with disease of interest or hypernym concepts."))
     })
   },
-  cacheFolder = phenotypeFolder,
+  cacheFolder = phenotype$phenotypeFolder,
   fileName = sprintf("SpecificConcepts_%s.csv", databaseForFileName)
   )
   if ("error" %in% colnames(specificConcepts)) {
@@ -370,12 +394,12 @@ createKeeperReferenceCohort <- function(row,
         tempEmulationSchema = databaseReference$tempEmulationSchema,
         sensitiveCohortDatabaseSchema = databaseReference$sensitiveCohortDatabaseSchema,
         sensitiveCohortTable = databaseReference$sensitiveCohortTable,
-        sensitiveCohortDefinitionId = row$cohortId,
+        sensitiveCohortDefinitionId = phenotype$cohortId,
         keeperConceptSets = conceptSets,
         client = llmClient,
-        phenotypeName = row$phenotypeName,
-        clinicalDefinition = row$clinicalDefinition,
-        cacheFolder = file.path(phenotypeFolder, sprintf("cache_%s", databaseForFileName))
+        phenotypeName = phenotype$phenotypeName,
+        clinicalDefinition = phenotype$clinicalDefinition,
+        cacheFolder = databaseCacheFolder
       )
     },
     NoCasesInSampleError = function(e) {
@@ -383,7 +407,7 @@ createKeeperReferenceCohort <- function(row,
       return("No cases in sample")
     })
   },
-  cacheFolder = phenotypeFolder,
+  cacheFolder = phenotype$phenotypeFolder,
   fileName = sprintf("llmReviews_%s.rds", databaseForFileName)
   )
   if (!is.character(llmReviews)) {
