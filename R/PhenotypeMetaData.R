@@ -29,7 +29,10 @@
 #' @export
 generatePhenotypeMetaData <- function(phenotypes,
                                       llmClient,
-                                      costTracker = createCostTracker()) {
+                                      costTracker = createCostTracker(),
+                                      pegasusConnection = NULL,
+                                      pegasusConnectionDetails = NULL,
+                                      pegasusDatabaseSchema = NULL) {
   errorMessages <- checkmate::makeAssertCollection()
   checkmate::assertDataFrame(phenotypes, min.rows = 1, add = errorMessages)
   checkmate::assertNames(colnames(phenotypes), must.include = c(
@@ -38,10 +41,36 @@ generatePhenotypeMetaData <- function(phenotypes,
   ), add = errorMessages)
   checkmate::assertR6(llmClient, "Chat", add = errorMessages)
   checkmate::assertClass(costTracker, "CostTracker", add = errorMessages)
+  checkmate::assertClass(pegasusConnection, "DatabaseConnectorConnection", null.ok = TRUE, add = errorMessages)
+  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", null.ok = TRUE, add = errorMessages)
+  checkmate::assertCharacter(pegasusDatabaseSchema, len = 1, null.ok = TRUE, add = errorMessages)
   checkmate::reportAssertions(collection = errorMessages)
 
   startTime <- Sys.time()
   startCost <- costTracker$amount
+
+  if (!is.null(pegasusConnectionDetails)) {
+    pegasusConnection <- DatabaseConnector::connect(pegasusConnectionDetails)
+    on.exit(DatabaseConnector::disconnect(pegasusConnection))
+  }
+  if (is.null(pegasusConnection)) {
+    existingPhenotypeIds <- c()
+  } else {
+    phenotypes <- addPhenotypeIdIfMissing(phenotypes,
+                                          pegasusConnection = pegasusConnection,
+                                          pegasusDatabaseSchema = pegasusDatabaseSchema)
+    sql <- "
+      SELECT phenotype_id
+      FROM @database_schema.phenotype_meta_data;
+    "
+    existingPhenotypeIds <- DatabaseConnector::renderTranslateQuerySql(
+      connection = pegasusConnection,
+      sql = sql,
+      database_schema = pegasusDatabaseSchema,
+      snakeCaseToCamelCase = TRUE
+    ) |>
+      pull(.data$phenotypeId)
+  }
 
   # Generate targets for the phenotype itself
   promptFile <- system.file("prompts", "GeneratePhenotypeMetaData.txt", package = "Pegasus")
@@ -68,28 +97,37 @@ generatePhenotypeMetaData <- function(phenotypes,
     confidence = ellmer::type_enum(values = c("HIGH", "MODERATE", "LOW"))
   )
   metaData <- list()
+  skipped <- 0
   for (i in seq_len(nrow(phenotypes))) {
-    message("Creating meta data for ", phenotypes$phenotypeName[i])
-    prompt <- sprintf("Phenotype: %s\nClinical definition: %s\n",
-                      phenotypes$phenotypeName[i],
-                      phenotypes$clinicalDefinition[i])
-    response <- queryLlm(
-      prompt = prompt,
-      systemPrompt = systemPrompt,
-      llmClient = llmClient,
-      costTracker = costTracker,
-      outputType = outputType
-    )
-    metaData[[i]] <- as_tibble(lapply(response, function(x) if (is.null(x)) NA_integer_ else x)) |>
-      SqlRender::snakeCaseToCamelCaseNames() |>
-      mutate(phenotypeName = phenotypes$phenotypeName[i],
-             hasDiscreteRecordedSymptoms = as.integer(.data$hasDiscreteRecordedSymptoms),
-             requiresDiagnosticTestOrProcedure = as.integer(.data$requiresDiagnosticTestOrProcedure),
-             requiresActiveTreatmentWithin30d = as.integer(.data$requiresActiveTreatmentWithin30d),
-             expectsConditionSpecificFollowupOrSequelae1yr = as.integer(.data$expectsConditionSpecificFollowupOrSequelae1yr))
+    if (length(existingPhenotypeIds) > 0 && phenotypes$phenotypeId[i] %in% existingPhenotypeIds) {
+      skipped <- skipped + 1
+      next
+    } else {
+      message("Creating meta data for ", phenotypes$phenotypeName[i])
+      prompt <- sprintf("Phenotype: %s\nClinical definition: %s\n",
+                        phenotypes$phenotypeName[i],
+                        phenotypes$clinicalDefinition[i])
+      response <- queryLlm(
+        prompt = prompt,
+        systemPrompt = systemPrompt,
+        llmClient = llmClient,
+        costTracker = costTracker,
+        outputType = outputType
+      )
+      metaData[[i]] <- as_tibble(lapply(response, function(x) if (is.null(x)) NA_integer_ else x)) |>
+        SqlRender::snakeCaseToCamelCaseNames() |>
+        mutate(phenotypeName = phenotypes$phenotypeName[i],
+               hasDiscreteRecordedSymptoms = as.integer(.data$hasDiscreteRecordedSymptoms),
+               requiresDiagnosticTestOrProcedure = as.integer(.data$requiresDiagnosticTestOrProcedure),
+               requiresActiveTreatmentWithin30d = as.integer(.data$requiresActiveTreatmentWithin30d),
+               expectsConditionSpecificFollowupOrSequelae1yr = as.integer(.data$expectsConditionSpecificFollowupOrSequelae1yr))
+    }
   }
   metaData <- bind_rows(metaData)
 
+  message(sprintf("Generated %d phenotype meta data rows. Skipped %d because they already exist in the Pegasus database.",
+                  nrow(metaData),
+                  skipped))
   delta <- Sys.time() - startTime
   message(sprintf("Generating phenotype meta data took %0.2f %s and cost $%0.2f.",
                   delta,

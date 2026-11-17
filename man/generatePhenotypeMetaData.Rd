@@ -7,7 +7,10 @@
 generatePhenotypeMetaData(
   phenotypes,
   llmClient,
-  costTracker = createCostTracker()
+  costTracker = createCostTracker(),
+  pegasusConnection = NULL,
+  pegasusConnectionDetails = NULL,
+  pegasusDatabaseSchema = NULL
 )
 }
 \arguments{

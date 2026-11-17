@@ -127,6 +127,7 @@ generateConceptSets  <- function(
     fullConceptSets,
     hasConceptSet
   )
+  costTracker$amount <- costTracker$amount + sum(conceptSets$cost, na.rm=T)
   delta <- Sys.time() - startTime
   message(sprintf("Generating concept sets took %0.2f %s and cost $%0.2f.",
                   delta,

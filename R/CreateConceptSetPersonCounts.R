@@ -98,7 +98,7 @@ createConceptSetCounts <- function(conceptSets = NULL,
       databaseCacheFolder <- NULL
     } else {
       databaseCacheFolder <- file.path(cacheFolder, gsub("[^[:alnum:]]+", "", databaseReference$databaseName))
-      dir.create(databaseCacheFolder, recursive = TRUE)
+      dir.create(databaseCacheFolder, recursive = TRUE, showWarnings = FALSE)
     }
     conceptSetsToCount <- removeConceptSetsWithExistingCounts(
         uniqueConceptSets = uniqueConceptSets,

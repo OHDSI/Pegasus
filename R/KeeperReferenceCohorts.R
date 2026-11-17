@@ -330,13 +330,16 @@ createKeeperConceptSets <- function(phenotype,
   fileName <- file.path(phenotype$phenotypeFolder, "KeeperConceptSets.csv")
 
   if (!file.exists(fileName)) {
+    keeperCostTracker <- Keeper::createCostTracker()
     conceptSets <- Keeper::generateKeeperConceptSets(
       phenotype = phenotype$phenotypeName,
       clinicalDefinition = phenotype$clinicalDefinition,
       client = llmClient,
+      costTracker = keeperCostTracker,
       vocabConnectionDetails = databaseReference$connectionDetails,
       vocabDatabaseSchema = databaseReference$cdmDatabaseSchema
     )
+    costTracker$amount <- costTracker$amount + keeperCostTracker$amount
     readr::write_csv(conceptSets, fileName)
   }
 }
@@ -386,6 +389,7 @@ createKeeperReferenceCohort <- function(phenotype,
   }
 
   # Review patient profiles using LLM ----------------------------------------------------------------------------------
+  keeperCostTracker <- Keeper::createCostTracker()
   llmReviews <- withCache({
     tryCatch({
       Keeper::reviewCasesUsingStratifiedSampling(
@@ -397,6 +401,7 @@ createKeeperReferenceCohort <- function(phenotype,
         sensitiveCohortDefinitionId = phenotype$cohortId,
         keeperConceptSets = conceptSets,
         client = llmClient,
+        costTracker = keeperCostTracker,
         phenotypeName = phenotype$phenotypeName,
         clinicalDefinition = phenotype$clinicalDefinition,
         cacheFolder = databaseCacheFolder
@@ -483,7 +488,7 @@ evaluateUsingKeeperReferenceCohorts <- function(phenotypes,
   for (i in seq_along(databaseReferences)) {
     databaseReference <- databaseReferences[[i]]
     toSkip <- existingEvaluations |>
-      filter(.data$databaseId == databaseReferences$databaseId)
+      filter(.data$databaseId == databaseReference$databaseId)
     results[[i]] <- evaluateInDatabase(
       cohortDefinitions = cohortDefinitions,
       databaseReference = databaseReference,
@@ -500,6 +505,7 @@ evaluateUsingKeeperReferenceCohorts <- function(phenotypes,
 }
 
 evaluateInDatabase <- function(cohortDefinitions, databaseReference, toSkip) {
+  message("Evaluating cohort definitions in database ", databaseReference$databaseName)
   connection <- DatabaseConnector::connect(databaseReference$connectionDetails)
   on.exit(DatabaseConnector::disconnect(connection))
 

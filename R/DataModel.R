@@ -1030,6 +1030,18 @@ downloadConceptSets <- function(pegasusConnection = NULL,
   return(data)
 }
 
+downloadDatabaseMetaData <- function(pegasusConnection = NULL,
+                                     pegasusConnectionDetails = NULL,
+                                     pegasusDatabaseSchema) {
+  data <- genericDownload(
+    tableName = "database_meta_data",
+    pegasusConnection = pegasusConnection,
+    pegasusConnectionDetails = pegasusConnectionDetails,
+    pegasusDatabaseSchema = pegasusDatabaseSchema
+  )
+  return(data)
+}
+
 genericDownload <- function(tableName,
                             pegasusConnection,
                             pegasusConnectionDetails,

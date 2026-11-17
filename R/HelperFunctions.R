@@ -274,9 +274,11 @@ getDatabaseMetaData <- function(databaseReferences,
   }
 
   metaDatas <- list()
+  skipped <- 0
   for (i in seq_along(databaseReferences)) {
     databaseReference <- databaseReferences[[i]]
     if (databaseReference$databaseId %in% existingDatabaseIds) {
+      skipped <- skipped + 1
       next
     }
     connection <- DatabaseConnector::connect(databaseReference$connectionDetails)
@@ -311,6 +313,9 @@ getDatabaseMetaData <- function(databaseReferences,
     metaDatas[[i]] <- metaData
   }
   metaDatas <- bind_rows(metaDatas)
+  message(sprintf("Retrieved %d meta data rows. Skipped %d because they already exist in the Pegasus database.",
+                  nrow(metaDatas),
+                  skipped))
   return(metaDatas)
 }
 

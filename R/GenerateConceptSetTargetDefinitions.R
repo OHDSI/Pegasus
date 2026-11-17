@@ -253,12 +253,13 @@ fetchOrGenerateDefinitions <- function(targets,
     phenotypeTargetCategories <- targets |>
       filter(.data$conceptId == row$conceptId) |>
       distinct(.data$phenotypeName, .data$conceptId, .data$conceptName, .data$pertains, .data$category) |>
-      mutate(context = sprintf("%s of %s%s",
+      mutate(context = trimws(sprintf("%s of %s%s",
                                .data$category,
                                if_else(.data$pertains == "Alternative diagnoses",
                                        "alternative diagnoses of ",
                                        ""),
-                               .data$phenotypeName))
+                               .data$phenotypeName),
+                              whitespace = "[ \t\r\n\u00A0]"))
     nContextTarget <- nContextTarget + nrow(phenotypeTargetCategories)
 
     cacheFileName <- paste0(digest::digest(phenotypeTargetCategories), ".rds")

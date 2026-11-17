@@ -29,7 +29,7 @@ Contexts:
 4. Context-Driven Subtyping:
    - Analyze the full list of Contexts to deduce if distinct phenotypic, procedural, or measurement-based subtypes exist.
    - For example, if contexts split between diagnostic and treatment uses, or between different underlying phenotypes, generate distinct definitions for each variant (e.g., "Diagnostic abdominal paracentesis" vs. "Therapeutic abdominal paracentesis").
-   - You MUST identify which Contexts each Definition covers. You may use the "all" shorthand ONLY if a single Definition applies to every single context. Otherwise, you must list the exact strings of the covered contexts. Ensure every provided context is assigned to a definition.
+   - You MUST identify which Contexts each Definition covers. You may use the 'all' shorthand ONLY if a single Definition applies to every single context. Otherwise, you must list the exact strings of the covered contexts. Ensure every provided context is assigned to a definition.
 
 ### Output Requirements
 Respond **only** with a valid JSON array of objects matching the following exact structure:
@@ -38,6 +38,6 @@ Respond **only** with a valid JSON array of objects matching the following exact
   {
     "label": "Use the exact term if there is only 1 definition. If subtyping, use a descriptive variant label.",
     "definition": "Standardized definition text here, adhering to the boundaries above.",
-    "coveredContexts": ["List of EXACT strings from the contexts provided", "or 'all'"]
+    "coveredContexts": ["List of EXACT strings from the contexts provided or 'all'"]
   }
 ]

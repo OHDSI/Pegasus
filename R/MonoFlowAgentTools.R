@@ -1206,7 +1206,6 @@ getConceptSetsCapr <- function(context, phenotype, conceptSetNames, detail = "co
   if (!detail %in% c("code", "code_and_counts", "full_reference")) {
     stop("The detail argument should be 'code', 'code_and_counts', or 'full_reference'")
   }
-  browser()
   sql <- "
     SELECT concept_set_name,
       has_descendants,
