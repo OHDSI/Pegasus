@@ -46,6 +46,7 @@ generateCohortDefinitionsUsingMonoFlowAgent <- function(phenotypes,
   errorMessages <- checkmate::makeAssertCollection()
   checkmate::assertDataFrame(phenotypes, min.rows = 1, add = errorMessages)
   checkmate::assertNames(colnames(phenotypes), must.include = c(
+    "phenotypeId",
     "phenotypeName",
     "clinicalDefinition"
   ), add = errorMessages)
@@ -88,7 +89,8 @@ generateCohortDefinitionsUsingMonoFlowAgent <- function(phenotypes,
   startCost <- costTracker$amount
 
   dir.create(workFolder)
-  toolContext <- PegasusAgentContext$new(pegasusConnection = pegasusConnection,
+  toolContext <- PegasusAgentContext$new(phenotype,
+                                         pegasusConnection = pegasusConnection,
                                          pegasusDatabaseSchema = pegasusDatabaseSchema,
                                          databaseReferences = databaseReferences)
   on.exit(toolContext$close())

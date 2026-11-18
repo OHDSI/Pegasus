@@ -22,6 +22,7 @@
 #' @template Phenotypes
 #' @template LlmClient
 #' @template CostTracker
+#' @template PegasusConnectionDetails
 #'
 #' @returns
 #' A tibble with one row.
@@ -37,6 +38,7 @@ generatePhenotypeMetaData <- function(phenotypes,
   checkmate::assertDataFrame(phenotypes, min.rows = 1, add = errorMessages)
   checkmate::assertNames(colnames(phenotypes), must.include = c(
     "phenotypeName",
+    "phenotypeId",
     "clinicalDefinition"
   ), add = errorMessages)
   checkmate::assertR6(llmClient, "Chat", add = errorMessages)
@@ -56,9 +58,6 @@ generatePhenotypeMetaData <- function(phenotypes,
   if (is.null(pegasusConnection)) {
     existingPhenotypeIds <- c()
   } else {
-    phenotypes <- addPhenotypeIdIfMissing(phenotypes,
-                                          pegasusConnection = pegasusConnection,
-                                          pegasusDatabaseSchema = pegasusDatabaseSchema)
     sql <- "
       SELECT phenotype_id
       FROM @database_schema.phenotype_meta_data;

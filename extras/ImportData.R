@@ -892,4 +892,354 @@ copyTable("cohort_definition_evaluation")
 
 copyTable("phenotype_ancestor")
 
+# Copy Keeper reference tables -----------------------------------------------------------------------------------------
+phenotypes <- downloadPhenotypes(connection, pegasusDatabaseSchema = "pegasus") |>
+  mutate(phenotypeName = trimws(phenotypeName, whitespace = "[ \t\r\n\u00A0]"))
 
+cdmConnection <- DatabaseConnector::connect(cdmConnectionDetails)
+
+tableNames <- Keeper::createReferenceCohortTableNames("reference_cohort")
+
+# optum_extended_dod_v4020
+append <- FALSE
+sourceSchema <- "scratch.scratch_all"
+targetSchema <- "pegasus.pegasus_optum_extended_dod_v4020"
+sourceReferenceCohortTable <- "reference_cohort_optum_extended_dod_v4020"
+sourceReferenceCohortMetaDataTable <- "reference_cohort_optum_extended_dod_v4020_metadata"
+sourceReferenceCohortSensitiveTable <- "reference_cohort_optum_extended_dod_v4020_sensitive"
+sourceReferenceCohortProfileTable <- NULL
+
+# optum_ehr_v4154
+append <- FALSE
+sourceSchema <- "scratch.scratch_all"
+targetSchema <- "pegasus.pegasus_optum_ehr_v4154"
+sourceReferenceCohortTable <- "reference_cohort_optum_ehr_v4154"
+sourceReferenceCohortMetaDataTable <- "reference_cohort_optum_ehr_v4154_metadata"
+sourceReferenceCohortSensitiveTable <- NULL
+sourceReferenceCohortProfileTable <- NULL
+
+# optum_ehr_v4154 new phenotypes
+append <- TRUE
+sourceSchema <- "scratch.scratch_mschuemi"
+targetSchema <- "pegasus.pegasus_optum_ehr_v4154"
+sourceReferenceCohortTable <- "pegasus_reference_cohort_optum_ehr_v4154"
+sourceReferenceCohortMetaDataTable <- "pegasus_reference_cohort_optum_ehr_v4154_metadata"
+sourceReferenceCohortSensitiveTable <- "pegasus_reference_cohort_optum_ehr_v4154_sensitive"
+sourceReferenceCohortProfileTable <- "pegasus_reference_cohort_optum_ehr_v4154_profile"
+
+# optum_extended_dod_v4155
+append <- FALSE
+sourceSchema <- "scratch.scratch_mschuemi"
+targetSchema <- "pegasus.pegasus_optum_extended_dod_v4155"
+sourceReferenceCohortTable <- "pegasus_reference_cohort_optum_extended_dod_v4155"
+sourceReferenceCohortMetaDataTable <- "pegasus_reference_cohort_optum_extended_dod_v4155_metadata"
+sourceReferenceCohortSensitiveTable <- "pegasus_reference_cohort_optum_extended_dod_v4155_sensitive"
+sourceReferenceCohortProfileTable <- "pegasus_reference_cohort_optum_extended_dod_v4155_profile"
+
+# jmdc_v4152
+append <- FALSE
+sourceSchema <- "scratch.scratch_mschuemi"
+targetSchema <- "pegasus.pegasus_jmdc_v4152"
+sourceReferenceCohortTable <- "pegasus_reference_cohort_cdm_jmdc_v4152"
+sourceReferenceCohortMetaDataTable <- "pegasus_reference_cohort_cdm_jmdc_v4152_metadata"
+sourceReferenceCohortSensitiveTable <- "pegasus_reference_cohort_cdm_jmdc_v4152_sensitive"
+sourceReferenceCohortProfileTable <- "pegasus_reference_cohort_cdm_jmdc_v4152_profile"
+
+# merative_mdcr_v4151
+append <- FALSE
+sourceSchema <- "scratch.scratch_mschuemi"
+targetSchema <- "pegasus.pegasus_merative_mdcr_v4151"
+sourceReferenceCohortTable <- "pegasus_reference_cohort_merative_mdcr_v4151"
+sourceReferenceCohortMetaDataTable <- "pegasus_reference_cohort_merative_mdcr_v4151_metadata"
+sourceReferenceCohortSensitiveTable <- "pegasus_reference_cohort_merative_mdcr_v4151_sensitive"
+sourceReferenceCohortProfileTable <- "pegasus_reference_cohort_merative_mdcr_v4151_profile"
+
+
+if (!append) {
+  sql <- "
+  CREATE SCHEMA @schema;
+"
+  DatabaseConnector::renderTranslateExecuteSql(
+    connection = cdmConnection,
+    sql = sql,
+    schema = targetSchema
+  )
+}
+
+# Create cohort Id mapping
+sql <- "
+  SELECT *
+  FROM @schema.@table;
+"
+referenceCohortMetaData <- DatabaseConnector::renderTranslateQuerySql(
+  connection = cdmConnection,
+  sql = sql,
+  schema = sourceSchema,
+  table = sourceReferenceCohortMetaDataTable,
+  snakeCaseToCamelCase = TRUE
+)
+
+oldToNewCohortId <- referenceCohortMetaData |>
+  select("cohortDefinitionId", phenotypeName = "phenotype") |>
+  inner_join(phenotypes |>
+               select(newCohortId = "phenotypeId", "phenotypeName"),
+             by = join_by("phenotypeName")) |>
+  select("cohortDefinitionId", "newCohortId")
+
+DatabaseConnector::insertTable(
+  connection = cdmConnection,
+  tableName = "#old_to_new_cohort_id",
+  data = oldToNewCohortId,
+  createTable = TRUE,
+  dropTableIfExists = TRUE,
+  tempTable = TRUE,
+  camelCaseToSnakeCase = TRUE
+)
+
+# Copy meta data
+if (append) {
+  sql <- "
+    INSERT INTO @target_schema.@target_table (
+      cohort_definition_id,
+      phenotype,
+      cohort_prevalence,
+      model,
+      keeperversion)
+    SELECT new_cohort_id AS cohort_definition_id,
+      phenotype,
+      cohort_prevalence,
+      model,
+      keeperversion
+    FROM @source_schema.@source_table source
+    INNER JOIN #old_to_new_cohort_id mapping
+      ON source.cohort_definition_id = mapping.cohort_definition_id;
+  "
+  DatabaseConnector::renderTranslateExecuteSql(
+    connection = cdmConnection,
+    sql = sql,
+    source_schema = sourceSchema,
+    source_table = sourceReferenceCohortMetaDataTable,
+    target_schema = targetSchema,
+    target_table = tableNames$referenceCohortMetadataTable
+  )
+} else {
+  sql <- "
+    DROP TABLE IF EXISTS @target_schema.@target_table;
+
+    SELECT new_cohort_id AS cohort_definition_id,
+      phenotype,
+      cohort_prevalence,
+      model,
+      keeperversion
+    INTO  @target_schema.@target_table
+    FROM @source_schema.@source_table source
+    INNER JOIN #old_to_new_cohort_id mapping
+      ON source.cohort_definition_id = mapping.cohort_definition_id;
+  "
+  DatabaseConnector::renderTranslateExecuteSql(
+    connection = cdmConnection,
+    sql = sql,
+    source_schema = sourceSchema,
+    source_table = sourceReferenceCohortMetaDataTable,
+    target_schema = targetSchema,
+    target_table = tableNames$referenceCohortMetadataTable
+  )
+}
+
+# Reference cohort itself
+if (append) {
+  sql <- "
+    INSERT INTO  @target_schema.@target_table (
+      cohort_definition_id,
+      subject_id,
+      cohort_start_date,
+      is_case,
+      certainty,
+      justification,
+      observation_period_start_date,
+      observation_period_end_date
+    )
+    SELECT new_cohort_id AS cohort_definition_id,
+      subject_id,
+      cohort_start_date,
+      is_case,
+      certainty,
+      justification,
+      observation_period_start_date,
+      observation_period_end_date
+    FROM @source_schema.@source_table source
+    INNER JOIN #old_to_new_cohort_id mapping
+      ON source.cohort_definition_id = mapping.cohort_definition_id;
+  "
+  DatabaseConnector::renderTranslateExecuteSql(
+    connection = cdmConnection,
+    sql = sql,
+    source_schema = sourceSchema,
+    source_table = sourceReferenceCohortTable,
+    target_schema = targetSchema,
+    target_table = tableNames$referenceCohortTable
+  )
+} else {
+  sql <- "
+    DROP TABLE IF EXISTS @target_schema.@target_table;
+
+    SELECT new_cohort_id AS cohort_definition_id,
+      subject_id,
+      cohort_start_date,
+      is_case,
+      certainty,
+      justification,
+      observation_period_start_date,
+      observation_period_end_date
+    INTO  @target_schema.@target_table
+    FROM @source_schema.@source_table source
+    INNER JOIN #old_to_new_cohort_id mapping
+      ON source.cohort_definition_id = mapping.cohort_definition_id;
+  "
+  DatabaseConnector::renderTranslateExecuteSql(
+    connection = cdmConnection,
+    sql = sql,
+    source_schema = sourceSchema,
+    source_table = sourceReferenceCohortTable,
+    target_schema = targetSchema,
+    target_table = tableNames$referenceCohortTable
+  )
+}
+
+# Sensitive cohort
+if (is.null(sourceReferenceCohortSensitiveTable)) {
+  sql <- "
+      DROP TABLE IF EXISTS @reference_cohort_database_schema.@reference_sensitive_cohort_table;
+
+      CREATE TABLE @reference_cohort_database_schema.@reference_sensitive_cohort_table (
+        cohort_definition_id INT,
+        subject_id BIGINT,
+        cohort_start_date DATE,
+        stratum_id INT
+      );
+    "
+  DatabaseConnector::renderTranslateExecuteSql(
+    connection = cdmConnection,
+    sql = sql,
+    reference_cohort_database_schema = targetSchema,
+    reference_sensitive_cohort_table =  tableNames$referenceSensitiveCohortTable
+  )
+} else {
+  if (append) {
+    sql <- "
+      INSERT INTO  @target_schema.@target_table (
+        cohort_definition_id,
+        subject_id,
+        cohort_start_date,
+        stratum_id
+      )
+      SELECT new_cohort_id AS cohort_definition_id,
+        subject_id,
+        cohort_start_date,
+        stratum_id
+      FROM @source_schema.@source_table source
+      INNER JOIN #old_to_new_cohort_id mapping
+      ON source.cohort_definition_id = mapping.cohort_definition_id;
+    "
+    DatabaseConnector::renderTranslateExecuteSql(
+      connection = cdmConnection,
+      sql = sql,
+      source_schema = sourceSchema,
+      source_table = sourceReferenceCohortSensitiveTable,
+      target_schema = targetSchema,
+      target_table =  tableNames$referenceSensitiveCohortTable
+    )
+  } else {
+    sql <- "
+      DROP TABLE IF EXISTS @target_schema.@target_table;
+
+      SELECT new_cohort_id AS cohort_definition_id,
+        subject_id,
+        cohort_start_date,
+        stratum_id
+      INTO  @target_schema.@target_table
+      FROM @source_schema.@source_table source
+      INNER JOIN #old_to_new_cohort_id mapping
+      ON source.cohort_definition_id = mapping.cohort_definition_id;
+    "
+    DatabaseConnector::renderTranslateExecuteSql(
+      connection = cdmConnection,
+      sql = sql,
+      source_schema = sourceSchema,
+      source_table = sourceReferenceCohortSensitiveTable,
+      target_schema = targetSchema,
+      target_table =  tableNames$referenceSensitiveCohortTable
+    )
+  }
+}
+
+# Profiles
+if (is.null(sourceReferenceCohortProfileTable)) {
+  sql <- "
+    DROP TABLE IF EXISTS @reference_cohort_database_schema.@reference_profile_table;
+
+    CREATE TABLE @reference_cohort_database_schema.@reference_profile_table (
+      cohort_definition_id INT,
+      person_id BIGINT,
+      start_day INT,
+      end_day INT,
+      concept_id INT,
+      concept_name VARCHAR,
+      category VARCHAR,
+      target VARCHAR,
+      extra_data VARCHAR
+    );
+    "
+  DatabaseConnector::renderTranslateExecuteSql(
+    connection = cdmConnection,
+    sql = sql,
+    reference_cohort_database_schema = targetSchema,
+    reference_profile_table =  "reference_cohort_profile"
+  )
+} else {
+  sql <- "
+      DROP TABLE IF EXISTS @target_schema.@target_table;
+
+      SELECT new_cohort_id AS cohort_definition_id,
+        person_id,
+        start_day,
+        end_day,
+        concept_id,
+        concept_name,
+        category,
+        target,
+        extra_data
+      INTO  @target_schema.@target_table
+      FROM @source_schema.@source_table source
+      INNER JOIN #old_to_new_cohort_id mapping
+      ON source.cohort_definition_id = mapping.cohort_definition_id;
+    "
+  DatabaseConnector::renderTranslateExecuteSql(
+    connection = cdmConnection,
+    sql = sql,
+    source_schema = sourceSchema,
+    source_table = sourceReferenceCohortProfileTable,
+    target_schema = targetSchema,
+    target_table =  "reference_cohort_profile"
+  )
+
+}
+
+
+DatabaseConnector::disconnect(cdmConnection)
+DatabaseConnector::disconnect(connection)
+#
+# tables <- DatabaseConnector::getTableNames(cdmConnection, "scratch.scratch_mschuemi")
+# tables[grepl("_profile", tables)]
+# sql <- "
+#   SELECT TOP 1 *
+#   FROM @schema.@table;
+# "
+# x <- DatabaseConnector::renderTranslateQuerySql(
+#   connection = cdmConnection,
+#   sql = sql,
+#   schema =  "pegasus.pegasus_optum_extended_dod_v4155",
+#   table = "reference_cohort_profile",
+#   snakeCaseToCamelCase = TRUE
+# )
+# x

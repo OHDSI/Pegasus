@@ -30,15 +30,22 @@ requiredDatabaseColumns <- c(
 PegasusAgentContext <- R6::R6Class(
   "PegasusAgentContext",
   public = list(
+    phenotype = NULL,
     pegasusConnection = NULL,
     pegasusDatabaseSchema  = NULL,
     databaseReferences = NULL,
     connections = NULL,
 
-    initialize = function(pegasusConnection,
+    initialize = function(phenotype,
+                          pegasusConnection,
                           pegasusDatabaseSchema,
                           databaseReferences) {
       errorMessages <- checkmate::makeAssertCollection()
+      checkmate::assertDataFrame(phenotype, nrows = 1, add = errorMessages)
+      checkmate::assertNames(colnames(phenotype), must.include = c(
+        "phenotypeId",
+        "phenotypeName"
+      ), add = errorMessages)
       checkmate::assertClass(pegasusConnection, "DatabaseConnectorConnection", add = errorMessages)
       checkmate::assertCharacter(pegasusDatabaseSchema, len = 1, add = errorMessages)
       checkmate::assertList(databaseReferences, min.len = 1, add = errorMessages)
@@ -53,6 +60,7 @@ PegasusAgentContext <- R6::R6Class(
       }
       checkmate::reportAssertions(collection = errorMessages)
 
+      self$phenotype <- phenotype
       self$pegasusConnection <- pegasusConnection
       self$pegasusDatabaseSchema <- pegasusDatabaseSchema
       names(databaseReferences) <- sapply(databaseReferences, function(x) x$databaseName)
@@ -928,7 +936,8 @@ describeMeasurementValuesForDatabase <- function(connection, conceptSetsToDescri
     cdm_database_schema = databaseReference$cdmDatabaseSchema,
     snakeCaseToCamelCase = TRUE
   )
-  descriptives$database <- databaseReference$databaseName
+  descriptives <- descriptives |>
+    mutate(database = databaseReference$databaseName)
   return(descriptives)
 }
 
@@ -1020,10 +1029,11 @@ computeIncidenceRateForDatabase <- function(connection, databaseReference, cohor
   return(rates)
 }
 
-evaluateCohortForDatabase <- function(connection, databaseReference, cohortId, phenotype) {
+evaluateCohortForDatabase <- function(connection, databaseReference, cohortId, phenotypeId, phenotypeName) {
   referenceCohortDefinitionId <- getKeeperReferenceCohortId(connection = connection,
                                                             databaseReference = databaseReference,
-                                                            phenotype = phenotype)
+                                                            phenotypeId = phenotypeId,
+                                                            phenotypeName = phenotypeName)
   metrics <- Keeper::evaluateCohortUsingReferenceCohort(
     connection = connection,
     cohortDatabaseSchema = databaseReference$workDatabaseSchema,
@@ -1047,11 +1057,17 @@ evaluateCohortForDatabase <- function(connection, databaseReference, cohortId, p
 
 
 # Returns NULL when the database has no patients of the requested type.
-samplePatientProfileForDatabase <- function(connection, databaseReference, cohortId, phenotype, type) {
+samplePatientProfileForDatabase <- function(connection,
+                                            databaseReference,
+                                            cohortId,
+                                            phenotypeId,
+                                            phenotypeName,
+                                            type) {
   referenceCohortDefinitionId <- getKeeperReferenceCohortId(
     connection = connection,
     databaseReference = databaseReference,
-    phenotype = phenotype)
+    phenotypeId = phenotypeId,
+    phenotypeName = phenotypeName)
 
   sql <- "
     SELECT CAST(subject_id AS VARCHAR) AS subject_id
@@ -1133,30 +1149,28 @@ samplePatientProfileForDatabase <- function(connection, databaseReference, cohor
 }
 
 # Tool functions --------------------------------------------------------------------------------------------------------
-listConceptSets <- function(context, phenotype) {
+listConceptSets <- function(context) {
   sql <- "
     SELECT concept_set_name,
       has_descendants,
       database_meta_data.database_id,
       cdm_source_abbreviation,
       overall_persons
-    FROM @database_schema.phenotype
-    INNER JOIN @database_schema.phenotype_to_concept_set
-      ON phenotype.phenotype_id = phenotype_to_concept_set.phenotype_id
+    FROM @database_schema.phenotype_to_concept_set
     INNER JOIN @database_schema.concept_set
       ON phenotype_to_concept_set.concept_set_id = concept_set.concept_set_id
     INNER JOIN @database_schema.concept_set_person_count
       ON concept_set.concept_set_id = concept_set_person_count.concept_set_id
     INNER JOIN @database_schema.database_meta_data
       ON concept_set_person_count.database_id = database_meta_data.database_id
-    WHERE LOWER(phenotype_name) = LOWER(@phenotype)
+    WHERE phenotype_id = @phenotype_id
       AND capr_concept_set_expression IS NOT NULL;
   "
   conceptSets <- DatabaseConnector::renderTranslateQuerySql(
     connection = context$pegasusConnection,
     sql = sql,
     database_schema = context$pegasusDatabaseSchema,
-    phenotype = quoteSqlString(phenotype),
+    phenotype_id = context$phenotype$phenotypeId,
     snakeCaseToCamelCase = TRUE
   )
 
@@ -1202,7 +1216,7 @@ listConceptSets <- function(context, phenotype) {
   return(table)
 }
 
-getConceptSetsCapr <- function(context, phenotype, conceptSetNames, detail = "code_and_counts") {
+getConceptSetsCapr <- function(context, conceptSetNames, detail = "code_and_counts") {
   if (!detail %in% c("code", "code_and_counts", "full_reference")) {
     stop("The detail argument should be 'code', 'code_and_counts', or 'full_reference'")
   }
@@ -1220,23 +1234,21 @@ getConceptSetsCapr <- function(context, phenotype, conceptSetNames, detail = "co
       observation_persons,
       visit_persons,
       overall_persons
-    FROM @database_schema.phenotype
-    INNER JOIN @database_schema.phenotype_to_concept_set
-      ON phenotype.phenotype_id = phenotype_to_concept_set.phenotype_id
+    FROM @database_schema.phenotype_to_concept_set
     INNER JOIN @database_schema.concept_set
       ON phenotype_to_concept_set.concept_set_id = concept_set.concept_set_id
     INNER JOIN @database_schema.concept_set_person_count
       ON concept_set.concept_set_id = concept_set_person_count.concept_set_id
     INNER JOIN @database_schema.database_meta_data
       ON concept_set_person_count.database_id = database_meta_data.database_id
-    WHERE LOWER(phenotype_name) = LOWER(@phenotype)
+    WHERE phenotype_id = @phenotype_id
       AND LOWER(concept_set_name) IN (@concept_set_names);
   "
   conceptSets <- DatabaseConnector::renderTranslateQuerySql(
     connection = context$pegasusConnection,
     sql = sql,
     database_schema = context$pegasusDatabaseSchema,
-    phenotype = quoteSqlString(phenotype),
+    phenotype_id = context$phenotype$phenotypeId,
     concept_set_names = paste(tolower(quoteSqlString(conceptSetNames)), collapse = ", "),
     snakeCaseToCamelCase = TRUE
   )
@@ -1526,7 +1538,7 @@ computeIncidenceRate <- function(context, cohortId, database = NULL) {
   return(jsonlite::toJSON(rates, auto_unbox = TRUE, pretty = TRUE, na = "null"))
 }
 
-evaluateCohort <- function(context, cohortId, phenotype, database = NULL) {
+evaluateCohort <- function(context, cohortId, database = NULL) {
   databaseReferences <- context$selectDatabaseReferences(database)
   metrics <- list()
   for (i in seq_along(databaseReferences)) {
@@ -1534,7 +1546,8 @@ evaluateCohort <- function(context, cohortId, phenotype, database = NULL) {
       connection = context$getConnection(databaseReferences[[i]]$databaseName),
       databaseReference = databaseReferences[[i]],
       cohortId = cohortId,
-      phenotype = phenotype
+      phenotypeId = context$phenotype$phenotypeId,
+      phenotypeName = context$phenotype$phenotypeName
     )
   }
   metrics <- bind_rows(metrics)
@@ -1542,7 +1555,7 @@ evaluateCohort <- function(context, cohortId, phenotype, database = NULL) {
   return(json)
 }
 
-samplePatientProfile <- function(context, cohortId, phenotype, type, database = NULL) {
+samplePatientProfile <- function(context, cohortId, type, database = NULL) {
   type <- tolower(type)
   if (!type %in% c("tp", "fp", "tn", "fn")) {
     return("Error: type must have value 'TP', 'FP', 'TN', or 'FN'")
@@ -1555,7 +1568,8 @@ samplePatientProfile <- function(context, cohortId, phenotype, type, database = 
       connection = context$getConnection(databaseReferences[[i]]$databaseName),
       databaseReference = databaseReferences[[i]],
       cohortId = cohortId,
-      phenotype = phenotype,
+      phenotypeId = context$phenotype$phenotypeId,
+      phenotypeName = context$phenotype$phenotypeName,
       type = type
     )
   }
@@ -1603,14 +1617,12 @@ listConceptSetsTool <- function(context) ellmer::tool(
   bindContext(listConceptSets, context),
   name = "listConceptSets",
   description = paste(
-    "Retrieve the concept sets associated with a phenotype.",
+    "Retrieve the concept sets associated with the phenotype.",
     "Returns a markdown table with three columns: concept set name, whether the set includes descendants, and the",
     "number of unique persons with at least one of the concepts in the set.",
     "A count of 0 means nobody has any of the concepts."
   ),
-  arguments = list(
-    phenotype = ellmer::type_string("Name of the phenotype for which concept sets should be returned.")
-  )
+  arguments = list()
 )
 
 getConceptSetsCaprTool <- function(context) ellmer::tool(
@@ -1619,7 +1631,6 @@ getConceptSetsCaprTool <- function(context) ellmer::tool(
   description = paste("Returns the Capr R code for one or more concept sets, and unique person counts per domain",
                       "(only non-zero domains)."),
   arguments = list(
-    phenotype = ellmer::type_string("Name of the phenotype."),
     conceptSetNames = ellmer::type_array(ellmer::type_string("Names of the concept sets.")),
     detail = ellmer::type_enum(c("code", "code_and_counts", "full_reference"),
                        paste("Level of detail to return.",
@@ -1777,12 +1788,11 @@ evaluateCohortTool <- function(context, databaseArgument = createDatabaseArgumen
   bindContext(evaluateCohort, context),
   name = "evaluateCohort",
   description = paste(
-    "Evaluate the cohort using a 10,000 person KEEPER reference cohort.",
+    "Evaluate the cohort using a KEEPER reference cohort.",
     "Returns sensitivity, specificity (adjusted for sampling), PPV, and the confusion matrix."
   ),
   arguments = list(
     cohortId = ellmer::type_integer("The cohort ID as returned by the `generate_cohort` tool."),
-    phenotype = ellmer::type_string("Name of the phenotype."),
     database = databaseArgument
   )
 )
@@ -1796,7 +1806,6 @@ samplePatientProfileTool <- function(context, databaseArgument = createDatabaseA
   ),
   arguments = list(
     cohortId = ellmer::type_integer("The cohort ID as returned by the `generate_cohort` tool."),
-    phenotype = ellmer::type_string("Name of the phenotype. Used to fetch the gold standard."),
     type = ellmer::type_enum(c("TP", "FP", "TN", "FN"), paste(
       "Type, based on classification status, using the KEEPER reference cohort as gold standard.",
       "Options: TP, FP, TN, FN"

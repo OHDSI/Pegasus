@@ -40,7 +40,7 @@ generateConceptSets  <- function(
   errorMessages <- checkmate::makeAssertCollection()
   checkmate::assertDataFrame(conceptSetTargetDefinitions, min.rows = 1, add = errorMessages)
   checkmate::assertNames(colnames(conceptSetTargetDefinitions), must.include = c(
-    "phenotypeName",
+    "phenotypeId",
     "pertains",
     "category",
     "conceptId",

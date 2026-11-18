@@ -49,7 +49,7 @@ Proceed to KEEPER evaluation only after:
 
 1. **Evaluate:** Call the `evaluateCohort` tool using the cohort ID to get a summary of the cohort's operating characteristics against the KEEPER reference set. 
 2. **Patient Profiling:** To understand the performance, call the `samplePatientProfile` tool to review individual patient profiles.
-3. **Refine or Terminate:** Adjust the cohort definition based on evaluation results. Return to Phase 2 to regenerate the cohort. You must **STOP** after evaluateCohort has been called three times in total during the skill invocation.
+3. **Refine or Terminate:** Adjust the cohort definition based on evaluation results. Return to Phase 2 to regenerate the cohort. You must **STOP** after `evaluateCohort` has been called three times in total during the skill invocation.
 
 ## Final Output
 Present the user with the final Capr R code and a summary of the evaluation results. If the user wants the OMOP JSON, produce it with the `convertCaprToJson` tool, saving it to file immediately. Do *not* verify the content of the JSON file.

@@ -43,6 +43,7 @@ generateCohortDefinitionssUsingTemplates <- function(phenotypes,
   errorMessages <- checkmate::makeAssertCollection()
   checkmate::assertDataFrame(phenotypes, min.rows = 1, add = errorMessages)
   checkmate::assertNames(colnames(phenotypes), must.include = c(
+    "phenotypeId",
     "phenotypeName"
   ), add = errorMessages)
   checkmate::assertClass(pegasusConnection, "DatabaseConnectorConnection", null.ok = TRUE, add = errorMessages)
@@ -72,12 +73,6 @@ generateCohortDefinitionssUsingTemplates <- function(phenotypes,
 
   unionsFolder <- file.path(workFolder, "conceptSetUnions")
   dir.create(unionsFolder, showWarnings  = FALSE)
-
-  phenotypes <- addPhenotypeIdIfMissing(
-    data = phenotypes,
-    pegasusConnection = pegasusConnection,
-    pegasusDatabaseSchema = pegasusDatabaseSchema
-  )
 
   phenotypeConfigs <- buildPhenotypeConfigs(
     phenotypes = phenotypes,

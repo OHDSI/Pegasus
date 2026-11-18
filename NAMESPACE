@@ -43,3 +43,4 @@ importFrom(ellmer,
   type_string
 )
 importFrom(rlang,.data)
+importFrom(utils,head)

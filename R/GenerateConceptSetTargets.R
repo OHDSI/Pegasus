@@ -320,6 +320,7 @@ generateConceptSetTargets <- function(phenotypes,
   errorMessages <- checkmate::makeAssertCollection()
   checkmate::assertDataFrame(phenotypes, min.rows = 1, add = errorMessages)
   checkmate::assertNames(colnames(phenotypes), must.include = c(
+    "phenotypeId",
     "phenotypeName",
     "clinicalDefinition"
   ), add = errorMessages)
@@ -343,6 +344,7 @@ generateConceptSetTargets <- function(phenotypes,
   for (i in seq_len(nrow(phenotypes))) {
     conceptSetTargets[[i]] <- withCache({
       generateConceptSetTargetsForPhenotype(
+        phenotypeId = phenotypes$phenotypeId[i],
         phenotypeName = phenotypes$phenotypeName[i],
         clinicalDefinition = phenotypes$clinicalDefinition[i],
         connection = connection,
@@ -364,7 +366,8 @@ generateConceptSetTargets <- function(phenotypes,
   return(conceptSetTargets)
 }
 
-generateConceptSetTargetsForPhenotype <- function(phenotypeName,
+generateConceptSetTargetsForPhenotype <- function(phenotypeId,
+                                                  phenotypeName,
                                                   clinicalDefinition,
                                                   connection,
                                                   vocabDatabaseSchema,
@@ -418,13 +421,15 @@ generateConceptSetTargetsForPhenotype <- function(phenotypeName,
   # Combine and return
   result <- bind_rows(
     targets |>
-      mutate(phenotypeName = !!phenotypeName,
+      mutate(phenotypeId = !!phenotypeId,
+             phenotypeName = !!phenotypeName,
              pertains = "Disease of interest"),
     targetsAd |>
-      mutate(phenotypeName = !!phenotypeName,
+      mutate(phenotypeId = !!phenotypeId,
+             phenotypeName = !!phenotypeName,
              pertains = "Alternative diagnoses")
   ) |>
-    relocate("phenotypeName", "pertains")
+    relocate("phenotypeId", "phenotypeName", "pertains")
 
   return(result)
 }

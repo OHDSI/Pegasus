@@ -38,6 +38,7 @@ createKeeperReferenceCohorts <- function(phenotypes,
                                          workFolder) {
   errorMessages <- checkmate::makeAssertCollection()
   checkmate::assertNames(colnames(phenotypes), must.include = c(
+    "phenotypeId",
     "phenotypeName",
     "clinicalDefinition"
   ), add = errorMessages)
@@ -57,7 +58,7 @@ createKeeperReferenceCohorts <- function(phenotypes,
 
 
   phenotypesWithFolders <- phenotypes |>
-    mutate(phenotypeFolder =  file.path(workFolder, gsub("[^[:alnum:]]+", "", .data$phenotypeName)))
+    mutate(phenotypeFolder =  file.path(workFolder, sprintf("Phenotype_%d", .data$phenotypeId)))
   for (i in seq_len(nrow(phenotypesWithFolders))) {
     createKeeperConceptSets(
       phenotype = phenotypesWithFolders[i, ],
@@ -117,21 +118,16 @@ createKeeperReferenceCohortsForDatabase <- function(phenotypesWithFolders,
       referenceCohortDatabaseSchema = databaseReference$referenceCohortDatabaseSchema,
       referenceCohortMetadataTable = referenceCohortTableNames$referenceCohortMetadataTable
     )
-    if (nrow(existingCohorts) == 0) {
-      lastCohortId <- 0
-    } else {
-      overlap <- intersect(phenotypesWithFolders$phenotypeName, existingCohorts$phenotype)
+      overlap <- intersect(phenotypesWithFolders$phenotypeId, existingCohorts$cohortDefinitionId)
       if (length(overlap) > 0) {
-        message(sprintf("- Phenotypes '%s' already have reference cohorts in database %s. Skipping",
-                     paste(overlap, collapse =  "', '"),
+        message(sprintf("- Phenotypes %s already have reference cohorts in database %s. Skipping",
+                     paste(overlap, collapse =  ", "),
                      databaseReference$databaseName))
         remainingPhenotypes <- phenotypesWithFolders |>
-          filter(!.data$phenotypeName %in% existingCohorts$phenotype)
+          filter(!as.character(.data$phenotypeId) %in% existingCohorts$phenotype)
         if (nrow(remainingPhenotypes) == 0) {
           return(NULL)
         }
-      }
-      lastCohortId <- max(existingCohorts$cohortDefinitionId)
     }
   } else {
     Keeper::createReferenceCohortTables(
@@ -140,7 +136,6 @@ createKeeperReferenceCohortsForDatabase <- function(phenotypesWithFolders,
       referenceCohortTableNames = referenceCohortTableNames
     )
     existingCohorts <- tibble()
-    lastCohortId <- 0
   }
 
   sensitiveCohortTableExists <- DatabaseConnector::existsTable(
@@ -156,12 +151,9 @@ createKeeperReferenceCohortsForDatabase <- function(phenotypesWithFolders,
     )
   }
 
-  phenotypesWithIds <- remainingPhenotypes |>
-    mutate(cohortId = row_number() + lastCohortId)
-
-  cluster <- ParallelLogger::makeCluster(min(maxCores, nrow(phenotypesWithIds)))
+  cluster <- ParallelLogger::makeCluster(min(maxCores, nrow(remainingPhenotypes)))
   ParallelLogger::clusterRequire(cluster, "dplyr")
-  rows <- split(phenotypesWithIds, phenotypesWithIds$cohortId)
+  rows <- split(remainingPhenotypes, remainingPhenotypes$phenotypeId)
   cost <- ParallelLogger::clusterApply(
     cluster = cluster,
     x = rows,
@@ -174,7 +166,7 @@ createKeeperReferenceCohortsForDatabase <- function(phenotypesWithFolders,
   costTracker$amount <- costTracker$amount + sum(unlist(cost))
 
   status <- uploadReferenceCohortsAndProfiles(
-    phenotypesWithIds = phenotypesWithIds,
+    phenotypes = remainingPhenotypes,
     connection = connection,
     databaseReference = databaseReference,
     uploadKeeperProfiles = uploadKeeperProfiles
@@ -182,7 +174,7 @@ createKeeperReferenceCohortsForDatabase <- function(phenotypesWithFolders,
   return(status)
 }
 
-uploadReferenceCohortsAndProfiles <- function(phenotypesWithIds,
+uploadReferenceCohortsAndProfiles <- function(phenotypes,
                                               connection,
                                               databaseReference,
                                               uploadKeeperProfiles) {
@@ -217,14 +209,16 @@ uploadReferenceCohortsAndProfiles <- function(phenotypesWithIds,
       )
     }
   }
-  status <- phenotypesWithIds |>
-    select("cohortId", "phenotypeName") |>
+  status <- phenotypes |>
+    select("phenotypeId") |>
     mutate(databaseId = databaseReference$databaseId,
            referenceCohortSize = 0,
            error = "")
-  for (i in seq_len(nrow(phenotypesWithIds))) {
-    row <- phenotypesWithIds[i, ]
-    message("- Uploading reference cohort and profiles for '", row$phenotypeName,"'.")
+  for (i in seq_len(nrow(phenotypes))) {
+    row <- phenotypes[i, ]
+    message(sprintf("- Uploading reference cohort and profiles for '%s' (%d).",
+            row$phenotypeName,
+            row$phenotypeId))
     databaseForFileName <- gsub("[^[:alnum:]]+", "", databaseReference$databaseName)
 
     fileName <- file.path(row$phenotypeFolder, sprintf("llmReviews_%s.rds", databaseForFileName))
@@ -243,17 +237,20 @@ uploadReferenceCohortsAndProfiles <- function(phenotypesWithIds,
     } else {
       llmReviews <- readRDS(fileName)
       if (is.character(llmReviews)) {
-        message("- Phenotype '", row$phenotypeName, "' has error '", llmReviews, "'. Skipping")
+        message(sprintf("- Phenotype '%s' (%d) has error '%s'. Skipping",
+                        row$phenotypeName,
+                        row$phenotypeId,
+                        llmReviews))
         status$error[i] <- llmReviews
       } else {
         Keeper::uploadReferenceCohortUsingStratifiedSample(
           connection = connection,
           sensitiveCohortDatabaseSchema = databaseReference$sensitiveCohortDatabaseSchema,
           sensitiveCohortTable = databaseReference$sensitiveCohortTable,
-          sensitiveCohortDefinitionId = row$cohortId,
+          sensitiveCohortDefinitionId = row$phenotypeId,
           referenceCohortDatabaseSchema = databaseReference$referenceCohortDatabaseSchema,
           referenceCohortTableNames = Keeper::createReferenceCohortTableNames(databaseReference$referenceCohortTable),
-          referenceCohortDefinitionId = row$cohortId,
+          referenceCohortDefinitionId = row$phenotypeId,
           createReferenceCohortTables = FALSE,
           stratifiedReviews = llmReviews
         )
@@ -274,17 +271,17 @@ uploadReferenceCohortsAndProfiles <- function(phenotypesWithIds,
                                 keeperSamplePhase2)
           }
           keeper <- keeper |>
-            mutate(cohortDefinitionId = row$cohortId)
+            mutate(cohortDefinitionId = row$phenotypeId)
           sql <- "
             DELETE FROM @database_schema.@table
-            WHERE cohort_definition_id = @cohort_id;
+            WHERE cohort_definition_id = @cohort_definition_id;
           "
           DatabaseConnector::renderTranslateExecuteSql(
             connection = connection,
             sql = sql,
             database_schema = databaseReference$referenceCohortDatabaseSchema,
             table = paste0(databaseReference$referenceCohortTable, "_profile"),
-            cohort_id = row$cohortId,
+            cohort_definition_id = row$phenotypeId,
             reportOverallTime = FALSE,
             progressBar = FALSE
           )
@@ -294,6 +291,7 @@ uploadReferenceCohortsAndProfiles <- function(phenotypesWithIds,
             tableName = paste0(databaseReference$referenceCohortTable, "_profile"),
             data = keeper,
             createTable = FALSE,
+            dropTableIfExists = FALSE,
             tempTable = FALSE,
             camelCaseToSnakeCase = TRUE
           )
@@ -323,7 +321,9 @@ createKeeperConceptSets <- function(phenotype,
                                     llmClient,
                                     costTracker,
                                     databaseReference) {
-  message(sprintf("Creating Keeper concept sets for '%s'", phenotype$phenotypeName))
+  message(sprintf("Creating Keeper concept sets for '%s' (%d)",
+                  phenotype$phenotypeName,
+                  phenotype$phenotypeId))
 
   dir.create(phenotype$phenotypeFolder)
 
@@ -350,8 +350,9 @@ createKeeperReferenceCohort <- function(phenotype,
                                         llmClient,
                                         databaseReference,
                                         stratifiedSampling = TRUE) {
-  message(sprintf("*** Creating Keeper reference set for '%s' in %s ***",
+  message(sprintf("*** Creating Keeper reference set for '%s' (%d) in %s ***",
                   phenotype$phenotypeName,
+                  phenotype$phenotypeId,
                   databaseReference$databaseName))
 
   databaseForFileName <- gsub("[^[:alnum:]]+", "", databaseReference$databaseName)
@@ -371,7 +372,7 @@ createKeeperReferenceCohort <- function(phenotype,
         tempEmulationSchema = databaseReference$tempEmulationSchema,
         sensitiveCohortDatabaseSchema = databaseReference$sensitiveCohortDatabaseSchema,
         sensitiveCohortTable = databaseReference$sensitiveCohortTable,
-        sensitiveCohortDefinitionId = phenotype$cohortId,
+        sensitiveCohortDefinitionId = phenotype$phenotypeId,
         createCohortTable = FALSE,
         keeperConceptSets = conceptSets
       )
@@ -441,6 +442,7 @@ evaluateUsingKeeperReferenceCohorts <- function(phenotypes,
   errorMessages <- checkmate::makeAssertCollection()
   checkmate::assertDataFrame(phenotypes, min.rows = 1, add = errorMessages)
   checkmate::assertNames(colnames(phenotypes), must.include = c(
+    "phenotypeId",
     "phenotypeName"
   ), add = errorMessages)
   checkmate::assertClass(pegasusConnection, "DatabaseConnectorConnection", null.ok = TRUE, add = errorMessages)
@@ -466,7 +468,10 @@ evaluateUsingKeeperReferenceCohorts <- function(phenotypes,
     phenotypes = phenotypes,
     pegasusConnection = pegasusConnection,
     pegasusDatabaseSchema = pegasusDatabaseSchema
-  )
+  ) |>
+    inner_join(phenotypes |>
+                 select("phenotypeId", "phenotypeName"),
+               by = join_by("phenotypeId"))
 
   existingEvaluations <- getExistingEvaluations(
     cohortDefinitionIds = cohortDefinitions$cohortDefinitionId,
@@ -564,7 +569,8 @@ evaluateInDatabase <- function(cohortDefinitions, databaseReference, toSkip) {
     cohortDefinition <- toEvaluate[i, ]
     referenceCohortDefinitionId <- getKeeperReferenceCohortId(connection = connection,
                                                               databaseReference = databaseReference,
-                                                              phenotype = cohortDefinition$phenotypeName)
+                                                              phenotypeId = cohortDefinition$phenotypeId,
+                                                              phenotypeName = cohortDefinition$phenotypeName)
     metrics <- Keeper::evaluateCohortUsingReferenceCohort(
       connection = connection,
       cohortDatabaseSchema = databaseReference$candidateCohortDatabaseSchema,
@@ -634,22 +640,29 @@ getExistingEvaluations <- function(cohortDefinitionIds, databaseIds, pegasusConn
 }
 
 
-getKeeperReferenceCohortId <- function(connection, databaseReference, phenotype) {
+getKeeperReferenceCohortId <- function(connection, databaseReference, phenotypeId, phenotypeName) {
   sql <- "
-    SELECT cohort_definition_id
+    SELECT cohort_definition_id,
+      phenotype
     FROM @database_schema.@table
-    WHERE LOWER(phenotype) = LOWER(@phenotype);
+    WHERE cohort_definition_id = @cohort_definition_id;
   "
   keeperReference <- DatabaseConnector::renderTranslateQuerySql(
     connection = connection,
     sql = sql,
     database_schema = databaseReference$referenceCohortDatabaseSchema,
     table = Keeper::createReferenceCohortTableNames(databaseReference$referenceCohortTable)$referenceCohortMetadataTable,
-    phenotype = quoteSqlString(phenotype),
+    cohort_definition_id = phenotypeId,
     snakeCaseToCamelCase = TRUE
   )
   if (nrow(keeperReference) == 0) {
-    stop("Could not find reference cohort for phenotype ", phenotype, " in database '", databaseReference$databaseName, "'")
+    stop("Could not find reference cohort for phenotype ", phenotypeId, " in database '", databaseReference$databaseName, "'")
   }
+  if (keeperReference$phenotype != phenotypeName) {
+    warning(sprintf("Reference cohort %d was created for phenotype '%s', which is a different name than '%s'",
+                    keeperReference$phenotype,
+                    phenotypeName))
+  }
+
   return(keeperReference$cohortDefinitionId)
 }

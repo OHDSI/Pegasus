@@ -229,7 +229,7 @@ uploadPhenotypeMetaData <- function(phenotypeMetaData,
     "requiresActiveTreatmentWithin30d",
     "expectsConditionSpecificFollowupOrSequelae1yr",
     # "confidence",
-    "phenotypeName"
+    "phenotypeId"
   ), add = errorMessages)
   checkmate::assertClass(pegasusConnection, "DatabaseConnectorConnection", null.ok = TRUE, add = errorMessages)
   checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", null.ok = TRUE, add = errorMessages)
@@ -243,10 +243,22 @@ uploadPhenotypeMetaData <- function(phenotypeMetaData,
     on.exit(DatabaseConnector::disconnect(pegasusConnection))
   }
 
-  phenotypeMetaData <- addPhenotypeIdIfMissing(phenotypeMetaData,
-                                               pegasusConnection = pegasusConnection,
-                                               pegasusDatabaseSchema = pegasusDatabaseSchema)
-
+  sql <- "
+    SELECT phenotype_id
+    FROM @database_schema.phenotype_meta_data;
+  "
+  existingData <- DatabaseConnector::renderTranslateQuerySql(
+    connection = pegasusConnection,
+    sql = sql,
+    database_schema = pegasusDatabaseSchema,
+    snakeCaseToCamelCase = TRUE
+  )
+  overlap <- phenotypeMetaData |>
+    inner_join(existingData, by = join_by("phenotypeId"))
+  if (nrow(overlap) > 0) {
+    stop(sprintf("Found %d existing records overlapping with new data in the phenotype_meta_data table.",
+                 nrow(overlap)))
+  }
   dataToUpload <- phenotypeMetaData |>
     select(
       "phenotypeId",
@@ -266,22 +278,6 @@ uploadPhenotypeMetaData <- function(phenotypeMetaData,
       "expectsConditionSpecificFollowupOrSequelae1yr",
       # "confidence"
     )
-  sql <- "
-    SELECT phenotype_id
-    FROM @database_schema.phenotype_meta_data;
-  "
-  existingData <- DatabaseConnector::renderTranslateQuerySql(
-    connection = pegasusConnection,
-    sql = sql,
-    database_schema = pegasusDatabaseSchema,
-    snakeCaseToCamelCase = TRUE
-  )
-  overlap <- dataToUpload |>
-    inner_join(existingData, by = join_by("phenotypeId"))
-  if (nrow(overlap) > 0) {
-    stop(sprintf("Found %d existing records overlapping with new data in the phenotype_meta_data table.",
-                 nrow(overlap)))
-  }
   DatabaseConnector::insertTable(
     connection = pegasusConnection,
     databaseSchema = pegasusDatabaseSchema,
@@ -312,7 +308,7 @@ uploadDraftConceptSetTargets <- function(draftConceptSetTargets,
   errorMessages <- checkmate::makeAssertCollection()
   checkmate::assertDataFrame(draftConceptSetTargets, min.rows = 1, add = errorMessages)
   checkmate::assertNames(colnames(draftConceptSetTargets), must.include = c(
-    "phenotypeName",
+    "phenotypeId",
     "pertains",
     "category",
     "term",
@@ -336,16 +332,13 @@ uploadDraftConceptSetTargets <- function(draftConceptSetTargets,
   }
 
   sql <- "
-    SELECT phenotype.phenotype_id,
-      phenotype_name,
+    SELECT phenotype_id,
       pertains,
       category,
       term,
       concept_id,
       concept_name
-    FROM @database_schema.draft_concept_set_target
-    INNER JOIN @database_schema.phenotype
-      ON draft_concept_set_target.phenotype_id = phenotype.phenotype_id;
+    FROM @database_schema.draft_concept_set_target;
   "
   existingDraftConceptSetTargets <- DatabaseConnector::renderTranslateQuerySql(
     connection = pegasusConnection,
@@ -354,7 +347,7 @@ uploadDraftConceptSetTargets <- function(draftConceptSetTargets,
     snakeCaseToCamelCase = TRUE
   )
   overlap <- existingDraftConceptSetTargets |>
-    inner_join(draftConceptSetTargets, by = join_by("phenotypeName", "pertains", "category", "conceptId", "conceptName"))
+    inner_join(draftConceptSetTargets, by = join_by("phenotypeId", "pertains", "category", "conceptId", "conceptName"))
   if (nrow(overlap) > 0) {
     stop(sprintf("%s rows of data overlap with existing data in the draft_concept_set_target table. Aborting",
                  nrow(overlap)))
@@ -408,7 +401,7 @@ uploadConceptSets <- function(conceptSets,
   errorMessages <- checkmate::makeAssertCollection()
   checkmate::assertDataFrame(conceptSets, min.rows = 1, add = errorMessages)
   checkmate::assertNames(colnames(conceptSets), must.include = c(
-    "phenotypeName",
+    "phenotypeId",
     "pertains",
     "category",
     "conceptId",
@@ -433,13 +426,32 @@ uploadConceptSets <- function(conceptSets,
     on.exit(DatabaseConnector::disconnect(pegasusConnection))
   }
 
-  conceptSets <- addPhenotypeIdIfMissing(conceptSets,
-                                         pegasusConnection = pegasusConnection,
-                                         pegasusDatabaseSchema = pegasusDatabaseSchema)
-
-  # Upload new concept sets to concept_set table
   newConceptSets <- conceptSets |>
     filter(is.na(.data$conceptSetId))
+  message(sprintf("Skipping %d of %d concept sets that already have a concept set ID.",
+                   nrow(conceptSets) - nrow(newConceptSets),
+                   nrow(conceptSets)))
+
+  sql <- "
+    SELECT concept_set_name,
+      concept_id,
+      has_descendants,
+      clinical_definition,
+    FROM @database_schema.concept_set;
+  "
+  existingConceptSets <- DatabaseConnector::renderTranslateQuerySql(
+    connection = pegasusConnection,
+    sql = sql,
+    database_schema = pegasusDatabaseSchema,
+    snakeCaseToCamelCase = TRUE
+  )
+  overlap <- existingConceptSets |>
+    inner_join(newConceptSets, by = join_by("concept_set_name", "concept_id", "has_descendants", "clinical_definition"))
+  if (nrow(overlap) > 0) {
+    stop(sprintf("%s rows of data overlap with existing data in the concept_set table. Aborting",
+                 nrow(overlap)))
+  }
+
   sql <- "
     SELECT MAX(concept_set_id) AS last_id
     FROM @database_schema.concept_set;
@@ -487,11 +499,6 @@ uploadConceptSets <- function(conceptSets,
     filter(!is.na(.data$conceptSetId)) |>
     bind_rows(newConceptSets)
 
-  dataToUpload <- conceptSets |>
-    select("phenotypeId",
-           "pertains",
-           "category",
-           "conceptSetId")
   sql <- "
     SELECT *
     FROM @database_schema.phenotype_to_concept_set;
@@ -502,12 +509,17 @@ uploadConceptSets <- function(conceptSets,
     database_schema = pegasusDatabaseSchema,
     snakeCaseToCamelCase = TRUE
   )
-  overlap <- dataToUpload |>
+  overlap <- conceptSets |>
     inner_join(existingData, by = join_by("phenotypeId", "pertains", "category", "conceptSetId"))
   if (nrow(overlap) > 0) {
     stop(sprintf("Found %d existing records overlapping with new data in the phenotype_to_concept_set table.",
                  nrow(overlap)))
   }
+  dataToUpload <- conceptSets |>
+    select("phenotypeId",
+           "pertains",
+           "category",
+           "conceptSetId")
   DatabaseConnector::insertTable(
     connection = pegasusConnection,
     databaseSchema = pegasusDatabaseSchema,
@@ -766,18 +778,16 @@ uploadCohortDefinitions <- function(cohortDefinitions,
     database_schema = pegasusDatabaseSchema,
     snakeCaseToCamelCase = TRUE
   )
-  if (nrow(existingCohortDefinitions) == 0) {
-    lastId <- 0
-  } else {
-    lastId <- max(existingCohortDefinitions$cohortDefinitionId)
-  }
-
   overlap <- existingCohortDefinitions |>
     filter(.data$cohortDefinitionName %in% cohortDefinitions$cohortDefinitionName)
   if (nrow(overlap) > 0) {
     stop(sprintf("Overlapping cohort definition names found: '%s'", paste(overlap$cohortDefinitionName, collapse = "', '")))
   }
-
+  if (nrow(existingCohortDefinitions) == 0) {
+    lastId <- 0
+  } else {
+    lastId <- max(existingCohortDefinitions$cohortDefinitionId)
+  }
   dataToUpload <- addPhenotypeIdIfMissing(
     data = cohortDefinitions,
     pegasusConnection = pegasusConnection,

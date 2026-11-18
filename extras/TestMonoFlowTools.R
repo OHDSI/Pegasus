@@ -27,35 +27,38 @@ databaseReference <- createDatabaseReference(
   databaseName = "Optum Clinformatics",
   connectionDetails = connectionDetails,
   cdmDatabaseSchema = "optum_extended_dod.cdm_optum_extended_dod_v4155",
-  referenceCohortDatabaseSchema = "scratch.scratch_mschuemi",
-  referenceCohortTable  = "pegasus_reference_cohort_optum_extended_dod_v4155",
-  sensitiveCohortDatabaseSchema = "scratch.scratch_mschuemi",
-  sensitiveCohortTable = "pegasus_sensitive_cohort_optum_extended_dod_v4155",
-  candidateCohortDatabaseSchema = "scratch.scratch_all",
-  candidateCohortTable = "pegasus_cohort_optum_extended_dod_v4155",
+  referenceCohortDatabaseSchema = "pegasus.pegasus_optum_extended_dod_v4155",
+  referenceCohortTable  = "reference_cohort",
+  sensitiveCohortDatabaseSchema = "",
+  sensitiveCohortTable = "",
+  candidateCohortDatabaseSchema = "",
+  candidateCohortTable = "",
   workDatabaseSchema = "scratch.scratch_mschuemi",
   workCohortTable = "pegasus_agent_cohort_optum_extended_dod_v4155",
   workConceptSetTable = "pegasus_agent_concept_set_optum_extended_dod_v4155"
 )
 
 # phenotype <- "Acute myocardial infarction"
-phenotype = "Radiation Induced Lung Toxicity"
+phenotype <- tibble(
+  phenotypeId = 579,
+  phenotypeName = "Radiation Induced Lung Toxicity",
+  clinicalDefinition = ""
+)
 
 pegasusConnection <- DatabaseConnector::connect(pegasusConnectionDetails)
 
 source("R/MonoFlowAgentTools.R")
-context <- PegasusAgentContext$new(pegasusConnection = pegasusConnection,
+context <- PegasusAgentContext$new(phenotype = phenotype,
+                                   pegasusConnection = pegasusConnection,
                                    pegasusDatabaseSchema = pegasusDatabaseSchema,
                                    databaseReferences = list(databaseReference))
-listConceptSets(context, phenotype)
-getConceptSetsCapr(context, phenotype, conceptSetNames = c("Acute heart failure", "Acute pulmonary embolism"))
-getConceptSetsCapr(context, phenotype, conceptSetNames = c("Radiation Induced Lung Toxicity"), detail = "full_reference")
-
-getConceptSetsCapr(context, phenotype, conceptSetNames = c("Acute heart failure", "Acute pulmonary embolism"), detail = "code")
-getConceptSetsCapr(context, phenotype, conceptSetNames = c("Acute heart failure", "Acute pulmonary embolism"), detail = "full_reference")
+listConceptSets(context)
+getConceptSetsCapr(context, conceptSetNames = c("Spirometry", "Acute pulmonary embolism"), detail = "code")
+getConceptSetsCapr(context, conceptSetNames = c("Spirometry", "Acute pulmonary embolism"))
+getConceptSetsCapr(context, conceptSetNames = c("Radiation Induced Lung Toxicity"), detail = "full_reference")
 caprCohort <- "cohort(entry = entry(conditionOccurrence(cs(descendants(764873, 442310, exclude(36716182)), name = \"Acute heart failure\")), primaryCriteriaLimit = \"First\"), exit  = exit(endStrategy = observationExit()))"
 caprConceptSet <- "cs(descendants(764873, 442310, exclude(36716182)), name = \"Acute heart failure\")"
-caprMeasurementConceptSet <- "cs(descendants(4208414, exclude(36315486, 36315484, 36315487, 1552093, 1552133, 1988606, 3000965, 3034254, 3035320, 3044417, 36315485, 40762274)), name = \"C-reactive protein measurement\")"
+caprMeasurementConceptSet <- "cs(4133840, descendants(759713, 2106190, 2314005, 2314007, 43533300, 43533319, 2106191, 2106212, 2314004, 2314006, 2314008, 2314009, 40756916), name = \"Spirometry\")"
 
 validateCapr(context, caprCohort)
 convertCaprToJson(context, caprCohort)
@@ -67,12 +70,10 @@ countConceptSetPersonOverlap(context = context,
 describeMeasurementValues(context = context,
                           caprCode = caprMeasurementConceptSet)
 evaluateCohort(context = context,
-               cohortId = 1,
-               phenotype = phenotype)
+               cohortId = 579)
 samplePatientProfile(context = context,
                      cohortId = 1,
-                     phenotype = phenotype,
-                     type = "FP")
+                     type = "FN")
 
 context$close()
 

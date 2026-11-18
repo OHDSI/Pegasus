@@ -47,6 +47,7 @@ createConceptSetCounts <- function(conceptSets = NULL,
   checkmate::assertDataFrame(phenotypes, min.rows = 1, null.ok = TRUE, add = errorMessages)
   if (!is.null(phenotypes)) {
     checkmate::assertNames(colnames(phenotypes), must.include = c(
+      "phenotypeId",
       "phenotypeName"
     ), add = errorMessages)
   }

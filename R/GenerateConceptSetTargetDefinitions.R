@@ -54,7 +54,7 @@ generateOrReuseConceptSetTargetDefinitions <- function(
   errorMessages <- checkmate::makeAssertCollection()
   checkmate::assertDataFrame(conceptSetTargets, min.rows = 1, add = errorMessages)
   checkmate::assertNames(colnames(conceptSetTargets), must.include = c(
-    "phenotypeName",
+    "phenotypeId",
     "pertains",
     "category",
     "term",
@@ -67,6 +67,7 @@ generateOrReuseConceptSetTargetDefinitions <- function(
   ), add = errorMessages)
   checkmate::assertDataFrame(phenotypes, min.rows = 1, add = errorMessages)
   checkmate::assertNames(colnames(phenotypes), must.include = c(
+    "phenotypeId",
     "phenotypeName",
     "clinicalDefinition"
   ), add = errorMessages)
@@ -88,7 +89,19 @@ generateOrReuseConceptSetTargetDefinitions <- function(
   }
   dedupedTargets <- conceptSetTargets |>
     filter(match != "None") |>
-    slice_head(n = 1, by = c("phenotypeName",
+    select("phenotypeId",
+           "pertains",
+           "category",
+           "conceptId",
+           "conceptName",
+           "domainId",
+           "conceptClassId",
+           "vocabularyId") |>
+    inner_join(phenotypes |>
+                 select("phenotypeId",
+                        "phenotypeName"),
+               by = join_by("phenotypeId")) |>
+    slice_head(n = 1, by = c("phenotypeId",
                              "pertains",
                              "category",
                              "conceptId",
@@ -97,16 +110,16 @@ generateOrReuseConceptSetTargetDefinitions <- function(
   # Disease of interest
   diseaseOfInterestTargets <- phenotypes |>
     transmute(
-    phenotypeName = .data$phenotypeName,
-    pertains = "Disease of interest",
-    category = "Disease of interest",
-    concpetId = NA_real_,
-    conceptName = NA_character_,
-    conceptSetId = NA_real_,
-    conceptSetName = .data$phenotypeName,
-    clinicalDefinition = .data$clinicalDefinition,
-    sourceType = FROM_HUMAN_DEFINITION
-  )
+      phenotypeId = .data$phenotypeId,
+      pertains = "Disease of interest",
+      category = "Disease of interest",
+      concpetId = NA_real_,
+      conceptName = NA_character_,
+      conceptSetId = NA_real_,
+      conceptSetName = .data$phenotypeName,
+      clinicalDefinition = .data$clinicalDefinition,
+      sourceType = FROM_HUMAN_DEFINITION
+    )
 
   # Hypernyms
   hypernymTargets <- dedupedTargets |>
@@ -145,7 +158,7 @@ generateOrReuseConceptSetTargetDefinitions <- function(
     filter(.data$category != "Hypernym", .data$domainId !="Drug")
   uniqueTargets <- targets |>
     group_by(.data$conceptId, .data$conceptName) |>
-    summarise(nPhenotypes = length(unique(.data$phenotypeName)), .groups = "drop")
+    summarise(nPhenotypes = length(unique(.data$phenotypeId)), .groups = "drop")
   existingDefinitionData <- downloadExistingDefinitionData(
     pegasusConnection = pegasusConnection,
     pegasusDatabaseSchema = pegasusDatabaseSchema,
@@ -177,7 +190,7 @@ generateOrReuseConceptSetTargetDefinitions <- function(
 
   # Low frequency targets
   nTotalPhenotypes <- targets |>
-    distinct(.data$phenotypeName) |>
+    distinct(.data$phenotypeId) |>
     count() |>
     pull()
   lowFrequencyTargets <- uniqueTargets |>
@@ -215,7 +228,7 @@ generateOrReuseConceptSetTargetDefinitions <- function(
     lowFrequencyTargets,
     aiDefinitionTargets
   ) |>
-    select("phenotypeName",
+    select("phenotypeId",
            "pertains",
            "category",
            "conceptId",
@@ -252,13 +265,13 @@ fetchOrGenerateDefinitions <- function(targets,
     row <- uniqueTargets[i, ]
     phenotypeTargetCategories <- targets |>
       filter(.data$conceptId == row$conceptId) |>
-      distinct(.data$phenotypeName, .data$conceptId, .data$conceptName, .data$pertains, .data$category) |>
+      distinct(.data$phenotypeId, .data$phenotypeName, .data$conceptId, .data$conceptName, .data$pertains, .data$category) |>
       mutate(context = trimws(sprintf("%s of %s%s",
-                               .data$category,
-                               if_else(.data$pertains == "Alternative diagnoses",
-                                       "alternative diagnoses of ",
-                                       ""),
-                               .data$phenotypeName),
+                                      .data$category,
+                                      if_else(.data$pertains == "Alternative diagnoses",
+                                              "alternative diagnoses of ",
+                                              ""),
+                                      .data$phenotypeName),
                               whitespace = "[ \t\r\n\u00A0]"))
     nContextTarget <- nContextTarget + nrow(phenotypeTargetCategories)
 
@@ -324,7 +337,7 @@ fetchOrGenerateDefinitionsSingleTarget <- function(phenotypeTargetCategories,
       costTracker = costTracker
     )
     phenotypeTargetCategories <- phenotypeTargetCategories |>
-      anti_join(matchedDefinitions, by = join_by("phenotypeName", "pertains", "category", "context"))
+      anti_join(matchedDefinitions, by = join_by("phenotypeId", "pertains", "category", "context"))
   } else {
     matchedDefinitions <- NULL
   }
