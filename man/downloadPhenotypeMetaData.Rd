@@ -5,14 +5,14 @@
 \title{Download phenotype meta data from the server}
 \usage{
 downloadPhenotypeMetaData(
-  phenotypes,
+  phenotypeIds = NULL,
   pegasusConnection = NULL,
   pegasusConnectionDetails = NULL,
   pegasusDatabaseSchema
 )
 }
 \arguments{
-\item{phenotypes}{A tibble with two columns: \code{phenotypeName}, and \code{clinicalDefinition}.}
+\item{phenotypeIds}{(Optional) A list of phenotype IDs for which to retrieve data.}
 
 \item{pegasusConnection}{A connection object created using \code{DatabaseConnector::connect()} for connecting to
 the database holding the Pegasus data model. Can be null if

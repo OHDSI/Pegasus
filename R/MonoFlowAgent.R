@@ -74,9 +74,28 @@ generateCohortDefinitionsUsingMonoFlowAgent <- function(phenotypes,
     on.exit(DatabaseConnector::disconnect(pegasusConnection))
   }
 
-  phenotypes <- addPhenotypeIdIfMissing(phenotypes,
-                                        pegasusConnection,
-                                        pegasusDatabaseSchema)
+  sql <- "
+    SELECT phenotype_id
+    FROM @database_schema.cohort_definition
+    WHERE cd_source_type = 'MonoFlow'
+      AND phenotype_id IN (@phenotype_ids);
+  "
+  existingPhenotypeIds <- DatabaseConnector::renderTranslateQuerySql(
+    connection = pegasusConnection,
+    sql = sql,
+    database_schema = pegasusDatabaseSchema,
+    phenotype_ids = phenotypes$phenotypeId
+  )
+  if (length(existingPhenotypeIds) > 0) {
+    message(sprintf("- Skipping %d of %d phenotypes that already have MonoFlow cohort definitions.",
+                    length(existingPhenotypeIds),
+                    nrow(phenotypes)))
+    phenotypes <- phenotypes |>
+      filter(!.data$phenotypeId %in% existingPhenotypeIds)
+    if (nrow(phenotypes) == 0) {
+      return(tibble())
+    }
+  }
 
   checkRequirementsMet(phenotypes = phenotypes,
                        llmClient = llmClient,
@@ -216,7 +235,7 @@ checkRequirementsMet <- function(phenotypes,
                                  databaseReferences) {
 
   message("- Checking if phenotypes have concepts sets")
-  phenotypeToConceptSets <- downloadPhenotypeToConceptSets(phenotypes = phenotypes,
+  phenotypeToConceptSets <- downloadPhenotypeToConceptSets(phenotypeIds = phenotypes$phenotypeId,
                                                            pegasusConnection = pegasusConnection,
                                                            pegasusDatabaseSchema = pegasusDatabaseSchema)
   phenotypeNames <- unique(phenotypeToConceptSets$phenotypeName)

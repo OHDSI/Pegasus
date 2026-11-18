@@ -30,13 +30,12 @@
 #' A tibble with one row per generated concept set. Targets that already have an existing concept set are omitted.
 #'
 #' @export
-generateConceptSets  <- function(
-    conceptSetTargetDefinitions,
-    llmClient,
-    costTracker = createCostTracker(),
-    databaseReference = databaseReference,
-    maxCores = 4,
-    cacheFolder = NULL) {
+generateConceptSets  <- function(conceptSetTargetDefinitions,
+                                 llmClient,
+                                 costTracker = createCostTracker(),
+                                 databaseReference = databaseReference,
+                                 maxCores = 4,
+                                 cacheFolder = NULL) {
   errorMessages <- checkmate::makeAssertCollection()
   checkmate::assertDataFrame(conceptSetTargetDefinitions, min.rows = 1, add = errorMessages)
   checkmate::assertNames(colnames(conceptSetTargetDefinitions), must.include = c(

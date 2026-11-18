@@ -56,12 +56,15 @@ createKeeperReferenceCohorts <- function(phenotypes,
   dir.create(workFolder, recursive = TRUE, showWarnings = FALSE)
   ParallelLogger::addDefaultFileLogger(file.path(workFolder, "log.txt"), name = "KEEPER_LOGGER")
 
+  phenotypeDatabases <- lapply(databaseReferences, removeFinishedKeeperReferenceCohortJobs, phenotypes = phenotypes)
+  phenotypeDatabases <- bind_rows(phenotypeDatabases)
 
-  phenotypesWithFolders <- phenotypes |>
+  remainingPhenotypes <- phenotypeDatabases |>
+    distinct(.data$phenotypeId, .data$phenotypeName, .data$clinicalDefinition) |>
     mutate(phenotypeFolder =  file.path(workFolder, sprintf("Phenotype_%d", .data$phenotypeId)))
-  for (i in seq_len(nrow(phenotypesWithFolders))) {
+  for (i in seq_len(nrow(remainingPhenotypes))) {
     createKeeperConceptSets(
-      phenotype = phenotypesWithFolders[i, ],
+      phenotype = remainingPhenotypes[i, ],
       llmClient = llmClient,
       costTracker = costTracker,
       databaseReference = databaseReferences[[1]]
@@ -70,11 +73,17 @@ createKeeperReferenceCohorts <- function(phenotypes,
 
   status <- list()
   for (i in seq_along(databaseReferences)) {
+    databaseReference <- databaseReferences[[i]]
+    phenotypesInDatabase <- phenotypeDatabases |>
+      filter(.data$databaseId == databaseReference$databaseId)
+    if (nrow(phenotypesInDatabase) == 0) {
+      next
+    }
     status[[i]] <- createKeeperReferenceCohortsForDatabase(
-      phenotypesWithFolders = phenotypesWithFolders,
+      phenotypes = phenotypesInDatabase,
       llmClient = llmClient,
       costTracker = costTracker,
-      databaseReference = databaseReferences[[i]],
+      databaseReference = databaseReference,
       maxCores = maxCores,
       uploadKeeperProfiles = uploadKeeperProfiles,
       workFolder = workFolder
@@ -92,7 +101,44 @@ createKeeperReferenceCohorts <- function(phenotypes,
   return(status)
 }
 
-createKeeperReferenceCohortsForDatabase <- function(phenotypesWithFolders,
+removeFinishedKeeperReferenceCohortJobs <- function(databaseReference,
+                                                    phenotypes) {
+  connection <- DatabaseConnector::connect(databaseReference$connectionDetails)
+  on.exit(DatabaseConnector::disconnect(connection))
+
+  referenceCohortTableNames <- Keeper::createReferenceCohortTableNames(databaseReference$referenceCohortTable)
+  referenceCohortTableExists <- DatabaseConnector::existsTable(
+    connection = connection,
+    databaseSchema = databaseReference$referenceCohortDatabaseSchema,
+    tableName = referenceCohortTableNames$referenceCohortMetadataTable
+  )
+  if (referenceCohortTableExists) {
+    existingCohorts <- Keeper::listReferenceCohorts(
+      connection = connection,
+      referenceCohortDatabaseSchema = databaseReference$referenceCohortDatabaseSchema,
+      referenceCohortMetadataTable = referenceCohortTableNames$referenceCohortMetadataTable
+    )
+    overlap <- intersect(phenotypes$phenotypeId, existingCohorts$cohortDefinitionId)
+    if (length(overlap) > 0) {
+      message(sprintf("- Phenotypes %s already have reference cohorts in database %s. Skipping",
+                      paste(overlap, collapse =  ", "),
+                      databaseReference$databaseName))
+      phenotypes <- phenotypes |>
+        filter(!as.character(.data$phenotypeId) %in% existingCohorts$phenotype)
+    }
+  } else {
+    Keeper::createReferenceCohortTables(
+      connection = connection,
+      referenceCohortDatabaseSchema = databaseReference$referenceCohortDatabaseSchema,
+      referenceCohortTableNames = referenceCohortTableNames
+    )
+  }
+  phenotypesWithDatabase <- phenotypes |>
+    mutate(databaseId = databaseReference$databaseId)
+  return(phenotypesWithDatabase)
+}
+
+createKeeperReferenceCohortsForDatabase <- function(phenotypes,
                                                     llmClient,
                                                     costTracker,
                                                     databaseReference,
@@ -104,39 +150,6 @@ createKeeperReferenceCohortsForDatabase <- function(phenotypesWithFolders,
 
   connection <- DatabaseConnector::connect(databaseReference$connectionDetails)
   on.exit(DatabaseConnector::disconnect(connection))
-
-  referenceCohortTableNames <- Keeper::createReferenceCohortTableNames(databaseReference$referenceCohortTable)
-  referenceCohortTableExists <- DatabaseConnector::existsTable(
-    connection = connection,
-    databaseSchema = databaseReference$referenceCohortDatabaseSchema,
-    tableName = referenceCohortTableNames$referenceCohortMetadataTable
-  )
-  remainingPhenotypes <- phenotypesWithFolders
-  if (referenceCohortTableExists) {
-    existingCohorts <- Keeper::listReferenceCohorts(
-      connection = connection,
-      referenceCohortDatabaseSchema = databaseReference$referenceCohortDatabaseSchema,
-      referenceCohortMetadataTable = referenceCohortTableNames$referenceCohortMetadataTable
-    )
-      overlap <- intersect(phenotypesWithFolders$phenotypeId, existingCohorts$cohortDefinitionId)
-      if (length(overlap) > 0) {
-        message(sprintf("- Phenotypes %s already have reference cohorts in database %s. Skipping",
-                     paste(overlap, collapse =  ", "),
-                     databaseReference$databaseName))
-        remainingPhenotypes <- phenotypesWithFolders |>
-          filter(!as.character(.data$phenotypeId) %in% existingCohorts$phenotype)
-        if (nrow(remainingPhenotypes) == 0) {
-          return(NULL)
-        }
-    }
-  } else {
-    Keeper::createReferenceCohortTables(
-      connection = connection,
-      referenceCohortDatabaseSchema = databaseReference$referenceCohortDatabaseSchema,
-      referenceCohortTableNames = referenceCohortTableNames
-    )
-    existingCohorts <- tibble()
-  }
 
   sensitiveCohortTableExists <- DatabaseConnector::existsTable(
     connection = connection,
@@ -151,9 +164,9 @@ createKeeperReferenceCohortsForDatabase <- function(phenotypesWithFolders,
     )
   }
 
-  cluster <- ParallelLogger::makeCluster(min(maxCores, nrow(remainingPhenotypes)))
+  cluster <- ParallelLogger::makeCluster(min(maxCores, nrow(phenotypes)))
   ParallelLogger::clusterRequire(cluster, "dplyr")
-  rows <- split(remainingPhenotypes, remainingPhenotypes$phenotypeId)
+  rows <- split(phenotypes, phenotypes$phenotypeId)
   cost <- ParallelLogger::clusterApply(
     cluster = cluster,
     x = rows,
@@ -166,7 +179,7 @@ createKeeperReferenceCohortsForDatabase <- function(phenotypesWithFolders,
   costTracker$amount <- costTracker$amount + sum(unlist(cost))
 
   status <- uploadReferenceCohortsAndProfiles(
-    phenotypes = remainingPhenotypes,
+    phenotypes = phenotypes,
     connection = connection,
     databaseReference = databaseReference,
     uploadKeeperProfiles = uploadKeeperProfiles
@@ -217,8 +230,8 @@ uploadReferenceCohortsAndProfiles <- function(phenotypes,
   for (i in seq_len(nrow(phenotypes))) {
     row <- phenotypes[i, ]
     message(sprintf("- Uploading reference cohort and profiles for '%s' (%d).",
-            row$phenotypeName,
-            row$phenotypeId))
+                    row$phenotypeName,
+                    row$phenotypeId))
     databaseForFileName <- gsub("[^[:alnum:]]+", "", databaseReference$databaseName)
 
     fileName <- file.path(row$phenotypeFolder, sprintf("llmReviews_%s.rds", databaseForFileName))
@@ -465,7 +478,7 @@ evaluateUsingKeeperReferenceCohorts <- function(phenotypes,
   }
 
   cohortDefinitions <- downloadCohortDefinition(
-    phenotypes = phenotypes,
+    phenotypeIds = phenotypes$phenotypeId,
     pegasusConnection = pegasusConnection,
     pegasusDatabaseSchema = pegasusDatabaseSchema
   ) |>

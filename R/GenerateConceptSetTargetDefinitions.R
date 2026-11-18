@@ -40,17 +40,16 @@
 #' A tibble with concept set IDs, definitions, and source types.
 #'
 #' @export
-generateOrReuseConceptSetTargetDefinitions <- function(
-    conceptSetTargets,
-    phenotypes,
-    minPhenotypeFraction = 0.02,
-    llmClient,
-    costTracker = createCostTracker(),
-    pegasusConnection = NULL,
-    pegasusConnectionDetails = NULL,
-    pegasusDatabaseSchema = NULL,
-    tempEmulationSchema = getOption("sqlRenderTempEmulationSchema"),
-    cacheFolder = NULL) {
+generateOrReuseConceptSetTargetDefinitions <- function(conceptSetTargets,
+                                                       phenotypes,
+                                                       minPhenotypeFraction = 0.02,
+                                                       llmClient,
+                                                       costTracker = createCostTracker(),
+                                                       pegasusConnection = NULL,
+                                                       pegasusConnectionDetails = NULL,
+                                                       pegasusDatabaseSchema = NULL,
+                                                       tempEmulationSchema = getOption("sqlRenderTempEmulationSchema"),
+                                                       cacheFolder = NULL) {
   errorMessages <- checkmate::makeAssertCollection()
   checkmate::assertDataFrame(conceptSetTargets, min.rows = 1, add = errorMessages)
   checkmate::assertNames(colnames(conceptSetTargets), must.include = c(

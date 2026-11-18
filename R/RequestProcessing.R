@@ -37,16 +37,16 @@ createPegasusConfig <- function(pegasusConnectionDetails,
                                 databaseReferences,
                                 llmClient,
                                 llmClientFrontier = llmClient,
-                                baseUrl,
+                                baseUrl = NULL,
                                 rootWorkFolder,
                                 maxCores = 4) {
   errorMessages <- checkmate::makeAssertCollection()
-  checkmate::assertR6(llmClient, "Chat", add = errorMessages)
+  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", add = errorMessages)
   checkmate::assertCharacter(pegasusDatabaseSchema, len = 1, add = errorMessages)
   checkmate::assertList(databaseReferences, types = c("DatabaseReference"), min.len = 1, add = errorMessages)
+  checkmate::assertR6(llmClient, "Chat", add = errorMessages)
   checkmate::assertR6(llmClientFrontier, "Chat", add = errorMessages)
-  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", null.ok = TRUE, add = errorMessages)
-  checkmate::assertCharacter(baseUrl, len = 1, add = errorMessages)
+  checkmate::assertCharacter(baseUrl, len = 1, null.ok = TRUE, add = errorMessages)
   checkmate::assertCharacter(rootWorkFolder, len = 1, add = errorMessages)
   checkmate::assertInt(maxCores, lower = 1, add = errorMessages)
   checkmate::reportAssertions(collection = errorMessages)
@@ -72,7 +72,20 @@ ensureDatabases <- function(pegasusConfig) {
   checkmate::assertClass(pegasusConfig, "PegasusConfig", add = errorMessages)
   checkmate::reportAssertions(collection = errorMessages)
 
-  #TODO: implement
+  pegasusConnection <- DatabaseConnector::connect(pegasusConfig$pegasusConnectionDetails)
+  on.exit(DatabaseConnector::disconnect(pegasusConnection))
+
+  newDatabases <- getDatabaseMetaData(databaseReferences = pegasusConfig$databaseReferences,
+                                      pegasusConnection = pegasusConnection,
+                                      pegasusDatabaseSchema = pegasusConfig$pegasusDatabaseSchema)
+  if (nrow(newDatabases) > 0) {
+    uploadDatabaseMetaData(
+      databaseMetaData = newDatabases,
+      pegasusConnection = pegasusConnection,
+      pegasusDatabaseSchema = pegasusConfig$pegasusDatabaseSchema
+    )
+  }
+  invisible(NULL)
 }
 
 TEMPLATES <- "templates"
@@ -105,7 +118,7 @@ processRequest <- function(phenotypeId,
                            pegasusConfig) {
   errorMessages <- checkmate::makeAssertCollection()
   checkmate::assertInt(phenotypeId, add = errorMessages)
-  checkmate::assertIntegerish(databaseIds, min.len = 1, add = errorMessages)
+  checkmate::assertIntegerish(databaseIds, min.len = 1, unique = TRUE, add = errorMessages)
   checkmate::assertCharacter(cohortCreationApproaches, add = errorMessages)
   checkmate::assertSubset(cohortCreationApproaches, choices = c(TEMPLATES, MONO_FLOW), add = errorMessages)
   checkmate::assertClass(pegasusConfig, "PegasusConfig", add = errorMessages)
@@ -114,151 +127,177 @@ processRequest <- function(phenotypeId,
   startTime <- Sys.time()
   costTracker <- createCostTracker()
 
-  ParallelLogger::addDefaultFileLogger(file.path(rootWorkFolder, "log.txt"), name = "PROCESS_REQUEST_LOG")
+  ParallelLogger::addDefaultFileLogger(file.path(pegasusConfig$rootWorkFolder, "log.txt"), name = "PROCESS_REQUEST_LOG")
   on.exit(ParallelLogger::unregisterLogger("PROCESS_REQUEST_LOG"))
 
-  dir.create(rootWorkFolder, recursive = TRUE, showWarnings = FALSE)
+  pegasusConnection <- DatabaseConnector::connect(pegasusConfig$pegasusConnectionDetails)
+  on.exit(DatabaseConnector::disconnect(pegasusConnection))
 
-  #TODO: implement
+  dir.create(pegasusConfig$rootWorkFolder, recursive = TRUE, showWarnings = FALSE)
 
-  # # Phenotype meta data ------------------------------------------------------------------------------------------------
-  # phenotypeMetaData <- generatePhenotypeMetaData(phenotypes = phenotypes,
-  #                                                llmClient = llmClient,
-  #                                                costTracker = costTracker)
-  #
-  # uploadPhenotypeMetaData(phenotypeMetaData = phenotypeMetaData,
-  #                         pegasusConnectionDetails = pegasusConnectionDetails,
-  #                         pegasusDatabaseSchema = pegasusDatabaseSchema)
-  #
-  #
-  # # Create concept sets ------------------------------------------------------------------------------------------------
-  # conceptSetTargets <- generateConceptSetTargets(
-  #   phenotypes = phenotypes,
-  #   databaseReference = databaseReferences[[1]],
-  #   llmClient = llmClient,
-  #   costTracker = costTracker,
-  #   cacheFolder =  file.path(rootWorkFolder, "cacheTargets")
-  # )
-  # readr::write_csv(conceptSetTargets, file.path(rootWorkFolder, "conceptSetTargets.csv"))
-  #
-  # uploadDraftConceptSetTargets(draftConceptSetTargets = conceptSetTargets,
-  #                              pegasusConnectionDetails = pegasusConnectionDetails,
-  #                              pegasusDatabaseSchema = pegasusDatabaseSchema)
-  #
-  #
-  # # Create concept set target definitions ------------------------------------------------------------------------------
-  # conceptSetTargetDefinitions <- generateOrReuseConceptSetTargetDefinitions(
-  #   conceptSetTargets = conceptSetTargets,
-  #   phenotypes = phenotypes,
-  #   llmClient = llmClient,
-  #   costTracker = costTracker,
-  #   pegasusConnectionDetails = pegasusConnectionDetails,
-  #   pegasusDatabaseSchema = pegasusDatabaseSchema,
-  #   cacheFolder = file.path(rootWorkFolder, "cacheTargetDefinitions")
-  # )
-  # readr::write_csv(conceptSetTargetDefinitions, file.path(rootWorkFolder, "conceptSetTargetDefinitions.csv"))
-  #
-  #
-  # # Create concept sets ------------------------------------------------------------------------------------------------
-  # conceptSets <- generateConceptSets(
-  #   conceptSetTargetDefinitions = conceptSetTargetDefinitions,
-  #   llmClient = llmClient,
-  #   costTracker = costTracker,
-  #   databaseReference = databaseReferences[[1]],
-  #   cacheFolder = file.path(rootWorkFolder, "cacheConceptSets")
-  # )
-  # saveRDS(conceptSets, file.path(rootWorkFolder, "conceptSets.rds"))
-  #
-  # uploadConceptSets(conceptSets = conceptSets,
-  #                   pegasusConnectionDetails = pegasusConnectionDetails,
-  #                   pegasusDatabaseSchema = pegasusDatabaseSchema)
-  #
-  #
-  # # Count persons with concept sets ------------------------------------------------------------------------------------
-  # conceptSetPersonCounts <- createConceptSetCounts(
-  #   pegasusConnectionDetails = pegasusConnectionDetails,
-  #   pegasusDatabaseSchema = pegasusDatabaseSchema,
-  #   databaseReferences = databaseReferences,
-  #   maxCores = 4,
-  #   cacheFolder = file.path(rootWorkFolder, "cacheConceptSetPersonCounts")
-  # )
-  # uploadConceptSetPersonCounts(conceptSetPersonCounts = conceptSetPersonCounts,
-  #                              pegasusConnectionDetails = pegasusConnectionDetails,
-  #                              pegasusDatabaseSchema = pegasusDatabaseSchema)
-  #
-  #
-  # # Create Keeper reference cohorts ------------------------------------------------------------------------------------
-  # status <- createKeeperReferenceCohorts(
-  #   phenotypes = phenotypes,
-  #   llmClient = llmClient,
-  #   costTracker = costTracker,
-  #   databaseReferences = databaseReferences,
-  #   workFolder = file.path(rootWorkFolder, "cacheKeeperReference")
-  # )
-  #
-  #
-  # # Create cohort definitions using MonoFlow ---------------------------------------------------------------------------
-  # cohortDefinitions <- generateCohortDefinitionsUsingMonoFlowAgent(
-  #   phenotypes = phenotypes,
-  #   llmClient = llmClientFrontier,
-  #   costTracker = costTracker,
-  #   pegasusConnectionDetails = pegasusConnectionDetails,
-  #   pegasusDatabaseSchema = pegasusDatabaseSchema,
-  #   databaseReferences = databaseReferences,
-  #   workFolder = file.path(rootWorkFolder, "cacheMonoFlow")
-  # )
-  #
-  # cohortDefinitionsWithAtlasIds <- insertCohortDefinitionsInAtlas(
-  #   cohortDefinitions = cohortDefinitions,
-  #   baseUrl = baseUrl
-  # )
-  #
-  # uploadCohortDefinitions(
-  #   cohortDefinitions = cohortDefinitionsWithAtlasIds,
-  #   pegasusConnectionDetails = pegasusConnectionDetails,
-  #   pegasusDatabaseSchema = pegasusDatabaseSchema
-  # )
-  #
-  #
-  # # Create cohort definitions using templates --------------------------------------------------------------------------
-  # cohortDefinitions <- generateCohortDefinitionssUsingTemplates(
-  #   phenotypes = phenotypes,
-  #   pegasusConnectionDetails = pegasusConnectionDetails,
-  #   pegasusDatabaseSchema = pegasusDatabaseSchema,
-  #   databaseReference = databaseReferences[[1]],
-  #   workFolder = file.path(rootWorkFolder, "cacheTemplates")
-  # )
-  #
-  # uploadCohortDefinitions(
-  #   cohortDefinitions = cohortDefinitions,
-  #   pegasusConnectionDetails = pegasusConnectionDetails,
-  #   pegasusDatabaseSchema = pegasusDatabaseSchema
-  # )
-  #
-  #
-  # # Evaluate cohort definitions ----------------------------------------------------------------------------------------
-  # cohortDefinitionsEvaluations <-evaluateUsingKeeperReferenceCohorts(
-  #   phenotypes = phenotypes,
-  #   pegasusConnectionDetails = pegasusConnectionDetails,
-  #   pegasusDatabaseSchema = pegasusDatabaseSchema,
-  #   databaseReferences = databaseReferences
-  # )
-  #
-  #
-  # # Flip draft and valid flags -----------------------------------------------------------------------------------------
-  # updatePhenotypes(
-  #   phenotypes = phenotypes,
-  #   draft = 0,
-  #   valid = 1,
-  #   pegasusConnectionDetails = pegasusConnectionDetails,
-  #   pegasusDatabaseSchema = pegasusDatabaseSchema,
-  # )
-  #
-  #
-  # delta <- Sys.time() - startTime
-  # message(sprintf("Creating cohort defintions and evaluations took %0.2f %s and cost $%0.2f.",
-  #                 delta,
-  #                 attr(delta, "units"),
-  #                 costTracker$amount - startCost))
+  # Filter database references -----------------------------------------------------------------------------------------
+  databaseReferences <- pegasusConfig$databaseReferences[sapply(pegasusConfig$databaseReferences,
+                                                                function(x) x$databaseId %in% databaseIds)]
+  if (length(databaseReferences) < length(databaseIds)) {
+    foundDatabaseIds <- sapply(databaseReferences, function(x) x$databaseId)
+    missingDatabaseIds <- databaseIds[!databaseIds %in% foundDatabaseIds]
+    stop("Could not find databases with IDs ", paste(missingDatabaseIds, collapse = ", "))
+  }
+
+  # Get phenotype ------------------------------------------------------------------------------------------------------
+  phenotypes <- downloadPhenotypes(phenotypeIds = phenotypeId,
+                                   pegasusConnection = pegasusConnection,
+                                   pegasusDatabaseSchema = pegasusConfig$pegasusDatabaseSchema)
+  if (nrow(phenotypes) == 0) {
+    stop(sprintf("No phenotype with ID %s found", phenotypeId))
+  }
+
+  # Create phenotype meta data -----------------------------------------------------------------------------------------
+  phenotypeMetaData <- generatePhenotypeMetaData(phenotypes = phenotypes,
+                                                 llmClient = pegasusConfig$llmClient,
+                                                 costTracker = costTracker,
+                                                 pegasusConnection = pegasusConnection,
+                                                 pegasusDatabaseSchema = pegasusConfig$pegasusDatabaseSchema)
+  if (nrow(phenotypeMetaData) > 0) {
+    uploadPhenotypeMetaData(phenotypeMetaData = phenotypeMetaData,
+                            pegasusConnection = pegasusConnection,
+                            pegasusDatabaseSchema = pegasusConfig$pegasusDatabaseSchema)
+  }
+
+  # Create concept sets ------------------------------------------------------------------------------------------------
+  conceptSetTargets <- generateConceptSetTargets(
+    phenotypes = phenotypes,
+    databaseReference = databaseReferences[[1]],
+    llmClient = pegasusConfig$llmClient,
+    costTracker = costTracker,
+    cacheFolder =  file.path(pegasusConfig$rootWorkFolder, "cacheTargets"),
+    pegasusConnection = pegasusConnection,
+    pegasusDatabaseSchema = pegasusConfig$pegasusDatabaseSchema
+  )
+
+  if (nrow(conceptSetTargets) > 0) {
+    # Create concept set target definitions ------------------------------------------------------------------------------
+    conceptSetTargetDefinitions <- generateOrReuseConceptSetTargetDefinitions(
+      conceptSetTargets = conceptSetTargets,
+      phenotypes = phenotypes,
+      llmClient = pegasusConfig$llmClient,
+      costTracker = costTracker,
+      pegasusConnection = pegasusConnection,
+      pegasusDatabaseSchema = pegasusConfig$pegasusDatabaseSchema,
+      cacheFolder = file.path(pegasusConfig$rootWorkFolder, "cacheTargetDefinitions")
+    )
+
+    # Create concept sets ------------------------------------------------------------------------------------------------
+    conceptSets <- generateConceptSets(
+      conceptSetTargetDefinitions = conceptSetTargetDefinitions,
+      llmClient = pegasusConfig$llmClient,
+      costTracker = costTracker,
+      databaseReference = databaseReferences[[1]],
+      maxCores = pegasusConfig$maxCores,
+      cacheFolder = file.path(pegasusConfig$rootWorkFolder, "cacheConceptSets")
+    )
+
+    uploadDraftConceptSetTargets(draftConceptSetTargets = conceptSetTargets,
+                                 pegasusConnection = pegasusConnection,
+                                 pegasusDatabaseSchema = pegasusConfig$pegasusDatabaseSchema)
+    uploadConceptSets(conceptSets = conceptSets,
+                      pegasusConnection = pegasusConnection,
+                      pegasusDatabaseSchema = pegasusConfig$pegasusDatabaseSchema)
+  }
+
+  # Count persons with concept sets ------------------------------------------------------------------------------------
+  conceptSetPersonCounts <- createConceptSetCounts(
+    pegasusConnection = pegasusConnection,
+    pegasusDatabaseSchema = pegasusConfig$pegasusDatabaseSchema,
+    databaseReferences = databaseReferences,
+    maxCores = pegasusConfig$maxCores,
+    cacheFolder = file.path(pegasusConfig$rootWorkFolder, "cacheConceptSetPersonCounts")
+  )
+  if (nrow(conceptSetPersonCounts) > 0) {
+    uploadConceptSetPersonCounts(conceptSetPersonCounts = conceptSetPersonCounts,
+                                 pegasusConnection = pegasusConnection,
+                                 pegasusDatabaseSchema = pegasusConfig$pegasusDatabaseSchema)
+  }
+
+  # Create Keeper reference cohorts ------------------------------------------------------------------------------------
+  status <- createKeeperReferenceCohorts(
+    phenotypes = phenotypes,
+    llmClient = pegasusConfig$llmClient,
+    costTracker = costTracker,
+    databaseReferences = databaseReferences,
+    maxCores = pegasusConfig$maxCores,
+    uploadKeeperProfiles = TRUE,
+    workFolder = file.path(pegasusConfig$rootWorkFolder, "cacheKeeperReference")
+  )
+
+  # Create cohort definitions using MonoFlow ---------------------------------------------------------------------------
+  if (MONO_FLOW %in% cohortCreationApproaches) {
+    # Note: for now keeping it simple and only use 1 database reference for agent:
+    cohortDefinitions <- generateCohortDefinitionsUsingMonoFlowAgent(
+      phenotypes = phenotypes,
+      llmClient = pegasusConfig$llmClientFrontier,
+      costTracker = costTracker,
+      pegasusConnection = pegasusConnection,
+      pegasusDatabaseSchema = pegasusConfig$pegasusDatabaseSchema,
+      databaseReferences = databaseReferences[1],
+      workFolder = file.path(pegasusConfig$rootWorkFolder, "cacheMonoFlow")
+    )
+
+    if (nrow(cohortDefinitions) != 0) {
+      if (!is.null(pegasusConfig$baseUrl)) {
+        cohortDefinitionsWithAtlasIds <- insertCohortDefinitionsInAtlas(
+          cohortDefinitions = cohortDefinitions,
+          baseUrl = pegasusConfig$baseUrl
+        )
+      }
+
+      uploadCohortDefinitions(
+        cohortDefinitions = cohortDefinitionsWithAtlasIds,
+        pegasusConnection = pegasusConnection,
+        pegasusDatabaseSchema = pegasusConfig$pegasusDatabaseSchema
+      )
+    }
+  }
+
+  # Create cohort definitions using templates --------------------------------------------------------------------------
+  if (TEMPLATES %in% cohortCreationApproaches) {
+    cohortDefinitions <- generateCohortDefinitionssUsingTemplates(
+      phenotypes = phenotypes,
+      pegasusConnection = pegasusConnection,
+      pegasusDatabaseSchema = pegasusConfig$pegasusDatabaseSchema,
+      databaseReference = databaseReferences[[1]],
+      maxCores = pegasusConfig$maxCores,
+      workFolder = file.path(pegasusConfig$rootWorkFolder, "cacheTemplates")
+    )
+
+    uploadCohortDefinitions(
+      cohortDefinitions = cohortDefinitions,
+      pegasusConnection = pegasusConnection,
+      pegasusDatabaseSchema = pegasusConfig$pegasusDatabaseSchema
+    )
+  }
+
+  # Evaluate cohort definitions ----------------------------------------------------------------------------------------
+  cohortDefinitionsEvaluations <-evaluateUsingKeeperReferenceCohorts(
+    phenotypes = phenotypes,
+    pegasusConnection = pegasusConnection,
+    pegasusDatabaseSchema = pegasusConfig$pegasusDatabaseSchema,
+    databaseReferences = databaseReferences
+  )
+
+  # Flip draft and valid flags -----------------------------------------------------------------------------------------
+  updatePhenotypes(
+    phenotypes = phenotypes,
+    draft = 0,
+    valid = 1,
+    pegasusConnection = pegasusConnection,
+    pegasusDatabaseSchema = pegasusConfig$pegasusDatabaseSchema,
+  )
+
+  delta <- Sys.time() - startTime
+  message(sprintf("Processing request took %0.2f %s and cost $%0.2f.",
+                  delta,
+                  attr(delta, "units"),
+                  costTracker$amount))
   invisible(NULL)
 }

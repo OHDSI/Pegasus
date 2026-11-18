@@ -303,6 +303,7 @@ mapToConcepts <- function(termsPerCategory,
 #' @template LlmClient
 #' @template CostTracker
 #' @template CacheFolder
+#' @template PegasusConnectionDetails
 #'
 #' @description
 #' Enumerates targets for concept sets for a phenotype. The targets themselves are mapped to concepts in the OHDSI
@@ -316,7 +317,10 @@ generateConceptSetTargets <- function(phenotypes,
                                       databaseReference = databaseReference,
                                       llmClient,
                                       costTracker = createCostTracker(),
-                                      cacheFolder = NULL) {
+                                      cacheFolder = NULL,
+                                      pegasusConnection = NULL,
+                                      pegasusConnectionDetails = NULL,
+                                      pegasusDatabaseSchema = NULL) {
   errorMessages <- checkmate::makeAssertCollection()
   checkmate::assertDataFrame(phenotypes, min.rows = 1, add = errorMessages)
   checkmate::assertNames(colnames(phenotypes), must.include = c(
@@ -328,6 +332,9 @@ generateConceptSetTargets <- function(phenotypes,
   checkmate::assertR6(llmClient, "Chat", add = errorMessages)
   checkmate::assertClass(costTracker, "CostTracker", add = errorMessages)
   checkmate::assertCharacter(cacheFolder, len = 1, null.ok = TRUE, add = errorMessages)
+  checkmate::assertClass(pegasusConnection, "DatabaseConnectorConnection", null.ok = TRUE, add = errorMessages)
+  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", null.ok = TRUE, add = errorMessages)
+  checkmate::assertCharacter(pegasusDatabaseSchema, len = 1, null.ok = TRUE, add = errorMessages)
   checkmate::reportAssertions(collection = errorMessages)
 
   startTime <- Sys.time()
@@ -335,6 +342,16 @@ generateConceptSetTargets <- function(phenotypes,
 
   if (!is.null(cacheFolder)) {
     dir.create(cacheFolder, recursive = TRUE, showWarnings = FALSE)
+  }
+
+  phenotypes <- removeExistingPhenotypes(phenotypes = phenotypes,
+                                         table = "draft_concept_set_target",
+                                         label = "concept set targets",
+                                         pegasusConnection = pegasusConnection,
+                                         pegasusConnectionDetails = pegasusConnectionDetails,
+                                         pegasusDatabaseSchema = pegasusDatabaseSchema)
+  if (nrow(phenotypes) == 0) {
+    return(tibble())
   }
 
   connection <- DatabaseConnector::connect(databaseReference$connectionDetails)
@@ -353,7 +370,7 @@ generateConceptSetTargets <- function(phenotypes,
         costTracker = costTracker
       )},
       cacheFolder = cacheFolder,
-      fileName = sprintf("targets_%s.csv", gsub("[^[:alnum:]]+", "", phenotypes$phenotypeName[i]))
+      fileName = sprintf("targets_%s.csv", gsub("[^[:alnum:]]+", "", phenotypes$phenotypeId[i]))
     )
   }
   conceptSetTargets <- bind_rows(conceptSetTargets)

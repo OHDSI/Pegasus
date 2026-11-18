@@ -15,6 +15,8 @@ pegasusConnectionDetails <- DatabaseConnector::createConnectionDetails(
 # pegasusDatabaseSchema <- Sys.getenv("PEGASUS_DATABASE_SCHEMA")
 pegasusDatabaseSchema <- "pegasus_stage"
 
+options(sqlRenderTempEmulationSchema = NULL) # For the Pegasus connection
+
 # Connection to the CDM database(s) ------------------------------------------------------------------------------------
 # These are used to generate the results
 connectionDetails <- DatabaseConnector::createConnectionDetails(

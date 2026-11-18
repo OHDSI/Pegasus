@@ -11,6 +11,7 @@ connectionDetails <- DatabaseConnector::createConnectionDetails(
 
 databaseSchema <- Sys.getenv("PEGASUS_DATABASE_SCHEMA")
 
+
 cdmConnectionDetails <- DatabaseConnector::createConnectionDetails(
   dbms = "spark",
   connectionString = keyring::key_get("databricksConnectionString"),
@@ -1243,3 +1244,41 @@ DatabaseConnector::disconnect(connection)
 #   snakeCaseToCamelCase = TRUE
 # )
 # x
+
+# Replace legacy database IDs ------------------------------------------------------------------------------------------
+legacyDatabaseIds <- c(1,2)
+pegasusDatabaseSchema <- "pegasus_stage"
+databases <- downloadDatabaseMetaData(pegasusConnection = connection,
+                                      pegasusDatabaseSchema = pegasusDatabaseSchema)
+oldToNew <- databases |>
+  filter(databaseId %in% legacyDatabaseIds) |>
+  mutate(newDatabaseId = digest::digest2int(cdmDatabaseSchema)) |>
+  select("databaseId", "newDatabaseId")
+
+tables <- DatabaseConnector::getTableNames(connection, pegasusDatabaseSchema)
+for (i in seq_along(tables)) {
+  table <- tables[i]
+  sql <- "SELECT TOP 1 * FROM @schema.@table;"
+  row <- DatabaseConnector::renderTranslateQuerySql(connection, sql, schema = pegasusDatabaseSchema, table = table)
+  if ("database_id" %in% colnames(row)) {
+    message("Updating ", table)
+    for (j in seq_len(nrow(oldToNew))) {
+      oldId <- oldToNew$databaseId[j]
+      newId <- oldToNew$newDatabaseId[j]
+      sql <- "
+        UPDATE @schema.@table
+        SET database_id = @new_id
+        WHERE database_id = @old_id;
+      "
+      DatabaseConnector::renderTranslateExecuteSql(
+        connection = connection,
+        sql = sql,
+        schema = pegasusDatabaseSchema,
+        table = table,
+        old_id = oldId,
+        new_id = newId
+      )
+    }
+  }
+}
+

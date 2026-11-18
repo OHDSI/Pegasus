@@ -147,7 +147,7 @@ buildPhenotypeConfigs <- function(phenotypes,
   message("Configuring phenotype meta data")
 
   phenotypeMetaData <- downloadPhenotypeMetaData(
-    phenotypes = phenotypes,
+    phenotypeIds = phenotypes$phenotypeId,
     pegasusConnection = pegasusConnection,
     pegasusDatabaseSchema = pegasusDatabaseSchema
   )
@@ -230,7 +230,7 @@ downloadAndUnionConceptSets <- function(phenotypes,
                                         unionsFolder) {
   message("Downloading and unioning concept sets")
   phenotypeToConceptSets <- downloadPhenotypeToConceptSets(
-    phenotypes = phenotypes,
+    phenotypeIds = phenotypes$phenotypeId,
     pegasusConnection = pegasusConnection,
     pegasusDatabaseSchema = pegasusDatabaseSchema
   )

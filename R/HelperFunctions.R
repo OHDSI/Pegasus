@@ -389,3 +389,40 @@ insertCohortDefinitionsInAtlas <- function(cohortDefinitions, baseUrl) {
 quoteSqlString <- function(value) {
   paste0("'", gsub("'", "''", value, fixed = TRUE), "'")
 }
+
+removeExistingPhenotypes <- function(phenotypes,
+                                     table,
+                                     label = "data",
+                                     pegasusConnection = NULL,
+                                     pegasusConnectionDetails = NULL,
+                                     pegasusDatabaseSchema = NULL) {
+  if (!is.null(pegasusConnectionDetails)) {
+    pegasusConnection <- DatabaseConnector::connect(pegasusConnectionDetails)
+    on.exit(DatabaseConnector::disconnect(pegasusConnection))
+  }
+  if (!is.null(pegasusConnection)) {
+    sql <- "
+      SELECT DISTINCT phenotype_id
+      FROM @database_schema.;
+    "
+    existingPhenotypeIds <- DatabaseConnector::renderTranslateQuerySql(
+      connection = pegasusConnection,
+      sql = sql,
+      database_schema = pegasusDatabaseSchema,
+      snakeCaseToCamelCase = TRUE
+    ) |>
+      pull(.data$phenotypeId)
+
+    skippingPhenotypes <- phenotypes |>
+      filter(.data$phenotypeId %in% existingPhenotypeIds)
+    if (nrow(skippingPhenotypes) > 0) {
+      message(sprintf("- Skipping %d of %d phenotypes that already have %s.",
+                      nrow(skippingPhenotypes),
+                      nrow(phenotypes),
+                      label))
+      phenotypes <- phenotypes |>
+        filter(!.data$phenotypeId %in% existingPhenotypeIds)
+    }
+  }
+  return(phenotypes)
+}

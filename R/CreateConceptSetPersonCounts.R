@@ -79,7 +79,7 @@ createConceptSetCounts <- function(conceptSets = NULL,
 
   if (is.null(conceptSets)) {
     conceptSets <- downloadPhenotypeToConceptSets(
-      phenotypes = phenotypes,
+      phenotypeIds = phenotypes$phenotypeId,
       pegasusConnection = pegasusConnection,
       pegasusDatabaseSchema = pegasusDatabaseSchema
     )

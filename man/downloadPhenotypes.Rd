@@ -5,12 +5,15 @@
 \title{Download phenotypes from the server}
 \usage{
 downloadPhenotypes(
+  phenotypeIds = NULL,
   pegasusConnection = NULL,
   pegasusConnectionDetails = NULL,
   pegasusDatabaseSchema
 )
 }
 \arguments{
+\item{phenotypeIds}{(Optional) A list of phenotype IDs for which to retrieve data.}
+
 \item{pegasusConnection}{A connection object created using \code{DatabaseConnector::connect()} for connecting to
 the database holding the Pegasus data model. Can be null if
 \code{pegasusConnectionDetails} is provided.}

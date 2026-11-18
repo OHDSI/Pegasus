@@ -1002,17 +1002,20 @@ uploadAtlasInstance <- function(baseUrl,
 
 #' Download phenotypes from the server
 #'
+#' @param phenotypeIds (Optional) A list of phenotype IDs for which to retrieve data.
 #' @template PegasusConnectionDetails
 #'
 #' @returns
 #' A tibble with one row per phenotype, including its ID, name, and clinical definition.
 #'
 #' @export
-downloadPhenotypes <- function(pegasusConnection = NULL,
+downloadPhenotypes <- function(phenotypeIds = NULL,
+                               pegasusConnection = NULL,
                                pegasusConnectionDetails = NULL,
                                pegasusDatabaseSchema) {
   data <- genericDownload(
     tableName = "phenotype",
+    phenotypeIds = phenotypeIds,
     pegasusConnection = pegasusConnection,
     pegasusConnectionDetails = pegasusConnectionDetails,
     pegasusDatabaseSchema = pegasusDatabaseSchema
@@ -1040,6 +1043,14 @@ downloadConceptSets <- function(pegasusConnection = NULL,
   return(data)
 }
 
+#' Download database meta data from the server
+#'
+#' @template PegasusConnectionDetails
+#'
+#' @returns
+#' A tibble with one row per database, including its ID and meta data.
+#'
+#' @export
 downloadDatabaseMetaData <- function(pegasusConnection = NULL,
                                      pegasusConnectionDetails = NULL,
                                      pegasusDatabaseSchema) {
@@ -1053,10 +1064,12 @@ downloadDatabaseMetaData <- function(pegasusConnection = NULL,
 }
 
 genericDownload <- function(tableName,
+                            phenotypeIds = NULL,
                             pegasusConnection,
                             pegasusConnectionDetails,
                             pegasusDatabaseSchema) {
   errorMessages <- checkmate::makeAssertCollection()
+  checkmate::assertIntegerish(phenotypeIds, null.ok = TRUE, add = errorMessages)
   checkmate::assertClass(pegasusConnection, "DatabaseConnectorConnection", null.ok = TRUE, add = errorMessages)
   checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", null.ok = TRUE, add = errorMessages)
   checkmate::assertCharacter(pegasusDatabaseSchema, len = 1, add = errorMessages)
@@ -1071,13 +1084,17 @@ genericDownload <- function(tableName,
 
   sql <- "
     SELECT *
-    FROM @database_schema.@table;
+    FROM @database_schema.@table
+    {@has_phenotype_ids} ? {  WHERE phenotype_id IN (@phenotype_ids)}
+    ;
   "
   data <- DatabaseConnector::renderTranslateQuerySql(
     connection = pegasusConnection,
     sql = sql,
     database_schema = pegasusDatabaseSchema,
     table = tableName,
+    has_phenotype_ids = !is.null(phenotypeIds) && length(phenotypeIds) != 0,
+    phenotype_ids = phenotypeIds,
     snakeCaseToCamelCase = TRUE
   )
   return(data)
@@ -1085,26 +1102,24 @@ genericDownload <- function(tableName,
 
 #' Download concept sets for phenotypes from the server
 #'
+#' @param phenotypeIds (Optional) A list of phenotype IDs for which to retrieve data.
 #' @template PegasusConnectionDetails
-#' @template Phenotypes
 #'
 #' @returns
 #' A tibble with concept sets for each provided phenotype.
 #'
 #' @export
-downloadPhenotypeToConceptSets <- function(phenotypes,
+downloadPhenotypeToConceptSets <- function(phenotypeIds = NULL,
                                            pegasusConnection = NULL,
                                            pegasusConnectionDetails = NULL,
                                            pegasusDatabaseSchema) {
   errorMessages <- checkmate::makeAssertCollection()
+  checkmate::assertIntegerish(phenotypeIds, null.ok = TRUE, add = errorMessages)
   checkmate::assertClass(pegasusConnection, "DatabaseConnectorConnection", null.ok = TRUE, add = errorMessages)
   checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", null.ok = TRUE, add = errorMessages)
   checkmate::assertCharacter(pegasusDatabaseSchema, len = 1, add = errorMessages)
-  checkmate::assertDataFrame(phenotypes, min.rows = 1, add = errorMessages)
-  checkmate::assertNames(colnames(phenotypes), must.include = c(
-    "phenotypeName"
-  ), add = errorMessages)
   checkmate::reportAssertions(errorMessages)
+
   if (is.null(pegasusConnection) && is.null(pegasusConnectionDetails)) {
     stop("Must provide either pegasusConnection or pegasusConnectionDetails")
   }
@@ -1113,11 +1128,6 @@ downloadPhenotypeToConceptSets <- function(phenotypes,
     on.exit(DatabaseConnector::disconnect(pegasusConnection))
   }
 
-  phenotypes <- addPhenotypeIdIfMissing(
-    data = phenotypes,
-    pegasusConnection = pegasusConnection,
-    pegasusDatabaseSchema = pegasusDatabaseSchema
-  )
   sql <- "
     SELECT phenotype_id,
       pertains,
@@ -1141,122 +1151,56 @@ downloadPhenotypeToConceptSets <- function(phenotypes,
     connection =  pegasusConnection,
     sql = sql,
     database_schema = pegasusDatabaseSchema,
-    phenotype_ids = phenotypes$phenotypeId,
+    phenotype_ids = phenotypeIds,
     snakeCaseToCamelCase = TRUE
   )
-  result <- result |>
-    inner_join(phenotypes |>
-                 select("phenotypeId", "phenotypeName"),
-               by = join_by("phenotypeId"))
   return(result)
 }
 
 #' Download phenotype meta data from the server
 #'
+#' @param phenotypeIds (Optional) A list of phenotype IDs for which to retrieve data.
 #' @template PegasusConnectionDetails
-#' @template Phenotypes
 #'
 #' @returns
 #' A tibble with meta data for each provided phenotype.
 #'
 #' @export
-downloadPhenotypeMetaData <- function(phenotypes,
+downloadPhenotypeMetaData <- function(phenotypeIds = NULL,
                                       pegasusConnection = NULL,
                                       pegasusConnectionDetails = NULL,
                                       pegasusDatabaseSchema) {
-  errorMessages <- checkmate::makeAssertCollection()
-  checkmate::assertClass(pegasusConnection, "DatabaseConnectorConnection", null.ok = TRUE, add = errorMessages)
-  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", null.ok = TRUE, add = errorMessages)
-  checkmate::assertCharacter(pegasusDatabaseSchema, len = 1, add = errorMessages)
-  checkmate::assertDataFrame(phenotypes, min.rows = 1, add = errorMessages)
-  checkmate::assertNames(colnames(phenotypes), must.include = c(
-    "phenotypeName"
-  ), add = errorMessages)
-  checkmate::reportAssertions(errorMessages)
-  if (is.null(pegasusConnection) && is.null(pegasusConnectionDetails)) {
-    stop("Must provide either pegasusConnection or pegasusConnectionDetails")
-  }
-  if (is.null(pegasusConnection)) {
-    pegasusConnection <- DatabaseConnector::connect(pegasusConnectionDetails)
-    on.exit(DatabaseConnector::disconnect(pegasusConnection))
-  }
-
-  phenotypes <- addPhenotypeIdIfMissing(
-    data = phenotypes,
+  data <- genericDownload(
+    tableName = "phenotype_meta_data",
+    phenotypeIds = phenotypeIds,
     pegasusConnection = pegasusConnection,
+    pegasusConnectionDetails = pegasusConnectionDetails,
     pegasusDatabaseSchema = pegasusDatabaseSchema
   )
-  sql <- "
-    SELECT *
-    FROM @database_schema.phenotype_meta_data
-    WHERE phenotype_id IN (@phenotype_ids);
-  "
-  result <-  DatabaseConnector::renderTranslateQuerySql(
-    connection =  pegasusConnection,
-    sql = sql,
-    database_schema = pegasusDatabaseSchema,
-    phenotype_ids = phenotypes$phenotypeId,
-    snakeCaseToCamelCase = TRUE
-  )
-  result <- result |>
-    inner_join(phenotypes |>
-                 select("phenotypeId", "phenotypeName"),
-               by = join_by("phenotypeId"))
-  return(result)
+  return(data)
 }
 
 #' Download phenotype meta data from the server
 #'
+#' @param phenotypeIds (Optional) A list of phenotype IDs for which to retrieve data.
 #' @template PegasusConnectionDetails
-#' @template Phenotypes
 #'
 #' @returns
 #' A tibble with meta data for each provided phenotype.
 #'
 #' @export
-downloadCohortDefinition <- function(phenotypes,
+downloadCohortDefinition <- function(phenotypeIds = NULL,
                                      pegasusConnection = NULL,
                                      pegasusConnectionDetails = NULL,
                                      pegasusDatabaseSchema) {
-  errorMessages <- checkmate::makeAssertCollection()
-  checkmate::assertClass(pegasusConnection, "DatabaseConnectorConnection", null.ok = TRUE, add = errorMessages)
-  checkmate::assertClass(pegasusConnectionDetails, "ConnectionDetails", null.ok = TRUE, add = errorMessages)
-  checkmate::assertCharacter(pegasusDatabaseSchema, len = 1, add = errorMessages)
-  checkmate::assertDataFrame(phenotypes, min.rows = 1, add = errorMessages)
-  checkmate::assertNames(colnames(phenotypes), must.include = c(
-    "phenotypeName"
-  ), add = errorMessages)
-  checkmate::reportAssertions(errorMessages)
-  if (is.null(pegasusConnection) && is.null(pegasusConnectionDetails)) {
-    stop("Must provide either pegasusConnection or pegasusConnectionDetails")
-  }
-  if (is.null(pegasusConnection)) {
-    pegasusConnection <- DatabaseConnector::connect(pegasusConnectionDetails)
-    on.exit(DatabaseConnector::disconnect(pegasusConnection))
-  }
-
-  phenotypes <- addPhenotypeIdIfMissing(
-    data = phenotypes,
+  data <- genericDownload(
+    tableName = "cohort_definition",
+    phenotypeIds = phenotypeIds,
     pegasusConnection = pegasusConnection,
+    pegasusConnectionDetails = pegasusConnectionDetails,
     pegasusDatabaseSchema = pegasusDatabaseSchema
   )
-  sql <- "
-    SELECT *
-    FROM @database_schema.cohort_definition
-    WHERE phenotype_id IN (@phenotype_ids);
-  "
-  result <-  DatabaseConnector::renderTranslateQuerySql(
-    connection =  pegasusConnection,
-    sql = sql,
-    database_schema = pegasusDatabaseSchema,
-    phenotype_ids = phenotypes$phenotypeId,
-    snakeCaseToCamelCase = TRUE
-  )
-  result <- result |>
-    inner_join(phenotypes |>
-                 select("phenotypeId", "phenotypeName"),
-               by = join_by("phenotypeId"))
-  return(result)
+  return(data)
 }
 
 #' Update phenotype status
