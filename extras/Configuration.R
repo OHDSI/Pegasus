@@ -108,4 +108,16 @@ pegasusConfig <- createPegasusConfig (
   rootWorkFolder = rootWorkFolder,
   maxCores = maxCores
 )
-
+rm("baseUrl",
+   "cdmDatabaseSchemas",
+   "connectionDetails",
+   "databaseNames",
+   "databaseReferences",
+   "databaseTails",
+   "i",
+   "llmClient",
+   "llmClientFrontier",
+   "maxCores",
+   "pegasusConnectionDetails",
+   "pegasusDatabaseSchema",
+   "rootWorkFolder")

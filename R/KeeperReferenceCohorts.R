@@ -124,7 +124,7 @@ removeFinishedKeeperReferenceCohortJobs <- function(databaseReference,
                       paste(overlap, collapse =  ", "),
                       databaseReference$databaseName))
       phenotypes <- phenotypes |>
-        filter(!as.character(.data$phenotypeId) %in% existingCohorts$phenotype)
+        filter(!.data$phenotypeId %in% existingCohorts$cohortDefinitionId)
     }
   } else {
     Keeper::createReferenceCohortTables(
@@ -505,13 +505,23 @@ evaluateUsingKeeperReferenceCohorts <- function(phenotypes,
   results <- list()
   for (i in seq_along(databaseReferences)) {
     databaseReference <- databaseReferences[[i]]
+    message("Evaluating cohort definitions in database ", databaseReference$databaseName)
     toSkip <- existingEvaluations |>
       filter(.data$databaseId == databaseReference$databaseId)
-    results[[i]] <- evaluateInDatabase(
-      cohortDefinitions = cohortDefinitions,
-      databaseReference = databaseReference,
-      toSkip = toSkip
-    )
+    toEvaluate <- cohortDefinitions  |>
+      filter(!.data$cohortDefinitionId %in% toSkip$cohortDefinitionId)
+    message(sprintf("- Skipped %d cohort definition with existing evaluations. Evaluating %d.",
+                    nrow(toSkip),
+                    nrow(toEvaluate)))
+
+    if (nrow(toEvaluate) == 0) {
+      results[[i]] <- NULL
+    } else {
+      results[[i]] <- evaluateInDatabase(
+        cohortDefinitions = toEvaluate,
+        databaseReference = databaseReference
+      )
+    }
   }
   results <- bind_rows(results)
 
@@ -522,8 +532,7 @@ evaluateUsingKeeperReferenceCohorts <- function(phenotypes,
   return(results)
 }
 
-evaluateInDatabase <- function(cohortDefinitions, databaseReference, toSkip) {
-  message("Evaluating cohort definitions in database ", databaseReference$databaseName)
+evaluateInDatabase <- function(cohortDefinitions, databaseReference) {
   connection <- DatabaseConnector::connect(databaseReference$connectionDetails)
   on.exit(DatabaseConnector::disconnect(connection))
 
@@ -538,12 +547,8 @@ evaluateInDatabase <- function(cohortDefinitions, databaseReference, toSkip) {
       cohortTableNames = cohortTableNames
     )
   }
-  toEvaluate <- cohortDefinitions  |>
-    filter(!.data$cohortDefinitionId %in% toSkip$cohortDefinitionId)
-  if (nrow(toEvaluate) == 0) {
-    return(NULL)
-  }
-  cohortDefinitionSet <- toEvaluate |>
+
+  cohortDefinitionSet <- cohortDefinitions |>
     select(
       cohortId = "cohortDefinitionId",
       cohortName = "cohortDefinitionName",
@@ -563,14 +568,14 @@ evaluateInDatabase <- function(cohortDefinitions, databaseReference, toSkip) {
     connection = connection,
     cohortDatabaseSchema = databaseReference$candidateCohortDatabaseSchema,
     cohortTable = databaseReference$candidateCohortTable,
-    cohortIds = toEvaluate$cohortDefinitionId
+    cohortIds = cohortDefinitions$cohortDefinitionId
   )
   times <- DatabaseConnector::renderTranslateQuerySql(
     connection = connection,
     sql = "SELECT * FROM @database_schema.@table WHERE cohort_definition_id IN (@cohort_ids);",
     database_schema = databaseReference$candidateCohortDatabaseSchema,
     table = cohortTableNames$cohortChecksumTable,
-    cohort_ids = toEvaluate$cohortDefinitionId,
+    cohort_ids = cohortDefinitions$cohortDefinitionId,
     snakeCaseToCamelCase = TRUE
   )
   times <- times |>
@@ -578,8 +583,8 @@ evaluateInDatabase <- function(cohortDefinitions, databaseReference, toSkip) {
 
   # Evaluate cohorts ---------------------------------------------------------------------------------------------------
   results <- list()
-  for (i in seq_len(nrow(toEvaluate))) {
-    cohortDefinition <- toEvaluate[i, ]
+  for (i in seq_len(nrow(cohortDefinitions))) {
+    cohortDefinition <- cohortDefinitions[i, ]
     referenceCohortDefinitionId <- getKeeperReferenceCohortId(connection = connection,
                                                               databaseReference = databaseReference,
                                                               phenotypeId = cohortDefinition$phenotypeId,

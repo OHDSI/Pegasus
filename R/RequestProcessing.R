@@ -127,15 +127,15 @@ processRequest <- function(phenotypeId,
   startTime <- Sys.time()
   costTracker <- createCostTracker()
 
+  dir.create(pegasusConfig$rootWorkFolder, recursive = TRUE, showWarnings = FALSE)
+
   ParallelLogger::addDefaultFileLogger(file.path(pegasusConfig$rootWorkFolder, "log.txt"), name = "PROCESS_REQUEST_LOG")
   on.exit(ParallelLogger::unregisterLogger("PROCESS_REQUEST_LOG"))
 
   pegasusConnection <- DatabaseConnector::connect(pegasusConfig$pegasusConnectionDetails)
-  on.exit(DatabaseConnector::disconnect(pegasusConnection))
+  on.exit(DatabaseConnector::disconnect(pegasusConnection), add = TRUE)
 
-  dir.create(pegasusConfig$rootWorkFolder, recursive = TRUE, showWarnings = FALSE)
-
-  # Filter database references -----------------------------------------------------------------------------------------
+  # Select database references -----------------------------------------------------------------------------------------
   databaseReferences <- pegasusConfig$databaseReferences[sapply(pegasusConfig$databaseReferences,
                                                                 function(x) x$databaseId %in% databaseIds)]
   if (length(databaseReferences) < length(databaseIds)) {
@@ -207,6 +207,7 @@ processRequest <- function(phenotypeId,
 
   # Count persons with concept sets ------------------------------------------------------------------------------------
   conceptSetPersonCounts <- createConceptSetCounts(
+    phenotypes = phenotypes,
     pegasusConnection = pegasusConnection,
     pegasusDatabaseSchema = pegasusConfig$pegasusDatabaseSchema,
     databaseReferences = databaseReferences,
@@ -269,12 +270,13 @@ processRequest <- function(phenotypeId,
       maxCores = pegasusConfig$maxCores,
       workFolder = file.path(pegasusConfig$rootWorkFolder, "cacheTemplates")
     )
-
-    uploadCohortDefinitions(
-      cohortDefinitions = cohortDefinitions,
-      pegasusConnection = pegasusConnection,
-      pegasusDatabaseSchema = pegasusConfig$pegasusDatabaseSchema
-    )
+    if (nrow(cohortDefinitions) != 0) {
+      uploadCohortDefinitions(
+        cohortDefinitions = cohortDefinitions,
+        pegasusConnection = pegasusConnection,
+        pegasusDatabaseSchema = pegasusConfig$pegasusDatabaseSchema
+      )
+    }
   }
 
   # Evaluate cohort definitions ----------------------------------------------------------------------------------------
@@ -284,6 +286,13 @@ processRequest <- function(phenotypeId,
     pegasusDatabaseSchema = pegasusConfig$pegasusDatabaseSchema,
     databaseReferences = databaseReferences
   )
+  if (nrow(cohortDefinitionsEvaluations) > 0) {
+    uploadCohortDefinitionEvaluations(
+      cohortDefinitionsEvaluations = cohortDefinitionsEvaluations,
+      pegasusConnection = pegasusConnection,
+      pegasusDatabaseSchema = pegasusConfig$pegasusDatabaseSchema
+    )
+  }
 
   # Flip draft and valid flags -----------------------------------------------------------------------------------------
   updatePhenotypes(

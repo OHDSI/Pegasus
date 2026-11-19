@@ -403,12 +403,13 @@ removeExistingPhenotypes <- function(phenotypes,
   if (!is.null(pegasusConnection)) {
     sql <- "
       SELECT DISTINCT phenotype_id
-      FROM @database_schema.;
+      FROM @database_schema.@table;
     "
     existingPhenotypeIds <- DatabaseConnector::renderTranslateQuerySql(
       connection = pegasusConnection,
       sql = sql,
       database_schema = pegasusDatabaseSchema,
+      table = table,
       snakeCaseToCamelCase = TRUE
     ) |>
       pull(.data$phenotypeId)

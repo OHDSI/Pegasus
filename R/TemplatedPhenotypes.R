@@ -59,6 +59,8 @@ generateCohortDefinitionssUsingTemplates <- function(phenotypes,
 
   startTime <- Sys.time()
 
+  dir.create(workFolder, recursive = TRUE, showWarnings = TRUE)
+
   ParallelLogger::addDefaultFileLogger(file.path(workFolder, "log.txt"), name = "TEMPLATES_LOGGER")
   on.exit(ParallelLogger::unregisterLogger("TEMPLATES_LOGGER"))
 
@@ -67,10 +69,30 @@ generateCohortDefinitionssUsingTemplates <- function(phenotypes,
     on.exit(DatabaseConnector::disconnect(pegasusConnection), add = TRUE)
   }
 
-  if (!dir.exists(workFolder)) {
-    dir.create(workFolder, recursive = TRUE)
+  sql <- "
+    SELECT DISTINCT phenotype_id
+    FROM @database_schema.cohort_definition
+    WHERE cd_source_type = 'Templates'
+      AND phenotype_id IN (@phenotype_ids);
+  "
+  existingPhenotypeIds <- DatabaseConnector::renderTranslateQuerySql(
+    connection = pegasusConnection,
+    sql = sql,
+    database_schema = pegasusDatabaseSchema,
+    phenotype_ids = phenotypes$phenotypeId
+  )
+  if (length(existingPhenotypeIds) > 0) {
+    message(sprintf("- Skipping %d of %d phenotypes that already have teamplated cohort definitions.",
+                    length(existingPhenotypeIds),
+                    nrow(phenotypes)))
+    phenotypes <- phenotypes |>
+      filter(!.data$phenotypeId %in% existingPhenotypeIds)
+    if (nrow(phenotypes) == 0) {
+      return(tibble())
+    }
   }
 
+  dir.create(workFolder, recursive = TRUE, showWarnings = FALSE)
   unionsFolder <- file.path(workFolder, "conceptSetUnions")
   dir.create(unionsFolder, showWarnings  = FALSE)
 

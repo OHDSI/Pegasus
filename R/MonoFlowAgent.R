@@ -75,7 +75,7 @@ generateCohortDefinitionsUsingMonoFlowAgent <- function(phenotypes,
   }
 
   sql <- "
-    SELECT phenotype_id
+    SELECT DISTINCT phenotype_id
     FROM @database_schema.cohort_definition
     WHERE cd_source_type = 'MonoFlow'
       AND phenotype_id IN (@phenotype_ids);
