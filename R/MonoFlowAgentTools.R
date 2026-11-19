@@ -112,16 +112,16 @@ PegasusAgentContext <- R6::R6Class(
       unknown <- setdiff(databaseNames, names(self$databaseReferences))
       if (length(unknown) > 0L) {
         stop("Unknown database(s): ", paste(unknown, collapse = ", "),
-             ". Valid databases: ", paste(databases, collapse = ", "))
+             ". Valid databases: ", paste(names(self$databaseReferences), collapse = ", "))
       }
-      return(self$databaseReference[databaseNames])
+      return(self$databaseReferences[databaseNames])
     },
 
     close = function() {
-      for (databaseReference in self$databaseReferences) {
-        connection <- self$getConnection(databaseReference$databaseName)
+      for (connection in self$connections) {
         DatabaseConnector::disconnect(connection)
       }
+      self$connections <- NULL
       invisible(NULL)
     },
 
@@ -672,31 +672,31 @@ countConceptSetPersonOverlapForDatabase <- function(connection, databaseReferenc
       GROUP BY concept_set_hash
     ),
     cohort_counts AS (
-      SELECT occurrence.concept_set_hash, window.window_order, occurrence.domain_id,
+      SELECT occurrence.concept_set_hash, time_window.window_order, occurrence.domain_id,
         COUNT(DISTINCT occurrence.person_id) AS person_count
       FROM domain_occurrences occurrence
       INNER JOIN cohort_entries cohort
         ON occurrence.person_id = cohort.person_id
-      CROSS JOIN requested_windows window
+      CROSS JOIN requested_windows time_window
       WHERE DATEDIFF(DAY, cohort.cohort_start_date, occurrence.occurrence_date)
-        BETWEEN window.start_day AND window.end_day
-      GROUP BY occurrence.concept_set_hash, window.window_order, occurrence.domain_id
+        BETWEEN time_window.start_day AND time_window.end_day
+      GROUP BY occurrence.concept_set_hash, time_window.window_order, occurrence.domain_id
     ),
     cohort_overall_counts AS (
-      SELECT occurrence.concept_set_hash, window.window_order,
+      SELECT occurrence.concept_set_hash, time_window.window_order,
         COUNT(DISTINCT occurrence.person_id) AS person_count
       FROM domain_occurrences occurrence
       INNER JOIN cohort_entries cohort
         ON occurrence.person_id = cohort.person_id
-      CROSS JOIN requested_windows window
+      CROSS JOIN requested_windows time_window
       WHERE DATEDIFF(DAY, cohort.cohort_start_date, occurrence.occurrence_date)
-        BETWEEN window.start_day AND window.end_day
-      GROUP BY occurrence.concept_set_hash, window.window_order
+        BETWEEN time_window.start_day AND time_window.end_day
+      GROUP BY occurrence.concept_set_hash, time_window.window_order
     )
     SELECT requested.concept_set_name,
-      window.window_name,
-      window.start_day,
-      window.end_day,
+      time_window.window_name,
+      time_window.start_day,
+      time_window.end_day,
       COALESCE(MAX(CASE WHEN population.domain_id = 'Condition' THEN population.person_count END), 0) AS condition_persons,
       COALESCE(MAX(CASE WHEN cohort.domain_id = 'Condition' THEN cohort.person_count END), 0) AS condition_cohort_persons,
       COALESCE(MAX(CASE WHEN population.domain_id = 'Procedure' THEN population.person_count END), 0) AS procedure_persons,
@@ -712,21 +712,21 @@ countConceptSetPersonOverlapForDatabase <- function(connection, databaseReferenc
       COALESCE(MAX(population_overall.person_count), 0) AS overall_persons,
       COALESCE(MAX(cohort_overall.person_count), 0) AS overall_cohort_persons
     FROM requested_concept_sets requested
-    CROSS JOIN requested_windows window
+    CROSS JOIN requested_windows time_window
     LEFT JOIN population_counts population
       ON requested.concept_set_hash = population.concept_set_hash
     LEFT JOIN cohort_counts cohort
       ON requested.concept_set_hash = cohort.concept_set_hash
-        AND window.window_order = cohort.window_order
+        AND time_window.window_order = cohort.window_order
         AND population.domain_id = cohort.domain_id
     LEFT JOIN population_overall_counts population_overall
       ON requested.concept_set_hash = population_overall.concept_set_hash
     LEFT JOIN cohort_overall_counts cohort_overall
       ON requested.concept_set_hash = cohort_overall.concept_set_hash
-        AND window.window_order = cohort_overall.window_order
+        AND time_window.window_order = cohort_overall.window_order
     GROUP BY requested.concept_set_hash, requested.concept_set_name, requested.input_order,
-      window.window_name, window.start_day, window.end_day, window.window_order
-    ORDER BY requested.input_order, window.window_order;
+      time_window.window_name, time_window.start_day, time_window.end_day, time_window.window_order
+    ORDER BY requested.input_order, time_window.window_order;
   "
   counts <- DatabaseConnector::renderTranslateQuerySql(
     connection = connection,
@@ -1266,9 +1266,8 @@ getConceptSetsCapr <- function(context, conceptSetNames, detail = "code_and_coun
     arrange(order) |>
     select(-"order", -"lcConceptSetName")
 
-  groups <- caprWithReference |>
-    group_by(.data$conceptSetName, .data$hasDescendants) |>
-    group_split()
+  groupKeys <- paste(caprWithReference$conceptSetName, caprWithReference$hasDescendants)
+  groups <- split(caprWithReference, factor(groupKeys, levels = unique(groupKeys)))
 
   result <- list()
   for (i in seq_along(groups)) {
