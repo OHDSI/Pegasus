@@ -38,6 +38,7 @@ export(uploadPhenotypeMetaData)
 export(uploadPhenotypes)
 import(DatabaseConnector)
 import(dplyr)
+importFrom(R6,R6Class)
 importFrom(ellmer,
   type_array,
   type_enum,

@@ -112,7 +112,7 @@ generateOrReuseConceptSetTargetDefinitions <- function(conceptSetTargets,
       phenotypeId = .data$phenotypeId,
       pertains = "Disease of interest",
       category = "Disease of interest",
-      concpetId = NA_real_,
+      conceptId = NA_real_,
       conceptName = NA_character_,
       conceptSetId = NA_real_,
       conceptSetName = .data$phenotypeName,
@@ -138,7 +138,7 @@ generateOrReuseConceptSetTargetDefinitions <- function(conceptSetTargets,
 
   # Drugs
   drugTargets <- dedupedTargets |>
-    filter(.data$domainId =="Drug")
+    filter(.data$domainId == "Drug")
   existingDrugConceptSets <- downloadExistingConceptSetData(
     pegasusConnection = pegasusConnection,
     pegasusDatabaseSchema = pegasusDatabaseSchema,
@@ -154,7 +154,7 @@ generateOrReuseConceptSetTargetDefinitions <- function(conceptSetTargets,
 
   # Remaining targets
   targets <- dedupedTargets |>
-    filter(.data$category != "Hypernym", .data$domainId !="Drug")
+    filter(.data$category != "Hypernym", .data$domainId != "Drug")
   uniqueTargets <- targets |>
     group_by(.data$conceptId, .data$conceptName) |>
     summarise(nPhenotypes = length(unique(.data$phenotypeId)), .groups = "drop")
@@ -176,7 +176,7 @@ generateOrReuseConceptSetTargetDefinitions <- function(conceptSetTargets,
     mutate(conceptSetId = NA_real_,
            conceptSetName = NA_character_) |>
     select(-"normName") |>
-    rename(targetPhenotypeName = "phenotypeName")
+    rename(targetPhenotypeId = "phenotypeId", targetPhenotypeName = "phenotypeName")
   definitionsFromPhenotypes <- definitionsFromPhenotypes |>
     bind_rows(existingDefinitionData$definitionsFromPhenotypes) |>
     slice_head(n = 1, by = "conceptId")
@@ -220,6 +220,7 @@ generateOrReuseConceptSetTargetDefinitions <- function(conceptSetTargets,
     mutate(sourceType = FROM_AI_DEFINITION)
 
   result <- bind_rows(
+    tibble(targetPhenotypeId = numeric(), targetPhenotypeName = character()),
     diseaseOfInterestTargets,
     hypernymTargets,
     drugTargets,
@@ -449,9 +450,9 @@ downloadExistingDefinitionData <- function(pegasusConnection,
   if (is.null(pegasusConnection)) {
     return(list(draftTargetToConceptSet = tibble(conceptId = 1, conceptSetId = 1) |>
                   filter(.data$conceptId != 1),
-                conceptSets = tibble(conceptSetId = 1) |>
+                conceptSets = tibble(conceptSetId = 1, conceptId = 1) |>
                   filter(.data$conceptSetId != 1),
-                definitionsFromPhenotypes = tibble()))
+                definitionsFromPhenotypes = tibble(conceptId = numeric())))
   }
 
   DatabaseConnector::insertTable(
@@ -484,7 +485,8 @@ downloadExistingDefinitionData <- function(pegasusConnection,
   sql <- "
     SELECT concept_set_id,
       concept_set_name,
-      clinical_definition
+      clinical_definition,
+      concept_id
     FROM @database_schema.concept_set
     WHERE valid = 1
       AND has_descendants = 1
@@ -547,7 +549,7 @@ downloadExistingConceptSetData <- function(pegasusConnection,
                                            newTargets,
                                            sourceType) {
   if (is.null(pegasusConnection)) {
-    return(tibble(conceptId = 1, conceptSetId = 1) |>
+    return(tibble(conceptId = 1, conceptSetId = 1, conceptSetName = "") |>
              filter(.data$conceptId != 1))
   }
   DatabaseConnector::insertTable(

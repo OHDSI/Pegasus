@@ -20,6 +20,7 @@
 #' @importFrom rlang .data
 #' @importFrom utils head
 #' @importFrom ellmer type_string type_array type_enum type_integer type_object
+#' @importFrom R6 R6Class
 #' @import DatabaseConnector
 #' @import dplyr
 NULL

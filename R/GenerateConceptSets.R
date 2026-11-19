@@ -126,7 +126,9 @@ generateConceptSets  <- function(conceptSetTargetDefinitions,
     fullConceptSets,
     hasConceptSet
   )
-  costTracker$amount <- costTracker$amount + sum(conceptSets$cost, na.rm=T)
+  if ("cost" %in% colnames(conceptSets)) {
+    costTracker$amount <- costTracker$amount + sum(conceptSets$cost, na.rm = TRUE)
+  }
   delta <- Sys.time() - startTime
   message(sprintf("Generating concept sets took %0.2f %s and cost $%0.2f.",
                   delta,
@@ -222,7 +224,7 @@ createFullConceptSet <- function(row, llmClient, databaseReference, cacheFolder)
       }
     }
     )
-    log <- paste(readLines(tempLogFile), collapse = "\n")
+    log <- if (file.exists(tempLogFile)) paste(readLines(tempLogFile), collapse = "\n") else ""
     unlink(tempLogFile)
     if (grepl("cost \\$", log)) {
       cost <- as.numeric(sub(".*\\$([0-9]+(?:\\.[0-9]+)?).*", "\\1", log))

@@ -436,7 +436,7 @@ uploadConceptSets <- function(conceptSets,
     SELECT concept_set_name,
       concept_id,
       has_descendants,
-      clinical_definition,
+      clinical_definition
     FROM @database_schema.concept_set;
   "
   existingConceptSets <- DatabaseConnector::renderTranslateQuerySql(
@@ -446,7 +446,7 @@ uploadConceptSets <- function(conceptSets,
     snakeCaseToCamelCase = TRUE
   )
   overlap <- existingConceptSets |>
-    inner_join(newConceptSets, by = join_by("concept_set_name", "concept_id", "has_descendants", "clinical_definition"))
+    inner_join(newConceptSets, by = join_by("conceptSetName", "conceptId", "hasDescendants", "clinicalDefinition"))
   if (nrow(overlap) > 0) {
     stop(sprintf("%s rows of data overlap with existing data in the concept_set table. Aborting",
                  nrow(overlap)))
@@ -1260,7 +1260,7 @@ updatePhenotypes <- function(phenotypes,
   } else {
     currentAndNewStatus <- phenotypes |>
       select("phenotypeName") |>
-      left_join(currentStatus, by = join_by("phenotypeNamne"))
+      left_join(currentStatus, by = join_by("phenotypeName"))
   }
   missing <- currentAndNewStatus |>
     filter(is.na(.data$draft))
@@ -1288,7 +1288,7 @@ updatePhenotypes <- function(phenotypes,
 
   if (nrow(toUpdateValid) > 0) {
     sql <- sprintf("UPDATE @database_schema.phenotype SET valid = @valid WHERE phenotype_id = %d;",
-                   toUpdateDraft$phenotypeId)
+                   toUpdateValid$phenotypeId)
     sql <- paste(sql, collapse = "\n")
     DatabaseConnector::renderTranslateExecuteSql(
       connection = pegasusConnection,
@@ -1296,7 +1296,7 @@ updatePhenotypes <- function(phenotypes,
       database_schema = pegasusDatabaseSchema,
       valid = valid
     )
-    message(sprintf("Uploaded the valid field for %d record(s)", nrow(toUpdateDraft)))
+    message(sprintf("Uploaded the valid field for %d record(s)", nrow(toUpdateValid)))
   }
   invisible(NULL)
 }

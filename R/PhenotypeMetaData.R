@@ -115,7 +115,8 @@ generatePhenotypeMetaData <- function(phenotypes,
       )
       metaData[[i]] <- as_tibble(lapply(response, function(x) if (is.null(x)) NA_integer_ else x)) |>
         SqlRender::snakeCaseToCamelCaseNames() |>
-        mutate(phenotypeName = phenotypes$phenotypeName[i],
+        mutate(phenotypeId = phenotypes$phenotypeId[i],
+               phenotypeName = phenotypes$phenotypeName[i],
                hasDiscreteRecordedSymptoms = as.integer(.data$hasDiscreteRecordedSymptoms),
                requiresDiagnosticTestOrProcedure = as.integer(.data$requiresDiagnosticTestOrProcedure),
                requiresActiveTreatmentWithin30d = as.integer(.data$requiresActiveTreatmentWithin30d),
