@@ -1642,7 +1642,7 @@ getConceptSetsCaprTool <- function(context) ellmer::tool(
 
 validateCaprTool <- function(context) ellmer::tool(
   bindContext(validateCapr, context),
-  name = "validate_capr",
+  name = "validateCapr",
   description = paste("Validate the provided Capr code. Either returns 'Valid' or an informative error message.",
                       predefinedConceptSetNote),
   arguments = list(
