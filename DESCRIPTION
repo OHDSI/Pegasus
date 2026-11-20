@@ -56,7 +56,8 @@ Remotes:
   ohdsi/Phenelope,
   ohdsi/Keeper,
   ohdsi/Capr,
-  ohdsi/ROhdsiWebApi
+  ohdsi/ROhdsiWebApi,
+  ohdsi/PhenotypeTemplates
 NeedsCompilation: no
 Roxygen: list(markdown = TRUE)
 Encoding: UTF-8
