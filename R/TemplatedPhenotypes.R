@@ -118,7 +118,7 @@ generateCohortDefinitionssUsingTemplates <- function(phenotypes,
     definitionsForPhenotype <- withCache({
       phenotypeConfig <- phenotypeConfigs[[as.character(phenotype$phenotypeId)]]
 
-      bucketFiles <- list.files(unionsFolder, pattern = gsub("[^[:alnum:]]+", "", phenotype$phenotypeName))
+      bucketFiles <- list.files(unionsFolder, pattern = sprintf("^%s_[A-Z]\\.json$", gsub("[^[:alnum:]]+", "", phenotype$phenotypeName)))
       bucketNames <- gsub("^.*_", "", gsub(".json$", "", bucketFiles))
       bucketCs <- lapply(seq_along(bucketFiles), function(j) Capr::readConceptSet(
         path = file.path(unionsFolder, bucketFiles[j]),
@@ -127,17 +127,10 @@ generateCohortDefinitionssUsingTemplates <- function(phenotypes,
       names(bucketCs) <- bucketNames
 
       templateCds <- PhenotypeTemplates::buildPhenotypeTemplates(
-        cs_I            = bucketCs[["I"]],
-        cs_H            = bucketCs[["H"]],
-        cs_S            = bucketCs[["S"]],
-        cs_D            = bucketCs[["D"]],
-        cs_T            = bucketCs[["T"]],
-        cs_C            = bucketCs[["C"]],
-        cs_A            = bucketCs[["A"]],
-        cs_E            = bucketCs[["E"]],
-        phenotypeLabel  = phenotype$phenotypeName,
-        config          = phenotypeConfig,
-        startCohortId   = 1
+        conceptSets    = bucketCs,
+        phenotypeLabel = phenotype$phenotypeName,
+        config         = phenotypeConfig,
+        startCohortId  = 1
       )
 
       tibble(
@@ -182,64 +175,21 @@ buildPhenotypeConfigs <- function(phenotypes,
                  paste(missingPhenotypes$phenotypeName, collapse = "', '")))
   }
 
-  clinicalCourseLookup <- c(
-    "PERSISTENT_STABLE"    = "persistent_stable",
-    "PERSISTENT_RELAPSING" = "persistent_recurrent",
-    "TRANSIENT_RECURRENT"  = "transient_recurrent",
-    "TRANSIENT_SINGLE"     = "transient_single"
-  )
-  expectedCareSettingLookup <- c(
-    "ACUTE_CARE_COMMON"   = "acute_care_common",
-    "ACUTE_CARE_EXPECTED" = "acute_care_expected",
-    "OUTPATIENT_EXPECTED" = "outpatient_expected"
-  )
-  recommendedCohortExitLookup <- c(
-    "END_OF_CONTINUOUS_OBSERVATION"   = "continuous_observation",
-    "END_OF_ERA_WITH_PERSISTENCE_GAP" = "era_persistence",
-    "FIXED_WINDOW_FROM_INDEX"         = "fixed_window"
-  )
-  str_to_logical <- function(x) {
-    if (is.na(x) || x == "" || tolower(x) == "null") return(FALSE)
-    tolower(x) %in% c("true", "yes", "t", "y", "1")
-  }
-  str_to_numeric <- function(x) {
-    if (is.na(x) || x == "" || tolower(x) == "null") return(NULL)
-    tryCatch(as.numeric(x), warning = function(w) NULL, error = function(e) NULL)
-  }
-  parse_sex_constraint <- function(sex_str) {
-    sex_str <- toupper(trimws(sex_str))
-    list(male = sex_str == "MALE_ONLY", female = sex_str == "FEMALE_ONLY")
+  phenotypeNames <- phenotypes$phenotypeName[match(phenotypeMetaData$phenotypeId, phenotypes$phenotypeId)]
+  problems <- PhenotypeTemplates::validateClinicalContext(phenotypeMetaData, throw = FALSE)
+  if (nrow(problems) > 0) {
+    stop(sprintf("Invalid phenotype meta data:\n%s",
+                 paste(sprintf("  - %s: %s = '%s' %s",
+                               phenotypeNames[problems$row],
+                               problems$field,
+                               ifelse(is.na(problems$value), "", problems$value),
+                               problems$problem),
+                       collapse = "\n")))
   }
 
-  phenotypeConfigs <- list()
-  for (i in seq_len(nrow(phenotypeMetaData))) {
-    row <- phenotypeMetaData[i, ] |>
-      SqlRender::camelCaseToSnakeCaseNames()
-    sexConstraint <- parse_sex_constraint(row$sex_constraint)
-    clinicalCourse <- unname(clinicalCourseLookup[toupper(trimws(row$clinical_course))])
-    occurrenceSettings <- PhenotypeTemplates:::inferPhenotypeOccurrenceSettings(clinicalCourse)
-
-    phenotypeConfigs[[i]] <- PhenotypeTemplates::phenotypeConfig(
-      clinicalCourse = clinicalCourse,
-      expectedCareSetting = unname(expectedCareSettingLookup[toupper(trimws(row$expected_care_setting))]),
-      minAge = str_to_numeric(row$min_age_years),
-      maxAge = str_to_numeric(row$max_age_years),
-      male = sexConstraint$male,
-      female = sexConstraint$female,
-      minimumInterepisodeDayGap = str_to_numeric(row$minimum_interepisode_gap_days),
-      recommendedCohortExit = if (!is.na(row$recommended_cohort_exit) && row$recommended_cohort_exit != "")
-        unname(recommendedCohortExitLookup[toupper(trimws(row$recommended_cohort_exit))]) else NULL,
-      fixedExitDays = str_to_numeric(row$recommended_exit_days),
-      hasDescreteRecordedSymptoms = str_to_logical(row$has_discrete_recorded_symptoms),
-      requiresDiagnosticTestOrProcedure = str_to_logical(row$requires_diagnostic_test_or_procedure),
-      requiresActiveTreatmentWithin30d = str_to_logical(row$requires_active_treatment_within_30d),
-      expectsConditionSpecificFollowupOrSequelae1yr = str_to_logical(row$expects_condition_specific_followup_or_sequelae_1yr),
-      firstOccurrenceOnly = occurrenceSettings$firstOccurrenceOnly,
-      primaryCriteriaLimit = occurrenceSettings$primaryCriteriaLimit,
-      expressionLimit = occurrenceSettings$expressionLimit,
-      hospitalVisitOverlapWindow = occurrenceSettings$hospitalVisitOverlapWindow
-    )
-  }
+  phenotypeConfigs <- lapply(seq_len(nrow(phenotypeMetaData)), function(i) {
+    PhenotypeTemplates::phenotypeConfigFromContext(phenotypeMetaData[i, ])
+  })
   names(phenotypeConfigs) <- phenotypeMetaData$phenotypeId
   return(phenotypeConfigs)
 }
@@ -265,22 +215,9 @@ downloadAndUnionConceptSets <- function(phenotypes,
                  paste(missingPhenotypes$phenotypeName, collapse = "', '")))
   }
 
-  categoryToBucket <- c(
-    "Disease of interest" = "I",
-    "Hypernym" = "H",
-    "Clinical presentation" = "S",
-    "Diagnostic procedure" = "D",
-    "Measurement" = "D",
-    "Drug" = "T",
-    "Treatment procedure" = "T",
-    "Etiology" = "E",
-    "Alternative diagnosis" = "A",
-    "Progression complication" = "C"
-  )
-
   phenotypeToConceptSets <- phenotypeToConceptSets |>
-    filter(.data$category != "Risk factor") |>
-    mutate(bucket = unname(categoryToBucket[.data$category]))
+    mutate(bucket = PhenotypeTemplates::conceptCategoryToBucket(.data$category)) |>
+    filter(!is.na(.data$bucket))
 
   groups <- phenotypeToConceptSets |>
     filter(.data$pertains == "Disease of interest") |>
