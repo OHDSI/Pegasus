@@ -12,6 +12,7 @@ generateCohortDefinitionsUsingMonoFlowAgent(
   pegasusConnectionDetails = NULL,
   pegasusDatabaseSchema,
   databaseReferences,
+  skipIfExists = TRUE,
   workFolder
 )
 }
@@ -36,6 +37,9 @@ database holding the Pegasus data model. Can be null if
 
 \item{databaseReferences}{A list of objects of type \code{DatabaseReference} as created by the \code{createDatabaseReference()}
 function.}
+
+\item{skipIfExists}{Skip creation of cohort definition if a MonoFlow cohort definition already exists for this
+phenotype?}
 
 \item{workFolder}{A folder where data objects are stored.}
 }
