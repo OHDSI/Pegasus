@@ -248,7 +248,8 @@ ensureCohortExists <- function(context, json, database) {
       )
     )
     runQuietly(
-      CohortGenerator::insertInclusionRuleNames(
+      # CohortGenerator::insertInclusionRuleNames(
+      insertInclusionRuleNames(
         connection = connection,
         cohortDatabaseSchema = databaseReference$workDatabaseSchema,
         cohortDefinitionSet = cohortDefinitionSet,
@@ -257,6 +258,65 @@ ensureCohortExists <- function(context, json, database) {
     )
   }
   return(cohortId)
+}
+
+# Copy of function in CohortGenerator while this issue is not resolved: https://github.com/OHDSI/CohortGenerator/issues/282
+insertInclusionRuleNames <- function(connectionDetails = NULL,
+                                     connection = NULL,
+                                     cohortDefinitionSet,
+                                     cohortDatabaseSchema,
+                                     cohortInclusionTable = CohortGenerator::getCohortTableNames()$cohortInclusionTable) {
+  # Parameter validation
+  if (is.null(connection) && is.null(connectionDetails)) {
+    stop("You must provide either a database connection or the connection details.")
+  }
+
+  if (is.null(connection)) {
+    connection <- DatabaseConnector::connect(connectionDetails)
+    on.exit(DatabaseConnector::disconnect(connection))
+  }
+
+  tableList <- DatabaseConnector::getTableNames(connection, cohortDatabaseSchema)
+  if (!toupper(cohortInclusionTable) %in% toupper(tableList)) {
+    stop(paste0(cohortInclusionTable, " table not found in schema: ", cohortDatabaseSchema, ". Please make sure the table is created using the createCohortTables() function before calling this function."))
+  }
+
+  inclusionRules <- CohortGenerator::getCohortInclusionRules(cohortDefinitionSet)
+
+  # Remove any existing data to prevent duplication
+  ### Modification starts here ***
+  sql <- "
+    DELETE FROM @cohort_database_schema.@table
+    WHERE cohort_definition_id IN (@cohort_ids);
+  "
+  DatabaseConnector::renderTranslateExecuteSql(
+    connection = connection,
+    sql = sql,
+    progressBar = FALSE,
+    reportOverallTime = FALSE,
+    cohort_database_schema = cohortDatabaseSchema,
+    table = cohortInclusionTable,
+    cohort_ids = cohortDefinitionSet$cohortId
+  )
+  ### Modification ends here ***
+
+  # Insert the inclusion rules
+  if (nrow(inclusionRules) > 0) {
+    rlang::inform("Inserting inclusion rule names")
+    DatabaseConnector::insertTable(
+      connection = connection,
+      databaseSchema = cohortDatabaseSchema,
+      tableName = cohortInclusionTable,
+      data = inclusionRules,
+      dropTableIfExists = FALSE,
+      createTable = FALSE,
+      camelCaseToSnakeCase = TRUE
+    )
+  } else {
+    warning("No inclusion rules found in the cohortDefinitionSet")
+  }
+
+  invisible(inclusionRules)
 }
 
 # Compile a client-supplied Capr cohort definition (R text) to Circe JSON in an isolated,
@@ -504,25 +564,46 @@ getCohortCountForDatabase <- function(cohortId, connection, databaseReference) {
                                 tibble(cohortDefinitionId = cohortId,
                                        ruleSequence = -1,
                                        name = "Initial event"))
-    counts <- CohortGenerator::computeCohortAttrition(inclusionResults, inclusionRules) |>
-      filter(.data$modeId == 0, .data$cohortEntry == 0) |>
+    counts <- CohortGenerator::computeCohortAttrition(inclusionResults, inclusionRules)
+    personCounts <- counts |>
+      filter(.data$modeId == 1, .data$cohortEntry == 0) |>
       right_join(inclusionRules, by = join_by("cohortDefinitionId", "ruleSequence")) |>
       select("ruleSequence", "name", incrementalPersons = "personCount")
 
-    counts <- counts |>
+    personCounts <- personCounts |>
       left_join(cohortInclusionStats |>
-                  filter(.data$modeId == 0) |>
-                  select("ruleSequence", marginalPerson = "personCount", "gainCount"),
+                  filter(.data$modeId == 1) |>
+                  select("ruleSequence", marginalPersons = "personCount", gainPersons = "gainCount"),
                 by = join_by("ruleSequence")) |>
       mutate(ruleSequence  = .data$ruleSequence + 1) |>
       mutate(incrementalPersons = if_else(is.na(.data$incrementalPersons), 0, .data$incrementalPersons),
-             marginalPerson = if_else(is.na(.data$marginalPerson) & .data$ruleSequence != 0, 0, .data$marginalPerson),
-             gainCount = if_else(is.na(.data$gainCount) & .data$ruleSequence != 0, 0, .data$gainCount)) |>
+             marginalPersons = if_else(is.na(.data$marginalPersons) & .data$ruleSequence != 0, 0, .data$marginalPersons),
+             gainPersons = if_else(is.na(.data$gainPersons) & .data$ruleSequence != 0, 0, .data$gainPersons))
+
+    eventCounts <- counts |>
+      filter(.data$modeId == 0, .data$cohortEntry == 0, .data$cohortDefinitionId == cohortId) |>
+      select("ruleSequence",  incrementalEvents = "personCount")
+
+    eventCounts <- eventCounts |>
+      left_join(cohortInclusionStats |>
+                  filter(.data$modeId == 0) |>
+                  select("ruleSequence", marginalEvents = "personCount", gainEvents= "gainCount"),
+                by = join_by("ruleSequence")) |>
+      mutate(ruleSequence  = .data$ruleSequence + 1) |>
+      mutate(incrementalEvents = if_else(is.na(.data$incrementalEvents), 0, .data$incrementalEvents),
+             marginalEvents = if_else(is.na(.data$marginalEvents) & .data$ruleSequence != 0, 0, .data$marginalEvents),
+             gainEvents = if_else(is.na(.data$gainEvents) & .data$ruleSequence != 0, 0, .data$gainEvents))
+
+    counts <- inner_join(
+      personCounts,
+      eventCounts,
+      by = join_by("ruleSequence")
+    ) |>
       arrange(.data$ruleSequence)
   } else {
     sql <- "
       SELECT COUNT(DISTINCT subject_id) AS person_count,
-        COUNT(*) AS entry_count
+        COUNT(*) AS event_count
       FROM @cohort_database_schema.@cohort_table
       WHERE cohort_definition_id = @cohort_id;
     "
@@ -573,18 +654,18 @@ countConceptSetPersonOverlapForDatabase <- function(connection, databaseReferenc
 
   requestedConceptSets <- paste(
     sprintf(
-      "SELECT %s AS concept_set_hash, %d AS input_order, %s AS concept_set_name",
+      "SELECT %s AS concept_set_hash, %d AS input_order",
       quoteSqlString(conceptSetsToCount$conceptSetHash),
-      conceptSetsToCount$inputOrder,
-      quoteSqlString(conceptSetsToCount$name)
+      conceptSetsToCount$inputOrder
+      # quoteSqlString(conceptSetsToCount$name)
     ),
     collapse = " UNION ALL "
   )
   requestedWindows <- paste(
     sprintf(
-      "SELECT %d AS window_order, %s AS window_name, %d AS start_day, %d AS end_day",
+      "SELECT %d AS window_order, %d AS start_day, %d AS end_day",
       windowsToCount$inputOrder,
-      quoteSqlString(windowsToCount$name),
+      # quoteSqlString(windowsToCount$name),
       as.integer(windowsToCount$startDay),
       as.integer(windowsToCount$endDay)
     ),
@@ -693,8 +774,7 @@ countConceptSetPersonOverlapForDatabase <- function(connection, databaseReferenc
         BETWEEN time_window.start_day AND time_window.end_day
       GROUP BY occurrence.concept_set_hash, time_window.window_order
     )
-    SELECT requested.concept_set_name,
-      time_window.window_name,
+    SELECT requested.concept_set_hash,
       time_window.start_day,
       time_window.end_day,
       COALESCE(MAX(CASE WHEN population.domain_id = 'Condition' THEN population.person_count END), 0) AS condition_persons,
@@ -724,8 +804,8 @@ countConceptSetPersonOverlapForDatabase <- function(connection, databaseReferenc
     LEFT JOIN cohort_overall_counts cohort_overall
       ON requested.concept_set_hash = cohort_overall.concept_set_hash
         AND time_window.window_order = cohort_overall.window_order
-    GROUP BY requested.concept_set_hash, requested.concept_set_name, requested.input_order,
-      time_window.window_name, time_window.start_day, time_window.end_day, time_window.window_order
+    GROUP BY requested.concept_set_hash, requested.input_order,
+      time_window.start_day, time_window.end_day, time_window.window_order
     ORDER BY requested.input_order, time_window.window_order;
   "
   counts <- DatabaseConnector::renderTranslateQuerySql(
@@ -740,6 +820,13 @@ countConceptSetPersonOverlapForDatabase <- function(connection, databaseReferenc
     cdm_database_schema = databaseReference$cdmDatabaseSchema,
     snakeCaseToCamelCase = TRUE
   )
+  counts <- counts |>
+    inner_join(conceptSetsToCount |>
+                 select("conceptSetHash", conceptSetName = "name"),
+               by = join_by("conceptSetHash")) |>
+    inner_join(windowsToCount |>
+                 select("startDay", "endDay", windowName = "name"),
+               by = join_by("startDay", "endDay"))
   counts <- counts |>
     mutate(database = databaseReference$databaseName)
   return(counts)
@@ -1587,10 +1674,10 @@ generateCohortTool <- function(context, databaseArgument = createDatabaseArgumen
 getCohortCountTool <- function(context, databaseArgument = createDatabaseArgument(context)) ellmer::tool(
   bindContext(getCohortCount, context),
   name = "getCohortCount",
-  description = paste("Returns cohort sizes per database. For cohorts with attrition rules, also returns the number of persons",
-                      "remaining after each rule is applied (incrementalPersons), the number of persons who satisfy",
-                      "both the initial event and the rule (marginalPersons), and the number of persons that would be",
-                      "added back if the rule were removed (gainCount)."),
+  description = paste("Returns cohort sizes per database. For cohorts with attrition rules, also returns the number of",
+                      "persons and events remaining after each rule is applied (incrementalPersons & incrementalEvents),",
+                      "the numbers satisfying both the initial event and the rule (marginalPersons $ marginalEvents),",
+                      "and the numbers that would be added back if the rule were removed (gainPersons and gainEvents)."),
   arguments = list(
     cohortId = ellmer::type_integer("The cohort ID as returned by the `generateCohort` tool."),
     database = databaseArgument

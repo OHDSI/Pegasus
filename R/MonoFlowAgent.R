@@ -196,6 +196,14 @@ constructPrompt <- function(phenotype, context) {
     databases,
     "</databases>",
     "",
+    "<phenotype_name>",
+    phenotype$phenotypeName,
+    "</phenotype_name>",
+    "",
+    "<clinical_definition>",
+    phenotype$clinicalDefinition,
+    "</clinical_definition>",
+    "",
     "<available_concept_sets>",
     availableConceptSets,
     "</available_concept_sets>",
@@ -245,7 +253,7 @@ checkRequirementsMet <- function(phenotypes,
                  paste(phenotypes$phenotypeName[!phenotypes$phenotypeId %in% phenotypeIds], collapse = "', '")))
   }
 
-  message(" - Ensuring standard concept sets exist in Pegasus schema")
+  message("- Ensuring standard concept sets exist in Pegasus schema")
   standardConceptSets <- getStandardConceptSets()
   sql <- "
     SELECT concept_set_id,
@@ -298,7 +306,7 @@ checkRequirementsMet <- function(phenotypes,
     standardConceptSets <- existingStandardConceptSets
   }
 
-  message(" - Ensuring standard concept sets have counts")
+  message("- Ensuring standard concept sets have counts")
   conceptSetPersonCounts <- createConceptSetCounts(conceptSets = standardConceptSets,
                                                    pegasusConnection = pegasusConnection,
                                                    pegasusDatabaseSchema = pegasusDatabaseSchema,
