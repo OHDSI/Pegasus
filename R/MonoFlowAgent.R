@@ -29,6 +29,8 @@
 #' @template CostTracker
 #' @template PegasusConnectionDetails
 #' @template DatabaseReferences
+#' @param skipIfExists Skip creation of cohort definition if a MonoFlow cohort definition already exists for this
+#'                     phenotype?
 #' @param workFolder A folder where data objects are stored.
 #'
 #' @returns
@@ -42,6 +44,7 @@ generateCohortDefinitionsUsingMonoFlowAgent <- function(phenotypes,
                                                         pegasusConnectionDetails = NULL,
                                                         pegasusDatabaseSchema,
                                                         databaseReferences,
+                                                        skipIfExists = TRUE,
                                                         workFolder) {
   errorMessages <- checkmate::makeAssertCollection()
   checkmate::assertDataFrame(phenotypes, min.rows = 1, add = errorMessages)
@@ -64,6 +67,7 @@ generateCohortDefinitionsUsingMonoFlowAgent <- function(phenotypes,
       "workConceptSetTable"
     ), add = errorMessages)
   }
+  checkmate::assertLogical(skipIfExists, len = 1, add = errorMessages)
   checkmate::assertCharacter(workFolder, len = 1, add = errorMessages)
   checkmate::reportAssertions(collection = errorMessages)
   if (is.null(pegasusConnection) && is.null(pegasusConnectionDetails)) {
@@ -73,52 +77,47 @@ generateCohortDefinitionsUsingMonoFlowAgent <- function(phenotypes,
     pegasusConnection <- DatabaseConnector::connect(pegasusConnectionDetails)
     on.exit(DatabaseConnector::disconnect(pegasusConnection))
   }
-
-  sql <- "
+  if (skipIfExists) {
+    sql <- "
     SELECT DISTINCT phenotype_id
     FROM @database_schema.cohort_definition
     WHERE cd_source_type = 'MonoFlow'
       AND phenotype_id IN (@phenotype_ids);
   "
-  existingPhenotypeIds <- DatabaseConnector::renderTranslateQuerySql(
-    connection = pegasusConnection,
-    sql = sql,
-    database_schema = pegasusDatabaseSchema,
-    phenotype_ids = phenotypes$phenotypeId
-  )
-  if (length(existingPhenotypeIds) > 0) {
-    message(sprintf("- Skipping %d of %d phenotypes that already have MonoFlow cohort definitions.",
-                    length(existingPhenotypeIds),
-                    nrow(phenotypes)))
-    phenotypes <- phenotypes |>
-      filter(!.data$phenotypeId %in% existingPhenotypeIds)
-    if (nrow(phenotypes) == 0) {
-      return(tibble())
+    existingPhenotypeIds <- DatabaseConnector::renderTranslateQuerySql(
+      connection = pegasusConnection,
+      sql = sql,
+      database_schema = pegasusDatabaseSchema,
+      phenotype_ids = phenotypes$phenotypeId
+    )
+    if (length(existingPhenotypeIds) > 0) {
+      message(sprintf("- Skipping %d of %d phenotypes that already have MonoFlow cohort definitions.",
+                      length(existingPhenotypeIds),
+                      nrow(phenotypes)))
+      phenotypes <- phenotypes |>
+        filter(!.data$phenotypeId %in% existingPhenotypeIds)
+      if (nrow(phenotypes) == 0) {
+        return(tibble())
+      }
     }
   }
-
-  checkRequirementsMet(phenotypes = phenotypes,
-                       llmClient = llmClient,
-                       costTracker = costTracker,
-                       pegasusConnection = pegasusConnection,
-                       pegasusDatabaseSchema = pegasusDatabaseSchema,
-                       databaseReferences = databaseReferences)
 
   startTime <- Sys.time()
   startCost <- costTracker$amount
 
-  dir.create(workFolder)
-  toolContext <- PegasusAgentContext$new(phenotype,
-                                         pegasusConnection = pegasusConnection,
-                                         pegasusDatabaseSchema = pegasusDatabaseSchema,
-                                         databaseReferences = databaseReferences)
-  on.exit(toolContext$close())
-  systemPromptFile <- system.file("prompts", "MonoFlowSystemPrompt.txt", package = "Pegasus")
-  systemPrompt <- paste(readLines(systemPromptFile), collapse = "\n")
+  dir.create(workFolder, recursive = TRUE, showWarnings = FALSE)
 
-  monoFlowAgent <- llmClient$clone()
-  monoFlowAgent$register_tools(createAgentTools(toolContext))
-  monoFlowAgent$set_system_prompt(systemPrompt)
+  jsonFiles <- file.path(workFolder, gsub("[^[:alnum:]]+", "_", phenotypes$phenotypeName), "best_cohort.json")
+  incompletePhenotypes <- phenotypes[!file.exists(jsonFiles), ]
+
+  if (nrow(incompletePhenotypes) > 0) {
+    checkRequirementsMet(phenotypes = incompletePhenotypes,
+                         llmClient = llmClient,
+                         costTracker = costTracker,
+                         pegasusConnection = pegasusConnection,
+                         pegasusDatabaseSchema = pegasusDatabaseSchema,
+                         databaseReferences = databaseReferences)
+  }
 
   cohortDefinitions <- list()
   for (i in seq_len(nrow(phenotypes))) {
@@ -127,42 +126,61 @@ generateCohortDefinitionsUsingMonoFlowAgent <- function(phenotypes,
     bestJsonFile <- file.path(outputFolder, "best_cohort.json")
     if (!file.exists(bestJsonFile)) {
       message("Creating cohort definition for ", phenotype$phenotypeName)
-      dir.create(outputFolder)
+      dir.create(outputFolder, showWarnings = FALSE)
 
-      context <- constructContext(phenotype)
+      context <- PegasusAgentContext$new(phenotype = phenotype,
+                                         pegasusConnection = pegasusConnection,
+                                         pegasusDatabaseSchema = pegasusDatabaseSchema,
+                                         databaseReferences = databaseReferences)
+      tryCatch({
+        systemPromptFile <- system.file("prompts", "MonoFlowSystemPrompt.txt", package = "Pegasus")
+        systemPrompt <- paste(readLines(systemPromptFile), collapse = "\n")
 
-      # Run chat
-      monoFlowAgent$set_turns(list())
-      response <- monoFlowAgent$chat(context)
+        monoFlowAgent <- llmClient$clone()
+        monoFlowAgent$set_system_prompt(systemPrompt)
+        monoFlowAgent$register_tools(createAgentTools(context))
 
-      # Save full chat
-      turns <- monoFlowAgent$get_turns()
-      texts <- list()
-      for (t in 2:length(turns)) {
-        texts[[t-1]] <- format(turns[[t]])
-      }
-      texts <- paste(texts, collapse = "\n\n")
-      writeLines(texts, file.path(outputFolder, "chat.txt"))
+        prompt <- constructPrompt(phenotype, context)
 
-      # Get best cohort definition
-      prompt <- "
-        Please return your best definition capr code.
-        Output using the following structure. Do not include text outside the JSON:
-        { \"capr\": \"cohort(...)\"}
-      "
-      bestCohortDefinition <- monoFlowAgent$chat_structured(prompt, type = type_object(capr = type_string()))
-      json <- convertCaprToJson(toolContext, bestCohortDefinition$capr)
-      writeLines(json, bestJsonFile)
+        # Run chat
+        monoFlowAgent$set_turns(list())
+        response <- monoFlowAgent$chat(prompt)
 
-      # Save cost
-      cost <- monoFlowAgent$get_cost("all")
-      writeLines(sprintf("Total cost: $%0.2f", cost), file.path(outputFolder, "cost.txt"))
-      costTracker$amount <- costTracker$amount + cost
+        # Save full chat
+        turns <- monoFlowAgent$get_turns()
+        texts <- list()
+        for (t in 2:length(turns)) {
+          texts[[t-1]] <- format(turns[[t]])
+        }
+        texts <- paste(texts, collapse = "\n\n")
+        writeLines(texts, file.path(outputFolder, "chat.txt"))
+
+        # Get best cohort definition
+        prompt <- "
+          Please return your best definition capr code.
+          Output using the following structure. Do not include text outside the JSON:
+          { \"capr\": \"cohort(...)\"}
+        "
+        bestCohortDefinition <- monoFlowAgent$chat_structured(prompt, type = type_object(capr = type_string()))
+        json <- convertCaprToJson(context, bestCohortDefinition$capr)
+        writeLines(json, bestJsonFile)
+
+        # Save cost
+        cost <- monoFlowAgent$get_cost("all")
+        writeLines(sprintf("Total cost: $%0.2f", cost), file.path(outputFolder, "cost.txt"))
+        costTracker$amount <- costTracker$amount + cost
+      },
+      finally = context$close()
+      )
     } else {
       json <- paste(readLines(bestJsonFile), collapse = "\n")
+      if (file.exists(file.path(outputFolder, "cost.txt"))) {
+        costString <- readLines(file.path(outputFolder, "cost.txt"))
+        costTracker$amount <- costTracker$amount + as.numeric(gsub("Total cost: \\$", "", costString))
+      }
     }
     cohortDefinitions[[i]] <- tibble(
-      phenotypeName = phenotype$phenotypeName,
+      phenotypeId = phenotype$phenotypeId,
       cohortDefinitionName = sprintf("[MonoFlow] %s (AI-generated)", phenotype$phenotypeName),
       circeCohortExpression = json,
       caprCohortExpression = circeToCaprCohortDefinition(json),
@@ -178,26 +196,26 @@ generateCohortDefinitionsUsingMonoFlowAgent <- function(phenotypes,
   return(cohortDefinitions)
 }
 
-constructContext <- function(phenotype) {
-  skillFile <- system.file("skills", "CohortDeveloper.md", package = "Pegasus")
-  skill <- readLines(skillFile)
-  endOfHeader <- grep("---", skill)[2]
-  skill <- paste(skill[(endOfHeader + 1) : length(skill)], collapse = "\n")
+constructPrompt <- function(phenotype, context) {
+  databases <- getDatabaseDescription(context)
+  availableConceptSets <- listConceptSets(context)
 
-  caprReferenceFile <- system.file("skills", "CaprReference.md", package = "Pegasus")
-  caprReference <- paste(readLines(caprReferenceFile), collapse = "\n")
   context <- paste(
-    skill,
+    "<databases>",
+    databases,
+    "</databases>",
     "",
-    "--- Start of CAPR_REFERENCE.md ---",
-    caprReference,
-    "--- End of CAPR_REFERENCE.md ---",
+    "<phenotype_name>",
+    phenotype$phenotypeName,
+    "</phenotype_name>",
     "",
-    sprintf("Phenotype: %s", phenotype$phenotypeName),
-    "",
-    "--- Start of clinical definition ---",
+    "<clinical_definition>",
     phenotype$clinicalDefinition,
-    "--- End of clinical definition ---",
+    "</clinical_definition>",
+    "",
+    "<available_concept_sets>",
+    availableConceptSets,
+    "</available_concept_sets>",
     sep = "\n"
   )
   return(context)
@@ -238,13 +256,13 @@ checkRequirementsMet <- function(phenotypes,
   phenotypeToConceptSets <- downloadPhenotypeToConceptSets(phenotypeIds = phenotypes$phenotypeId,
                                                            pegasusConnection = pegasusConnection,
                                                            pegasusDatabaseSchema = pegasusDatabaseSchema)
-  phenotypeNames <- unique(phenotypeToConceptSets$phenotypeName)
-  if (length(phenotypeNames) != nrow(phenotypes)) {
+  phenotypeIds <- unique(phenotypeToConceptSets$phenotypeId)
+  if (length(phenotypeIds) != nrow(phenotypes)) {
     stop(sprintf("No concept sets found for phenotype(s) '%s'",
-                 paste(phenotypes$phenotypeName[!phenotypes$phenotypeName %in% phenotypeNames], collapse = "', '")))
+                 paste(phenotypes$phenotypeName[!phenotypes$phenotypeId %in% phenotypeIds], collapse = "', '")))
   }
 
-  message(" - Ensuring standard concept sets exist in Pegasus schema")
+  message("- Ensuring standard concept sets exist in Pegasus schema")
   standardConceptSets <- getStandardConceptSets()
   sql <- "
     SELECT concept_set_id,
@@ -297,7 +315,7 @@ checkRequirementsMet <- function(phenotypes,
     standardConceptSets <- existingStandardConceptSets
   }
 
-  message(" - Ensuring standard concept sets have counts")
+  message("- Ensuring standard concept sets have counts")
   conceptSetPersonCounts <- createConceptSetCounts(conceptSets = standardConceptSets,
                                                    pegasusConnection = pegasusConnection,
                                                    pegasusDatabaseSchema = pegasusDatabaseSchema,
@@ -323,7 +341,7 @@ checkRequirementsMet <- function(phenotypes,
       LEFT JOIN @database_schema.concept_set_person_count
         ON phenotype_to_concept_set.concept_set_id = concept_set_person_count.concept_set_id
           AND concept_set_person_count.database_id = @database_id
-      WHERE phenotype.phenotype_id = @phenotype_ids
+      WHERE phenotype.phenotype_id IN (@phenotype_ids)
         AND concept_set_person_count.concept_set_id IS NULL;
     "
     missingCounts <- DatabaseConnector::renderTranslateQuerySql(
@@ -336,7 +354,7 @@ checkRequirementsMet <- function(phenotypes,
     )
     if (nrow(missingCounts) > 0) {
       stop("Missing concept set counts for (amongst others) concept sets '%s'",
-           paste(missingCounts$conceptsetName), collapse("', '"))
+           paste(missingCounts$conceptSetName, collapse = "', '"))
     }
 
     checkRequirementsMetDatabase(phenotypes = phenotypes,
@@ -361,8 +379,8 @@ checkRequirementsMetDatabase <- function(phenotypes,
                  referenceTables$referenceCohortMetadataTable))
   }
   sql <- "
-      SELECT phenotype,
-        cohort_definition_id
+      SELECT phenotype AS phenotype_name,
+        cohort_definition_id AS phenotype_id
       FROM @database_schema.@table;
     "
   existingPhenotypes <- DatabaseConnector::renderTranslateQuerySql(
@@ -373,13 +391,13 @@ checkRequirementsMetDatabase <- function(phenotypes,
     snakeCaseToCamelCase = TRUE
   )
   missingPhenotypes <- phenotypes |>
-    filter(!.data$phenotypeName %in% existingPhenotypes$phenotype)
+    filter(!.data$phenotypeId %in% existingPhenotypes$phenotypeId)
   if (nrow(missingPhenotypes) > 0) {
     stop(sprintf("Missing reference cohort for phenotype(s): '%s'",
-                 paste(missingPhenotypes$phenotype, collapse = "', '")))
+                 paste(missingPhenotypes$phenotypeName, collapse = "', '")))
   }
   existingPhenotypes <- existingPhenotypes|>
-    filter(.data$phenotype %in% phenotypes$phenotypeName)
+    filter(.data$phenotypeId %in% phenotypes$phenotypeId)
 
   message("- Checking if Keeper patient profiles exists for ", databaseReference$databaseName)
   if (!DatabaseConnector::existsTable(connection = connection,
@@ -390,21 +408,100 @@ checkRequirementsMetDatabase <- function(phenotypes,
                  paste0(databaseReference$referenceCohortTable, "_profile")))
   }
   sql <- "
-      SELECT DISTINCT(cohort_definition_id)
+      SELECT DISTINCT(cohort_definition_id) AS phenotype_id
       FROM @database_schema.@table
       WHERE cohort_definition_id IN (@cohort_ids);
     "
-  existingProfileCohortIds <- DatabaseConnector::renderTranslateQuerySql(
+  existingProfilePhenotypeIds <- DatabaseConnector::renderTranslateQuerySql(
     connection = connection,
     sql = sql,
     database_schema = databaseReference$referenceCohortDatabaseSchema,
     table = paste0(databaseReference$referenceCohortTable, "_profile"),
-    cohort_ids = existingPhenotypes$cohortDefinitionId
+    cohort_ids = existingPhenotypes$phenotypeId
   )[, 1]
   missingPhenotypes <- existingPhenotypes |>
-    filter(!.data$cohortDefinitionId %in% existingProfileCohortIds)
+    filter(!.data$phenotypeId %in% existingProfilePhenotypeIds)
   if (nrow(missingPhenotypes) > 0) {
     stop(sprintf("Missing reference cohort for phenotype(s): '%s'",
-                 paste(missingPhenotypes$phenotype, collapse = "', '")))
+                 paste(missingPhenotypes$phenotypeName, collapse = "', '")))
   }
+}
+
+listConceptSets <- function(context) {
+  sql <- "
+    SELECT concept_set_name,
+      has_descendants,
+      database_meta_data.database_id,
+      cdm_source_abbreviation,
+      overall_persons
+    FROM @database_schema.phenotype_to_concept_set
+    INNER JOIN @database_schema.concept_set
+      ON phenotype_to_concept_set.concept_set_id = concept_set.concept_set_id
+    INNER JOIN @database_schema.concept_set_person_count
+      ON concept_set.concept_set_id = concept_set_person_count.concept_set_id
+    INNER JOIN @database_schema.database_meta_data
+      ON concept_set_person_count.database_id = database_meta_data.database_id
+    WHERE phenotype_id = @phenotype_id
+      AND capr_concept_set_expression IS NOT NULL;
+  "
+  conceptSets <- DatabaseConnector::renderTranslateQuerySql(
+    connection = context$pegasusConnection,
+    sql = sql,
+    database_schema = context$pegasusDatabaseSchema,
+    phenotype_id = context$phenotype$phenotypeId,
+    snakeCaseToCamelCase = TRUE
+  )
+
+  sql <- "
+    SELECT concept_set_name,
+      has_descendants,
+      database_meta_data.database_id,
+      cdm_source_abbreviation,
+      overall_persons
+    FROM @database_schema.concept_set
+    INNER JOIN @database_schema.concept_set_person_count
+      ON concept_set.concept_set_id = concept_set_person_count.concept_set_id
+    INNER JOIN @database_schema.database_meta_data
+      ON concept_set_person_count.database_id = database_meta_data.database_id
+    WHERE concept_set_name IN (@concept_set_names);
+  "
+  standardConceptSets <- DatabaseConnector::renderTranslateQuerySql(
+    connection = context$pegasusConnection,
+    sql = sql,
+    database_schema = context$pegasusDatabaseSchema,
+    concept_set_names = paste(sapply(getStandardConceptSets()$conceptSetName, quoteSqlString), collapse = ", "),
+    snakeCaseToCamelCase = TRUE
+  )
+
+  subset <- bind_rows(conceptSets, standardConceptSets) |>
+    filter(.data$databaseId %in% context$getDatabaseIds()) |>
+    select("conceptSetName",
+           "hasDescendants",
+           "cdmSourceAbbreviation",
+           "overallPersons") |>
+    slice_head(n =1, by = c("conceptSetName",
+                            "hasDescendants",
+                            "cdmSourceAbbreviation")) |>
+    tidyr::pivot_wider(
+      id_cols = c("conceptSetName", "hasDescendants"),
+      names_from = "cdmSourceAbbreviation",
+      values_from = "overallPersons",
+      names_prefix = "persons in ",
+      values_fill = 0
+    ) |>
+    arrange(.data$conceptSetName)
+  table <- formatPipeTable(subset)
+  return(table)
+}
+
+getDatabaseDescription <- function(context, database = NULL) {
+  databaseReferences <- context$selectDatabaseReferences(database)
+  descriptions <- list()
+  for (i in seq_along(databaseReferences)) {
+    descriptions[[i]] <- getDescriptionForDatabase(connection = context$getConnection(databaseReferences[[i]]$databaseName),
+                                                   databaseReference = databaseReferences[[i]])
+  }
+  descriptions <- bind_rows(descriptions)
+  json <- jsonlite::toJSON(descriptions)
+  return(json)
 }

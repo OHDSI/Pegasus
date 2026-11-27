@@ -464,6 +464,10 @@ evaluateUsingKeeperReferenceCohorts <- function(phenotypes,
   checkmate::assertList(databaseReferences, min.len = 1, add = errorMessages)
   for (databaseReference in databaseReferences) {
     checkmate::assertClass(databaseReference, "DatabaseReference", add = errorMessages)
+    checkmate::assertString(databaseReference$referenceCohortDatabaseSchema, min.chars = 1, add = errorMessages)
+    checkmate::assertString(databaseReference$referenceCohortTable, min.chars = 1, add = errorMessages)
+    checkmate::assertString(databaseReference$candidateCohortDatabaseSchema, min.chars = 1, add = errorMessages)
+    checkmate::assertString(databaseReference$candidateCohortTable, min.chars = 1, add = errorMessages)
   }
   checkmate::reportAssertions(collection = errorMessages)
   if (is.null(pegasusConnection) && is.null(pegasusConnectionDetails)) {
@@ -493,15 +497,6 @@ evaluateUsingKeeperReferenceCohorts <- function(phenotypes,
     pegasusDatabaseSchema = pegasusDatabaseSchema
   )
 
-  jsonToSql <- function(json) {
-    expression <- CirceR::cohortExpressionFromJson(json)
-    sql <- CirceR::buildCohortQuery(expression, CirceR::createGenerateOptions(generateStats = FALSE))
-    return(sql)
-  }
-
-  cohortDefinitions <- cohortDefinitions |>
-    mutate(sql = sapply(.data$circeCohortExpression, jsonToSql))
-
   results <- list()
   for (i in seq_along(databaseReferences)) {
     databaseReference <- databaseReferences[[i]]
@@ -517,6 +512,8 @@ evaluateUsingKeeperReferenceCohorts <- function(phenotypes,
     if (nrow(toEvaluate) == 0) {
       results[[i]] <- NULL
     } else {
+      toEvaluate <- toEvaluate |>
+        mutate(sql = sapply(.data$circeCohortExpression, cohortJsonToSql))
       results[[i]] <- evaluateInDatabase(
         cohortDefinitions = toEvaluate,
         databaseReference = databaseReference
@@ -530,6 +527,13 @@ evaluateUsingKeeperReferenceCohorts <- function(phenotypes,
                   delta,
                   attr(delta, "units")))
   return(results)
+}
+
+
+cohortJsonToSql <- function(json) {
+  expression <- CirceR::cohortExpressionFromJson(json)
+  sql <- CirceR::buildCohortQuery(expression, CirceR::createGenerateOptions(generateStats = FALSE))
+  return(sql)
 }
 
 evaluateInDatabase <- function(cohortDefinitions, databaseReference) {
@@ -624,7 +628,7 @@ evaluateInDatabase <- function(cohortDefinitions, databaseReference) {
   results <- bind_rows(results) |>
     mutate(databaseId = databaseReference$databaseId,
            databaseName = databaseReference$databaseName,
-           evaluationType = "KEEPER + llm") |>
+           evaluationType = "KEEPER + LLM") |>
     inner_join(counts |>
                  select(cohortDefinitionId = "cohortId",
                         "cohortEntries",
@@ -644,16 +648,20 @@ getExistingEvaluations <- function(cohortDefinitionIds, databaseIds, pegasusConn
     FROM @database_schema.cohort_definition_evaluation
     WHERE cohort_definition_id IN (@cohort_ids)
       AND database_id IN (@database_ids)
-      AND evaluation_type = 'KEEPER + llm';
+      AND evaluation_type = 'KEEPER + LLM';
   "
-  existingEvaluations <- DatabaseConnector::renderTranslateQuerySql(
-    connection = pegasusConnection,
-    sql = sql,
-    database_schema = pegasusDatabaseSchema,
-    cohort_ids = cohortDefinitionIds,
-    database_ids = databaseIds,
-    snakeCaseToCamelCase = TRUE
-  )
+  batches <- split(cohortDefinitionIds, ceiling(seq_along(cohortDefinitionIds) / 500))
+  existingEvaluations <- lapply(batches, function(batch) {
+    DatabaseConnector::renderTranslateQuerySql(
+      connection = pegasusConnection,
+      sql = sql,
+      database_schema = pegasusDatabaseSchema,
+      cohort_ids = batch,
+      database_ids = databaseIds,
+      snakeCaseToCamelCase = TRUE
+    )
+  })
+  existingEvaluations <- bind_rows(existingEvaluations)
   return(existingEvaluations)
 }
 
@@ -675,6 +683,8 @@ getKeeperReferenceCohortId <- function(connection, databaseReference, phenotypeI
   )
   if (nrow(keeperReference) == 0) {
     stop("Could not find reference cohort for phenotype ", phenotypeId, " in database '", databaseReference$databaseName, "'")
+  } else if (nrow(keeperReference) > 1) {
+    stop("Found more than one reference cohort for phenotype ", phenotypeId, " in database '", databaseReference$databaseName, "'")
   }
   if (keeperReference$phenotype != phenotypeName) {
     warning(sprintf("Reference cohort %d was created for phenotype '%s', which is a different name than '%s'",

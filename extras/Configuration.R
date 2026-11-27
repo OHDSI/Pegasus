@@ -12,8 +12,7 @@ pegasusConnectionDetails <- DatabaseConnector::createConnectionDetails(
   password = Sys.getenv("PEGASUS_DB_PASSWORD")
 )
 
-# pegasusDatabaseSchema <- Sys.getenv("PEGASUS_DATABASE_SCHEMA")
-pegasusDatabaseSchema <- "pegasus_stage"
+pegasusDatabaseSchema <- Sys.getenv("PEGASUS_DATABASE_SCHEMA")
 
 options(sqlRenderTempEmulationSchema = NULL) # For the Pegasus connection
 
@@ -69,7 +68,7 @@ for (i in seq_along(cdmDatabaseSchemas)) {
     candidateCohortTable = "pegasus_cohort_optum_extended_dod_v4155",
     workDatabaseSchema = paste0("pegasus.pegasus_", databaseTails[i]),
     workCohortTable = "pegasus_agent_cohort",
-    workConceptSetTable = "pegasus_agent_concept_set_"
+    workConceptSetTable = "pegasus_agent_concept_set"
   )
 }
 

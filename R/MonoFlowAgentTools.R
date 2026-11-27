@@ -248,7 +248,8 @@ ensureCohortExists <- function(context, json, database) {
       )
     )
     runQuietly(
-      CohortGenerator::insertInclusionRuleNames(
+      # CohortGenerator::insertInclusionRuleNames(
+      insertInclusionRuleNames(
         connection = connection,
         cohortDatabaseSchema = databaseReference$workDatabaseSchema,
         cohortDefinitionSet = cohortDefinitionSet,
@@ -257,6 +258,65 @@ ensureCohortExists <- function(context, json, database) {
     )
   }
   return(cohortId)
+}
+
+# Copy of function in CohortGenerator while this issue is not resolved: https://github.com/OHDSI/CohortGenerator/issues/282
+insertInclusionRuleNames <- function(connectionDetails = NULL,
+                                     connection = NULL,
+                                     cohortDefinitionSet,
+                                     cohortDatabaseSchema,
+                                     cohortInclusionTable = CohortGenerator::getCohortTableNames()$cohortInclusionTable) {
+  # Parameter validation
+  if (is.null(connection) && is.null(connectionDetails)) {
+    stop("You must provide either a database connection or the connection details.")
+  }
+
+  if (is.null(connection)) {
+    connection <- DatabaseConnector::connect(connectionDetails)
+    on.exit(DatabaseConnector::disconnect(connection))
+  }
+
+  tableList <- DatabaseConnector::getTableNames(connection, cohortDatabaseSchema)
+  if (!toupper(cohortInclusionTable) %in% toupper(tableList)) {
+    stop(paste0(cohortInclusionTable, " table not found in schema: ", cohortDatabaseSchema, ". Please make sure the table is created using the createCohortTables() function before calling this function."))
+  }
+
+  inclusionRules <- CohortGenerator::getCohortInclusionRules(cohortDefinitionSet)
+
+  # Remove any existing data to prevent duplication
+  ### Modification starts here ***
+  sql <- "
+    DELETE FROM @cohort_database_schema.@table
+    WHERE cohort_definition_id IN (@cohort_ids);
+  "
+  DatabaseConnector::renderTranslateExecuteSql(
+    connection = connection,
+    sql = sql,
+    progressBar = FALSE,
+    reportOverallTime = FALSE,
+    cohort_database_schema = cohortDatabaseSchema,
+    table = cohortInclusionTable,
+    cohort_ids = cohortDefinitionSet$cohortId
+  )
+  ### Modification ends here ***
+
+  # Insert the inclusion rules
+  if (nrow(inclusionRules) > 0) {
+    rlang::inform("Inserting inclusion rule names")
+    DatabaseConnector::insertTable(
+      connection = connection,
+      databaseSchema = cohortDatabaseSchema,
+      tableName = cohortInclusionTable,
+      data = inclusionRules,
+      dropTableIfExists = FALSE,
+      createTable = FALSE,
+      camelCaseToSnakeCase = TRUE
+    )
+  } else {
+    warning("No inclusion rules found in the cohortDefinitionSet")
+  }
+
+  invisible(inclusionRules)
 }
 
 # Compile a client-supplied Capr cohort definition (R text) to Circe JSON in an isolated,
@@ -504,25 +564,46 @@ getCohortCountForDatabase <- function(cohortId, connection, databaseReference) {
                                 tibble(cohortDefinitionId = cohortId,
                                        ruleSequence = -1,
                                        name = "Initial event"))
-    counts <- CohortGenerator::computeCohortAttrition(inclusionResults, inclusionRules) |>
-      filter(.data$modeId == 0, .data$cohortEntry == 0) |>
+    counts <- CohortGenerator::computeCohortAttrition(inclusionResults, inclusionRules)
+    personCounts <- counts |>
+      filter(.data$modeId == 1, .data$cohortEntry == 0) |>
       right_join(inclusionRules, by = join_by("cohortDefinitionId", "ruleSequence")) |>
       select("ruleSequence", "name", incrementalPersons = "personCount")
 
-    counts <- counts |>
+    personCounts <- personCounts |>
       left_join(cohortInclusionStats |>
-                  filter(.data$modeId == 0) |>
-                  select("ruleSequence", marginalPerson = "personCount", "gainCount"),
+                  filter(.data$modeId == 1) |>
+                  select("ruleSequence", marginalPersons = "personCount", gainPersons = "gainCount"),
                 by = join_by("ruleSequence")) |>
       mutate(ruleSequence  = .data$ruleSequence + 1) |>
       mutate(incrementalPersons = if_else(is.na(.data$incrementalPersons), 0, .data$incrementalPersons),
-             marginalPerson = if_else(is.na(.data$marginalPerson) & .data$ruleSequence != 0, 0, .data$marginalPerson),
-             gainCount = if_else(is.na(.data$gainCount) & .data$ruleSequence != 0, 0, .data$gainCount)) |>
+             marginalPersons = if_else(is.na(.data$marginalPersons) & .data$ruleSequence != 0, 0, .data$marginalPersons),
+             gainPersons = if_else(is.na(.data$gainPersons) & .data$ruleSequence != 0, 0, .data$gainPersons))
+
+    eventCounts <- counts |>
+      filter(.data$modeId == 0, .data$cohortEntry == 0, .data$cohortDefinitionId == cohortId) |>
+      select("ruleSequence",  incrementalEvents = "personCount")
+
+    eventCounts <- eventCounts |>
+      left_join(cohortInclusionStats |>
+                  filter(.data$modeId == 0) |>
+                  select("ruleSequence", marginalEvents = "personCount", gainEvents= "gainCount"),
+                by = join_by("ruleSequence")) |>
+      mutate(ruleSequence  = .data$ruleSequence + 1) |>
+      mutate(incrementalEvents = if_else(is.na(.data$incrementalEvents), 0, .data$incrementalEvents),
+             marginalEvents = if_else(is.na(.data$marginalEvents) & .data$ruleSequence != 0, 0, .data$marginalEvents),
+             gainEvents = if_else(is.na(.data$gainEvents) & .data$ruleSequence != 0, 0, .data$gainEvents))
+
+    counts <- inner_join(
+      personCounts,
+      eventCounts,
+      by = join_by("ruleSequence")
+    ) |>
       arrange(.data$ruleSequence)
   } else {
     sql <- "
       SELECT COUNT(DISTINCT subject_id) AS person_count,
-        COUNT(*) AS entry_count
+        COUNT(*) AS event_count
       FROM @cohort_database_schema.@cohort_table
       WHERE cohort_definition_id = @cohort_id;
     "
@@ -573,18 +654,18 @@ countConceptSetPersonOverlapForDatabase <- function(connection, databaseReferenc
 
   requestedConceptSets <- paste(
     sprintf(
-      "SELECT %s AS concept_set_hash, %d AS input_order, %s AS concept_set_name",
+      "SELECT %s AS concept_set_hash, %d AS input_order",
       quoteSqlString(conceptSetsToCount$conceptSetHash),
-      conceptSetsToCount$inputOrder,
-      quoteSqlString(conceptSetsToCount$name)
+      conceptSetsToCount$inputOrder
+      # quoteSqlString(conceptSetsToCount$name)
     ),
     collapse = " UNION ALL "
   )
   requestedWindows <- paste(
     sprintf(
-      "SELECT %d AS window_order, %s AS window_name, %d AS start_day, %d AS end_day",
+      "SELECT %d AS window_order, %d AS start_day, %d AS end_day",
       windowsToCount$inputOrder,
-      quoteSqlString(windowsToCount$name),
+      # quoteSqlString(windowsToCount$name),
       as.integer(windowsToCount$startDay),
       as.integer(windowsToCount$endDay)
     ),
@@ -693,8 +774,7 @@ countConceptSetPersonOverlapForDatabase <- function(connection, databaseReferenc
         BETWEEN time_window.start_day AND time_window.end_day
       GROUP BY occurrence.concept_set_hash, time_window.window_order
     )
-    SELECT requested.concept_set_name,
-      time_window.window_name,
+    SELECT requested.concept_set_hash,
       time_window.start_day,
       time_window.end_day,
       COALESCE(MAX(CASE WHEN population.domain_id = 'Condition' THEN population.person_count END), 0) AS condition_persons,
@@ -724,8 +804,8 @@ countConceptSetPersonOverlapForDatabase <- function(connection, databaseReferenc
     LEFT JOIN cohort_overall_counts cohort_overall
       ON requested.concept_set_hash = cohort_overall.concept_set_hash
         AND time_window.window_order = cohort_overall.window_order
-    GROUP BY requested.concept_set_hash, requested.concept_set_name, requested.input_order,
-      time_window.window_name, time_window.start_day, time_window.end_day, time_window.window_order
+    GROUP BY requested.concept_set_hash, requested.input_order,
+      time_window.start_day, time_window.end_day, time_window.window_order
     ORDER BY requested.input_order, time_window.window_order;
   "
   counts <- DatabaseConnector::renderTranslateQuerySql(
@@ -740,6 +820,13 @@ countConceptSetPersonOverlapForDatabase <- function(connection, databaseReferenc
     cdm_database_schema = databaseReference$cdmDatabaseSchema,
     snakeCaseToCamelCase = TRUE
   )
+  counts <- counts |>
+    inner_join(conceptSetsToCount |>
+                 select("conceptSetHash", conceptSetName = "name"),
+               by = join_by("conceptSetHash")) |>
+    inner_join(windowsToCount |>
+                 select("startDay", "endDay", windowName = "name"),
+               by = join_by("startDay", "endDay"))
   counts <- counts |>
     mutate(database = databaseReference$databaseName)
   return(counts)
@@ -1149,77 +1236,11 @@ samplePatientProfileForDatabase <- function(connection,
 }
 
 # Tool functions --------------------------------------------------------------------------------------------------------
-listConceptSets <- function(context) {
-  sql <- "
-    SELECT concept_set_name,
-      has_descendants,
-      database_meta_data.database_id,
-      cdm_source_abbreviation,
-      overall_persons
-    FROM @database_schema.phenotype_to_concept_set
-    INNER JOIN @database_schema.concept_set
-      ON phenotype_to_concept_set.concept_set_id = concept_set.concept_set_id
-    INNER JOIN @database_schema.concept_set_person_count
-      ON concept_set.concept_set_id = concept_set_person_count.concept_set_id
-    INNER JOIN @database_schema.database_meta_data
-      ON concept_set_person_count.database_id = database_meta_data.database_id
-    WHERE phenotype_id = @phenotype_id
-      AND capr_concept_set_expression IS NOT NULL;
-  "
-  conceptSets <- DatabaseConnector::renderTranslateQuerySql(
-    connection = context$pegasusConnection,
-    sql = sql,
-    database_schema = context$pegasusDatabaseSchema,
-    phenotype_id = context$phenotype$phenotypeId,
-    snakeCaseToCamelCase = TRUE
-  )
-
-  sql <- "
-    SELECT concept_set_name,
-      has_descendants,
-      database_meta_data.database_id,
-      cdm_source_abbreviation,
-      overall_persons
-    FROM @database_schema.concept_set
-    INNER JOIN @database_schema.concept_set_person_count
-      ON concept_set.concept_set_id = concept_set_person_count.concept_set_id
-    INNER JOIN @database_schema.database_meta_data
-      ON concept_set_person_count.database_id = database_meta_data.database_id
-    WHERE concept_set_name IN (@concept_set_names);
-  "
-  standardConceptSets <- DatabaseConnector::renderTranslateQuerySql(
-    connection = context$pegasusConnection,
-    sql = sql,
-    database_schema = context$pegasusDatabaseSchema,
-    concept_set_names = paste(sapply(getStandardConceptSets()$conceptSetName, quoteSqlString), collapse = ", "),
-    snakeCaseToCamelCase = TRUE
-  )
-
-  subset <- bind_rows(conceptSets, standardConceptSets) |>
-    filter(.data$databaseId %in% context$getDatabaseIds()) |>
-    select("conceptSetName",
-           "hasDescendants",
-           "cdmSourceAbbreviation",
-           "overallPersons") |>
-    slice_head(n =1, by = c("conceptSetName",
-                            "hasDescendants",
-                            "cdmSourceAbbreviation")) |>
-    tidyr::pivot_wider(
-      id_cols = c("conceptSetName", "hasDescendants"),
-      names_from = "cdmSourceAbbreviation",
-      values_from = "overallPersons",
-      names_prefix = "persons in ",
-      values_fill = 0
-    ) |>
-    arrange(.data$conceptSetName)
-  table <- formatPipeTable(subset)
-  return(table)
-}
-
 getConceptSetsCapr <- function(context, conceptSetNames, detail = "code_and_counts") {
   if (!detail %in% c("code", "code_and_counts", "full_reference")) {
     stop("The detail argument should be 'code', 'code_and_counts', or 'full_reference'")
   }
+  standardConceptSets <- getStandardConceptSets()
   sql <- "
     SELECT concept_set_name,
       has_descendants,
@@ -1234,15 +1255,16 @@ getConceptSetsCapr <- function(context, conceptSetNames, detail = "code_and_coun
       observation_persons,
       visit_persons,
       overall_persons
-    FROM @database_schema.phenotype_to_concept_set
-    INNER JOIN @database_schema.concept_set
-      ON phenotype_to_concept_set.concept_set_id = concept_set.concept_set_id
+    FROM @database_schema.concept_set
     INNER JOIN @database_schema.concept_set_person_count
       ON concept_set.concept_set_id = concept_set_person_count.concept_set_id
     INNER JOIN @database_schema.database_meta_data
       ON concept_set_person_count.database_id = database_meta_data.database_id
-    WHERE phenotype_id = @phenotype_id
-      AND LOWER(concept_set_name) IN (@concept_set_names);
+    LEFT JOIN @database_schema.phenotype_to_concept_set
+      ON phenotype_to_concept_set.concept_set_id = concept_set.concept_set_id
+        AND phenotype_id = @phenotype_id
+    WHERE LOWER(concept_set_name) IN (@concept_set_names)
+      AND (phenotype_id IS NOT NULL OR LOWER(concept_set_name) IN (@standard_concept_set_names));
   "
   conceptSets <- DatabaseConnector::renderTranslateQuerySql(
     connection = context$pegasusConnection,
@@ -1250,6 +1272,7 @@ getConceptSetsCapr <- function(context, conceptSetNames, detail = "code_and_coun
     database_schema = context$pegasusDatabaseSchema,
     phenotype_id = context$phenotype$phenotypeId,
     concept_set_names = paste(tolower(quoteSqlString(conceptSetNames)), collapse = ", "),
+    standard_concept_set_names = paste(tolower(quoteSqlString(standardConceptSets$conceptSetName)), collapse = ", "),
     snakeCaseToCamelCase = TRUE
   )
   caprWithReference <- conceptSets |>
@@ -1375,18 +1398,6 @@ getCohortCount <- function(context, cohortId, database = NULL) {
   }
   counts <- bind_rows(counts)
   json <- jsonlite::toJSON(counts)
-  return(json)
-}
-
-getDatabaseDescription <- function(context, database = NULL) {
-  databaseReferences <- context$selectDatabaseReferences(database)
-  descriptions <- list()
-  for (i in seq_along(databaseReferences)) {
-    descriptions[[i]] <- getDescriptionForDatabase(connection = context$getConnection(databaseReferences[[i]]$databaseName),
-                                                   databaseReference = databaseReferences[[i]])
-  }
-  descriptions <- bind_rows(descriptions)
-  json <- jsonlite::toJSON(descriptions)
   return(json)
 }
 
@@ -1590,20 +1601,12 @@ bindContext <- function(fun, context) {
   return(bound)
 }
 
-predefinedConceptSetNote <- paste(
-  "Every concept set must be a predefined one (see listConceptSets / getConceptSetsCapr), used with its exact name",
-  "and exact content; unknown or modified concept sets are rejected."
-)
-
 createAgentTools <- function(context) {
   return(list(
-    listConceptSetsTool(context),
     getConceptSetsCaprTool(context),
     validateCaprTool(context),
-    convertCaprToJsonTool(context),
     generateCohortTool(context),
     getCohortCountTool(context),
-    getDatabaseDescriptionTool(context),
     countConceptSetPersonOverlapTool(context),
     describeMeasurementValuesTool(context),
     computeIncidenceRateTool(context),
@@ -1612,29 +1615,17 @@ createAgentTools <- function(context) {
   ))
 }
 
-listConceptSetsTool <- function(context) ellmer::tool(
-  bindContext(listConceptSets, context),
-  name = "listConceptSets",
-  description = paste(
-    "Retrieve the concept sets associated with the phenotype.",
-    "Returns a markdown table with three columns: concept set name, whether the set includes descendants, and the",
-    "number of unique persons with at least one of the concepts in the set.",
-    "A count of 0 means nobody has any of the concepts."
-  ),
-  arguments = list()
-)
-
 getConceptSetsCaprTool <- function(context) ellmer::tool(
   bindContext(getConceptSetsCapr, context),
   name = "getConceptSetsCapr",
-  description = paste("Returns the Capr R code for one or more concept sets, and unique person counts per domain",
-                      "(only non-zero domains)."),
+  description = paste("Returns the Capr R code for one or more concept sets, optionally with unique person counts per",
+                      "domainor full concept Id references."),
   arguments = list(
     conceptSetNames = ellmer::type_array(ellmer::type_string("Names of the concept sets.")),
     detail = ellmer::type_enum(c("code", "code_and_counts", "full_reference"),
                        paste("Level of detail to return.",
                              "'code' returns the Capr code,",
-                             "'code_and_counts' additionally returns person count per domain, and",
+                             "'code_and_counts' additionally returns person count per domain and database, and",
                              "'full_reference' also includes a reference for the concept IDs used in the code.")
     )
   )
@@ -1643,8 +1634,7 @@ getConceptSetsCaprTool <- function(context) ellmer::tool(
 validateCaprTool <- function(context) ellmer::tool(
   bindContext(validateCapr, context),
   name = "validateCapr",
-  description = paste("Validate the provided Capr code. Either returns 'Valid' or an informative error message.",
-                      predefinedConceptSetNote),
+  description = "Validate the provided Capr code. Either returns 'Valid' or an informative error message.",
   arguments = list(
     caprCode = ellmer::type_string(paste(
       "A single Capr cohort definition as R code: one cohort(...) expression with all concept",
@@ -1659,32 +1649,18 @@ validateCaprTool <- function(context) ellmer::tool(
 # argument is kept required and the LLM is told to pass an empty array to mean 'all databases'.
 createDatabaseArgument <- function(context) {
   ellmer::type_array(
-    ellmer::type_string(),
+    ellmer::type_enum(context$getDatabaseNames()),
     description = paste("Names of the databases to use. Pass an empty array ([]) to use all databases. Available:",
                         paste(context$getDatabaseNames(), collapse = "; ")),
     required = TRUE
   )
 }
 
-convertCaprToJsonTool <- function(context) ellmer::tool(
-  bindContext(convertCaprToJson, context),
-  name = "convertCaprToJson",
-  description = paste("Convert Capr code to JSON, including full concept information.",
-                      "(This can be a lot of text). Concept details come from the first selected database.",
-                      predefinedConceptSetNote),
-  arguments = list(
-    caprCode = ellmer::type_string(paste(
-      "A single Capr cohort definition as R code: one cohort(...) expression with all concept",
-      "sets inlined and no assignments. Compiled server-side - do not pass JSON."
-    ))
-  )
-)
-
 generateCohortTool <- function(context, databaseArgument = createDatabaseArgument(context)) ellmer::tool(
   bindContext(generateCohort, context),
   name = "generateCohort",
-  description = paste("Generate the cohort in the selected database(s) (default: all) and return the cohort ID.",
-                      "The same cohort ID is used in every database.", predefinedConceptSetNote),
+  description = paste("Generate the cohort in the selected database(s) and return the cohort ID.",
+                      "The same cohort ID is used in every database."),
   arguments = list(
     caprCode = ellmer::type_string(paste(
       "A single Capr cohort definition as R code: one cohort(...) expression with all concept",
@@ -1697,21 +1673,12 @@ generateCohortTool <- function(context, databaseArgument = createDatabaseArgumen
 getCohortCountTool <- function(context, databaseArgument = createDatabaseArgument(context)) ellmer::tool(
   bindContext(getCohortCount, context),
   name = "getCohortCount",
-  description = paste("Returns cohort sizes per database. For cohorts with attrition rules, also returns the number of persons",
-                      "remaining after each rule is applied (incrementalPersons), the number of persons who satisfy",
-                      "both the initial event and the rule (marginalPersons), and the number of persons that would be",
-                      "added back if the rule were removed (gainCount)."),
+  description = paste("Returns cohort sizes per database. For cohorts with attrition rules, also returns the number of",
+                      "persons and events remaining after each rule is applied (incrementalPersons & incrementalEvents),",
+                      "the numbers satisfying both the initial event and the rule (marginalPersons $ marginalEvents),",
+                      "and the numbers that would be added back if the rule were removed (gainPersons and gainEvents)."),
   arguments = list(
-    cohortId = ellmer::type_integer("The cohort ID as returned by the `generate_cohort` tool."),
-    database = databaseArgument
-  )
-)
-
-getDatabaseDescriptionTool <- function(context, databaseArgument = createDatabaseArgument(context)) ellmer::tool(
-  bindContext(getDatabaseDescription, context),
-  name = "getDatabaseDescription",
-  description = "Returns a short description of one or more databases (default: all).",
-  arguments = list(
+    cohortId = ellmer::type_integer("The cohort ID as returned by the `generateCohort` tool."),
     database = databaseArgument
   )
 )
@@ -1722,14 +1689,14 @@ countConceptSetPersonOverlapTool <- function(context, databaseArgument = createD
   description = paste(
     "Instantiate one or more Capr concept sets and count distinct people with their concepts",
     "in the general population and within inclusive day windows relative to generated cohort",
-    "index dates. Returns per-domain and overall counts for each window.", predefinedConceptSetNote
+    "index dates. Returns per-domain and overall counts for each window."
   ),
   arguments = list(
     caprCode = ellmer::type_array(ellmer::type_string(paste(
       "A standalone Capr cs(...) expression. Supply one or more expressions; include a",
       "name argument in each expression."
     ))),
-    cohortId = ellmer::type_integer("The cohort ID as returned by the `generate_cohort` tool."),
+    cohortId = ellmer::type_integer("The cohort ID as returned by the `generateCohort` tool."),
     database = databaseArgument,
     timeWindows = ellmer::type_array(
       ellmer::type_object(
@@ -1751,11 +1718,11 @@ describeMeasurementValuesTool <- function(context, databaseArgument = createData
   bindContext(describeMeasurementValues, context),
   name = "describeMeasurementValues",
   description = paste(
-    "For a measurement concept set, enumerate all units observed in the database and return",
+    "For one or more measurement concept sets, enumerate all units observed in the database and return",
     "descriptives of the measurement value distribution per unit: number of measurements,",
     "number of distinct persons, number of measurements without a value, minimum, 10th, 25th,",
     "50th, 75th and 90th percentile, maximum, mean, and standard deviation. Measurements without",
-    "a unit are reported as unit concept ID 0 ('No unit').", predefinedConceptSetNote
+    "a unit are reported as unit concept ID 0 ('No unit')."
   ),
   arguments = list(
     caprCode = ellmer::type_array(ellmer::type_string(paste(
@@ -1778,7 +1745,7 @@ computeIncidenceRateTool <- function(context, databaseArgument = createDatabaseA
     "Age and sex strata are computed separately, not crossed."
   ),
   arguments = list(
-    cohortId = ellmer::type_integer("The cohort ID as returned by the `generate_cohort` tool."),
+    cohortId = ellmer::type_integer("The cohort ID as returned by the `generateCohort` tool."),
     database = databaseArgument
   )
 )
@@ -1791,7 +1758,7 @@ evaluateCohortTool <- function(context, databaseArgument = createDatabaseArgumen
     "Returns sensitivity, specificity (adjusted for sampling), PPV, and the confusion matrix."
   ),
   arguments = list(
-    cohortId = ellmer::type_integer("The cohort ID as returned by the `generate_cohort` tool."),
+    cohortId = ellmer::type_integer("The cohort ID as returned by the `generateCohort` tool."),
     database = databaseArgument
   )
 )
@@ -1804,7 +1771,7 @@ samplePatientProfileTool <- function(context, databaseArgument = createDatabaseA
     "database. Call multiple times to sample multiple patients."
   ),
   arguments = list(
-    cohortId = ellmer::type_integer("The cohort ID as returned by the `generate_cohort` tool."),
+    cohortId = ellmer::type_integer("The cohort ID as returned by the `generateCohort` tool."),
     type = ellmer::type_enum(c("TP", "FP", "TN", "FN"), paste(
       "Type, based on classification status, using the KEEPER reference cohort as gold standard.",
       "Options: TP, FP, TN, FN"

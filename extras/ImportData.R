@@ -894,7 +894,7 @@ copyTable("cohort_definition_evaluation")
 copyTable("phenotype_ancestor")
 
 # Copy Keeper reference tables -----------------------------------------------------------------------------------------
-phenotypes <- downloadPhenotypes(connection, pegasusDatabaseSchema = "pegasus") |>
+phenotypes <- downloadPhenotypes(pegasusConnection = connection, pegasusDatabaseSchema = "pegasus") |>
   mutate(phenotypeName = trimws(phenotypeName, whitespace = "[ \t\r\n\u00A0]"))
 
 cdmConnection <- DatabaseConnector::connect(cdmConnectionDetails)
@@ -1245,6 +1245,171 @@ DatabaseConnector::disconnect(connection)
 # )
 # x
 
+# Upload Keeper profiles for Optum DoD 4020 ----------------------------------------------------------------------------
+phenotypes <- downloadPhenotypes(pegasusConnection = connection, pegasusDatabaseSchema = "pegasus") |>
+  mutate(phenotypeName = trimws(phenotypeName, whitespace = "[ \t\r\n\u00A0]"))
+
+cdmConnection <- DatabaseConnector::connect(cdmConnectionDetails)
+
+targetSchema <- "pegasus.pegasus_optum_extended_dod_v4020"
+
+rootFolder <- "../largescalephentest/Keeper"
+
+hscRef <- readr::read_csv(file.path(rootFolder, "HscCohortRef.csv"), show_col_types = FALSE)
+hscRef <- hscRef |>
+  inner_join(phenotypes |>
+               select(phenotype = phenotypeName,
+                      phenotypeId),
+             by = join_by(phenotype))
+
+cohortSizes <- readr::read_csv(file.path(rootFolder, "referenceCohortSizes.csv"), show_col_types = FALSE)
+toSkip <- cohortSizes |>
+  filter(countOptumClinformatics == 0)
+profilesTableExists <- DatabaseConnector::existsTable(
+  connection = cdmConnection,
+  databaseSchema = targetSchema,
+  tableName = "reference_cohort_profile"
+)
+if (!profilesTableExists) {
+  message("- Creating profile table")
+  sql <- "
+        CREATE TABLE @database_schema.@table (
+          cohort_definition_id INT,
+          person_id BIGINT,
+          start_day INT,
+          end_day INT,
+          concept_id INT,
+          concept_name VARCHAR,
+          category VARCHAR,
+          target VARCHAR,
+          extra_data VARCHAR
+        );
+      "
+  DatabaseConnector::renderTranslateExecuteSql(
+    connection = cdmConnection,
+    sql = sql,
+    database_schema = targetSchema,
+    table = "reference_cohort_profile"
+  )
+}
+
+
+# i = which(hscRef$phenotypeId == 421)
+for (i in 268:nrow(hscRef)) {
+  row <- hscRef[i, ]
+  if (row$phenotype %in% toSkip$phenotype) {
+    message(sprintf("Skipping '%s' (%d or %d)",
+                    row$phenotype,
+                    i,
+                    nrow(hscRef)))
+    next
+  }
+  message(sprintf("Copying KEEPER profiles for '%s' (%d or %d)",
+                  row$phenotype,
+                  i,
+                  nrow(hscRef)))
+  phenotypeFolder <- file.path(rootFolder, gsub("[^[:alnum:]]+", "_", row$phenotype))
+  keeperConceptSets <- readr::read_csv(file.path(phenotypeFolder, "KeeperConceptSets.csv"), show_col_types = FALSE)
+  llmReviews <- readRDS(file.path(phenotypeFolder, "llmReviews_OptumClinformatics.rds"))
+  if (!is.data.frame(llmReviews)) {
+    llmReviews <- llmReviews$llmReviews
+  }
+  keeper <- Keeper::generateKeeper(
+    connection = cdmConnection,
+    cdmDatabaseSchema = "optum_extended_dod.cdm_optum_extended_dod_v4020",
+    cohortDatabaseSchema = "scratch.scratch_mschuemi",
+    cohortTable = "keeper_hsc_acute_liver_failure",
+    cohortDefinitionId = row$cohortId,
+    personIds = llmReviews$personId,
+    sampleSize = nrow(llmReviews),
+    keeperConceptSets = keeperConceptSets,
+    phenotypeName = row$phenotype,
+    removePii  = FALSE
+  )
+
+  keeper <- keeper |>
+    mutate(cohortDefinitionId = row$phenotypeId) |>
+    Pegasus:::personIdToColumn()
+
+  sql <- "
+    DELETE FROM @database_schema.@table
+    WHERE cohort_definition_id = @cohort_definition_id;
+  "
+  DatabaseConnector::renderTranslateExecuteSql(
+    connection = cdmConnection,
+    sql = sql,
+    database_schema = targetSchema,
+    table = "reference_cohort_profile",
+    cohort_definition_id = row$phenotypeId,
+    reportOverallTime = FALSE,
+    progressBar = FALSE
+  )
+  DatabaseConnector::insertTable(
+    connection = cdmConnection,
+    tableName = "#reference_cohort_profile",
+    data = keeper,
+    createTable = TRUE,
+    dropTableIfExists = TRUE,
+    tempTable = TRUE,
+    camelCaseToSnakeCase = TRUE,
+    bulkLoad = TRUE
+  )
+  sql <- "
+    INSERT INTO @schema.@table (
+      start_day,
+      end_day,
+      concept_id,
+      concept_name,
+      category,
+      target,
+      extra_data,
+      cohort_definition_id,
+      person_id
+    )
+    SELECT start_day,
+      end_day,
+      concept_id,
+      concept_name,
+      category,
+      target,
+      extra_data,
+      cohort_definition_id,
+      person_id
+    FROM #reference_cohort_profile;
+  "
+  DatabaseConnector::renderTranslateExecuteSql(
+    connection = cdmConnection,
+    sql = sql,
+    schema = targetSchema,
+    table = "reference_cohort_profile"
+  )
+  # DatabaseConnector::insertTable(
+  #   connection = cdmConnection,
+  #   databaseSchema = targetSchema,
+  #   tableName = "reference_cohort_profile",
+  #   data = keeper,
+  #   createTable = FALSE,
+  #   dropTableIfExists = FALSE,
+  #   tempTable = FALSE,
+  #   camelCaseToSnakeCase = TRUE
+  # )
+}
+
+sql <- "SELECT cohort_definition_id,
+    COUNT(*) AS row_count
+  FROM @schema.@table
+  GROUP BY cohort_definition_id;
+"
+DatabaseConnector::renderTranslateQuerySql(
+  connection = cdmConnection,
+  sql = sql,
+  schema = targetSchema,
+  table = "reference_cohort_profile",
+  snakeCaseToCamelCase = TRUE
+)
+DatabaseConnector::disconnect(cdmConnection)
+
+
 # Replace legacy database IDs ------------------------------------------------------------------------------------------
 legacyDatabaseIds <- c(1,2)
 pegasusDatabaseSchema <- "pegasus_stage"
@@ -1281,4 +1446,10 @@ for (i in seq_along(tables)) {
     }
   }
 }
+
+
+tableNames <- Keeper::createReferenceCohortTableNames(databaseReference$referenceCohortTable)
+ref <- Keeper::listReferenceCohorts(connectionDetails = cdmConnectionDetails,
+                             referenceCohortDatabaseSchema = databaseReference$referenceCohortDatabaseSchema,
+                             referenceCohortMetadataTable = tableNames$referenceCohortMetadataTable)
 

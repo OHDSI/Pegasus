@@ -45,7 +45,8 @@ toRow <- function(capr) {
 standardConceptSets <- bind_rows(
   toRow(Capr::cs(Capr::descendants(9201), name = "Inpatient visit")),
   toRow(Capr::cs(Capr::descendants(9202), name = "Outpatient visit")),
-  toRow(Capr::cs(Capr::descendants(9203, 262), name = "Emergency room visit"))
+  toRow(Capr::cs(Capr::descendants(9203, 262), name = "Emergency room visit")),
+  toRow(Capr::cs(Capr::descendants(9201, 9203, 262), name = "Inpatient or emergency room visit"))
 )
 readr::write_csv(standardConceptSets, "inst/StandardConceptSets.csv")
 DatabaseConnector::disconnect(connection)
