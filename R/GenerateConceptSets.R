@@ -193,27 +193,7 @@ createFullConceptSet <- function(row, llmClient, databaseReference, cacheFolder)
         cacheFolder = if (hasCacheFolder)  folder else  NULL
       )
     },
-    TooManyConceptsError = function(e) {
-      warning("Too many recommended concepts for '",
-              row$conceptSetName,
-              "', reverting to simple concept set (seed + descendants).")
-      if (is.na(row$conceptId)) {
-        seedConcepts <- readr::read_csv(file.path(folder, "SeedConcepts.csv"), show_col_types = FALSE)
-        seedConceptId <- seedConcepts$conceptId[1]
-      } else {
-        seedConceptId <- row$conceptId
-      }
-      conceptSet <- Capr::cs(Capr::descendants(seedConceptId), name = row$conceptSetName)
-      connection <- DatabaseConnector::connect(databaseReference$connectionDetails)
-      conceptSet <- Capr::getConceptSetDetails(conceptSet, connection, databaseReference$cdmDatabaseSchema)
-      DatabaseConnector::disconnect(connection)
-      json <- Capr::toConceptSetJson(conceptSet)
-      if (hasCacheFolder) {
-        writeLines(json, file.path(folder, "ConceptSetExpression.json"))
-      }
-      return(json)
-    },
-    NoApprovedConceptsError = function(e) {
+    NoApprovedConceptsWarning = function(e) {
       "<No approved concepts>"
     },
     error = function(e) {

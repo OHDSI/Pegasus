@@ -1,8 +1,8 @@
 Package: Pegasus
 Type: Package
 Title: Phenotype Evaluation and Generation by AI-assisted Synthesis & User Specifications
-Version: 0.0.1
-Date: 2026-10-08
+Version: 0.1.0
+Date: 2026-11-27
 Authors@R: c(
 	person("Martijn", "Schuemie", email = "schuemie@ohdsi.org", role = c("aut", "cre")),
 	person("Jamie", "Gilbert", role = c("aut")),
@@ -28,7 +28,7 @@ Imports:
 	checkmate,
 	SnowballC,
 	digest,
-	Phenelope (>= 0.2.0),
+	Phenelope (>= 0.2.2),
 	Capr,
 	CirceR,
 	CohortGenerator,

@@ -75,7 +75,7 @@ test_that("cohort definitions are linked to phenotypes by name and can be downlo
   connection <- createTestPegasusConnection()
   uploadTestPhenotypes(connection)
   cohortDefinitions <- data.frame(
-    phenotypeName = c("Asthma", "Copd"),
+    phenotypeId = c(1, 2),
     cohortDefinitionName = c("Asthma cohort", "Copd cohort"),
     circeCohortExpression = "{}",
     caprCohortExpression = "cohort()",
@@ -212,7 +212,7 @@ test_that("removeExistingPhenotypes drops phenotypes that already have rows in t
   connection <- createTestPegasusConnection()
   uploadTestPhenotypes(connection)
   Pegasus::uploadCohortDefinitions(
-    data.frame(phenotypeName = "Asthma",
+    data.frame(phenotypeId = 1,
                cohortDefinitionName = "Asthma cohort",
                circeCohortExpression = "{}",
                caprCohortExpression = "cohort()",
