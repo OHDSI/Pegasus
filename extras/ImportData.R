@@ -1262,6 +1262,9 @@ hscRef <- hscRef |>
                       phenotypeId),
              by = join_by(phenotype))
 
+cohortSizes <- readr::read_csv(file.path(rootFolder, "referenceCohortSizes.csv"), show_col_types = FALSE)
+toSkip <- cohortSizes |>
+  filter(countOptumClinformatics == 0)
 profilesTableExists <- DatabaseConnector::existsTable(
   connection = cdmConnection,
   databaseSchema = targetSchema,
@@ -1291,9 +1294,20 @@ if (!profilesTableExists) {
 }
 
 
-# i = 82
-for (i in seq_len(nrow(hscRef))) {
+# i = which(hscRef$phenotypeId == 421)
+for (i in 268:nrow(hscRef)) {
   row <- hscRef[i, ]
+  if (row$phenotype %in% toSkip$phenotype) {
+    message(sprintf("Skipping '%s' (%d or %d)",
+                    row$phenotype,
+                    i,
+                    nrow(hscRef)))
+    next
+  }
+  message(sprintf("Copying KEEPER profiles for '%s' (%d or %d)",
+                  row$phenotype,
+                  i,
+                  nrow(hscRef)))
   phenotypeFolder <- file.path(rootFolder, gsub("[^[:alnum:]]+", "_", row$phenotype))
   keeperConceptSets <- readr::read_csv(file.path(phenotypeFolder, "KeeperConceptSets.csv"), show_col_types = FALSE)
   llmReviews <- readRDS(file.path(phenotypeFolder, "llmReviews_OptumClinformatics.rds"))
@@ -1315,7 +1329,7 @@ for (i in seq_len(nrow(hscRef))) {
 
   keeper <- keeper |>
     mutate(cohortDefinitionId = row$phenotypeId) |>
-    personIdToColumn()
+    Pegasus:::personIdToColumn()
 
   sql <- "
     DELETE FROM @database_schema.@table
@@ -1332,15 +1346,67 @@ for (i in seq_len(nrow(hscRef))) {
   )
   DatabaseConnector::insertTable(
     connection = cdmConnection,
-    databaseSchema = targetSchema,
-    tableName = "reference_cohort_profile",
+    tableName = "#reference_cohort_profile",
     data = keeper,
-    createTable = FALSE,
-    dropTableIfExists = FALSE,
-    tempTable = FALSE,
-    camelCaseToSnakeCase = TRUE
+    createTable = TRUE,
+    dropTableIfExists = TRUE,
+    tempTable = TRUE,
+    camelCaseToSnakeCase = TRUE,
+    bulkLoad = TRUE
   )
+  sql <- "
+    INSERT INTO @schema.@table (
+      start_day,
+      end_day,
+      concept_id,
+      concept_name,
+      category,
+      target,
+      extra_data,
+      cohort_definition_id,
+      person_id
+    )
+    SELECT start_day,
+      end_day,
+      concept_id,
+      concept_name,
+      category,
+      target,
+      extra_data,
+      cohort_definition_id,
+      person_id
+    FROM #reference_cohort_profile;
+  "
+  DatabaseConnector::renderTranslateExecuteSql(
+    connection = cdmConnection,
+    sql = sql,
+    schema = targetSchema,
+    table = "reference_cohort_profile"
+  )
+  # DatabaseConnector::insertTable(
+  #   connection = cdmConnection,
+  #   databaseSchema = targetSchema,
+  #   tableName = "reference_cohort_profile",
+  #   data = keeper,
+  #   createTable = FALSE,
+  #   dropTableIfExists = FALSE,
+  #   tempTable = FALSE,
+  #   camelCaseToSnakeCase = TRUE
+  # )
 }
+
+sql <- "SELECT cohort_definition_id,
+    COUNT(*) AS row_count
+  FROM @schema.@table
+  GROUP BY cohort_definition_id;
+"
+DatabaseConnector::renderTranslateQuerySql(
+  connection = cdmConnection,
+  sql = sql,
+  schema = targetSchema,
+  table = "reference_cohort_profile",
+  snakeCaseToCamelCase = TRUE
+)
 DatabaseConnector::disconnect(cdmConnection)
 
 

@@ -748,7 +748,7 @@ uploadCohortDefinitions <- function(cohortDefinitions,
   errorMessages <- checkmate::makeAssertCollection()
   checkmate::assertDataFrame(cohortDefinitions, min.rows = 1, add = errorMessages)
   checkmate::assertNames(colnames(cohortDefinitions), must.include = c(
-    "phenotypeName",
+    "phenotypeId",
     "cohortDefinitionName",
     "circeCohortExpression",
     "caprCohortExpression",
@@ -788,12 +788,7 @@ uploadCohortDefinitions <- function(cohortDefinitions,
   } else {
     lastId <- max(existingCohortDefinitions$cohortDefinitionId)
   }
-  dataToUpload <- addPhenotypeIdIfMissing(
-    data = cohortDefinitions,
-    pegasusConnection = pegasusConnection,
-    pegasusDatabaseSchema = pegasusDatabaseSchema
-  )
-  dataToUpload <- dataToUpload |>
+  dataToUpload <- cohortDefinitions |>
     mutate(cohortDefinitionId = lastId + row_number())
 
   if (!"valid" %in% names(dataToUpload)) {

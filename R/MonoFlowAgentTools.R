@@ -1240,7 +1240,6 @@ getConceptSetsCapr <- function(context, conceptSetNames, detail = "code_and_coun
   if (!detail %in% c("code", "code_and_counts", "full_reference")) {
     stop("The detail argument should be 'code', 'code_and_counts', or 'full_reference'")
   }
-
   standardConceptSets <- getStandardConceptSets()
   sql <- "
     SELECT concept_set_name,

@@ -102,17 +102,22 @@ generateCohortDefinitionsUsingMonoFlowAgent <- function(phenotypes,
     }
   }
 
-  checkRequirementsMet(phenotypes = phenotypes,
-                       llmClient = llmClient,
-                       costTracker = costTracker,
-                       pegasusConnection = pegasusConnection,
-                       pegasusDatabaseSchema = pegasusDatabaseSchema,
-                       databaseReferences = databaseReferences)
-
   startTime <- Sys.time()
   startCost <- costTracker$amount
 
-  dir.create(workFolder)
+  dir.create(workFolder, recursive = TRUE, showWarnings = FALSE)
+
+  jsonFiles <- file.path(workFolder, gsub("[^[:alnum:]]+", "_", phenotypes$phenotypeName), "best_cohort.json")
+  incompletePhenotypes <- phenotypes[!file.exists(jsonFiles), ]
+
+  if (nrow(incompletePhenotypes) > 0) {
+    checkRequirementsMet(phenotypes = incompletePhenotypes,
+                         llmClient = llmClient,
+                         costTracker = costTracker,
+                         pegasusConnection = pegasusConnection,
+                         pegasusDatabaseSchema = pegasusDatabaseSchema,
+                         databaseReferences = databaseReferences)
+  }
 
   cohortDefinitions <- list()
   for (i in seq_len(nrow(phenotypes))) {
@@ -121,7 +126,7 @@ generateCohortDefinitionsUsingMonoFlowAgent <- function(phenotypes,
     bestJsonFile <- file.path(outputFolder, "best_cohort.json")
     if (!file.exists(bestJsonFile)) {
       message("Creating cohort definition for ", phenotype$phenotypeName)
-      dir.create(outputFolder)
+      dir.create(outputFolder, showWarnings = FALSE)
 
       context <- PegasusAgentContext$new(phenotype = phenotype,
                                          pegasusConnection = pegasusConnection,
@@ -169,9 +174,13 @@ generateCohortDefinitionsUsingMonoFlowAgent <- function(phenotypes,
       )
     } else {
       json <- paste(readLines(bestJsonFile), collapse = "\n")
+      if (file.exists(file.path(outputFolder, "cost.txt"))) {
+        costString <- readLines(file.path(outputFolder, "cost.txt"))
+        costTracker$amount <- costTracker$amount + as.numeric(gsub("Total cost: \\$", "", costString))
+      }
     }
     cohortDefinitions[[i]] <- tibble(
-      phenotypeName = phenotype$phenotypeName,
+      phenotypeId = phenotype$phenotypeId,
       cohortDefinitionName = sprintf("[MonoFlow] %s (AI-generated)", phenotype$phenotypeName),
       circeCohortExpression = json,
       caprCohortExpression = circeToCaprCohortDefinition(json),
@@ -332,7 +341,7 @@ checkRequirementsMet <- function(phenotypes,
       LEFT JOIN @database_schema.concept_set_person_count
         ON phenotype_to_concept_set.concept_set_id = concept_set_person_count.concept_set_id
           AND concept_set_person_count.database_id = @database_id
-      WHERE phenotype.phenotype_id = @phenotype_ids
+      WHERE phenotype.phenotype_id IN (@phenotype_ids)
         AND concept_set_person_count.concept_set_id IS NULL;
     "
     missingCounts <- DatabaseConnector::renderTranslateQuerySql(

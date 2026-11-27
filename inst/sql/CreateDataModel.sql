@@ -114,7 +114,7 @@ CREATE TABLE @database_schema.cohort_definition_evaluation (
   npv FLOAT,
   npv_lb FLOAT,
   npv_ub FLOAT,
-  evaluation_type VARCHAR -- 'KEEPER + llm', 'PheValuator', or 'KEEPER + human'
+  evaluation_type VARCHAR -- 'KEEPER + LLM', 'PheValuator', or 'KEEPER + human'
 );
 
 CREATE TABLE @database_schema.database_meta_data (
